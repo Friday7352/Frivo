@@ -32,6 +32,13 @@ key, Frivo shows a helpful error and does not send the message.
 API providers may charge for their services. You are responsible for your
 own OpenAI and ElevenLabs accounts, usage, and costs.
 
+## Local Ollama models
+
+If you prefer not to use OpenAI for chat and translation, Frivo can use a
+locally hosted Ollama model instead. Install and run Ollama, then select
+**Ollama (local)** in **Settings** > **Providers** and choose your model.
+An OpenAI API key is not required when chat and translation use Ollama.
+
 ## Recommended audio routing: Voicemeeter
 
 Frivo works without Voicemeeter, but Voicemeeter and its virtual audio cables
