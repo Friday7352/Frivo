@@ -1,8 +1,4 @@
-// Frivo's native Windows host.
-//
-// It runs the existing PowerShell installer/launcher scripts in-process,
-// rather than starting powershell.exe. That preserves the mature setup logic
-// while giving Windows and Task Manager a real Frivo executable to display.
+// Native Windows host for Frivo's PowerShell UI scripts.
 
 using System;
 using System.IO;
@@ -58,6 +54,16 @@ internal static class Program
                 using (var powerShell = PowerShell.Create())
                 {
                     powerShell.Runspace = runspace;
+
+                    // Bundled Frivo scripts must run regardless of the user's
+                    // LocalMachine or CurrentUser execution-policy setting.
+                    powerShell.AddScript("Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force");
+                    powerShell.Invoke();
+                    if (powerShell.HadErrors)
+                        throw new InvalidOperationException("Unable to set the process execution policy.");
+                    powerShell.Commands.Clear();
+                    powerShell.Streams.Error.Clear();
+
                     powerShell.AddCommand(script);
                     if (!string.IsNullOrWhiteSpace(dataPath))
                         powerShell.AddParameter("DataPath", dataPath);
