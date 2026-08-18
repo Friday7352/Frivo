@@ -39,6 +39,11 @@ locally hosted Ollama model instead. Install and run Ollama, then select
 **Ollama (local)** in **Settings** > **Providers** and choose your model.
 An OpenAI API key is not required when chat and translation use Ollama.
 
+For dictation and listening, Frivo can also use **Local Whisper** to
+transcribe audio on your computer or local network. Whisper transcribes the
+audio; Frivo then translates the resulting text with the translation provider
+you selected, such as Ollama or OpenAI.
+
 ## Recommended audio routing: Voicemeeter
 
 Frivo works without Voicemeeter, but Voicemeeter and its virtual audio cables
