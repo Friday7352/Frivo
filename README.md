@@ -32,6 +32,22 @@ key, Frivo shows a helpful error and does not send the message.
 API providers may charge for their services. You are responsible for your
 own OpenAI and ElevenLabs accounts, usage, and costs.
 
+## Recommended audio routing: Voicemeeter
+
+Frivo works without Voicemeeter, but Voicemeeter and its virtual audio cables
+are recommended when using Frivo's listening features or sending Frivo's
+spoken replies into VRChat.
+
+Use a dedicated virtual cable for the program or game you want Frivo to
+listen to, then select that cable as Frivo's listening input. This lets
+Frivo hear that source without also capturing your microphone, other apps,
+or the rest of your system audio.
+
+For VRChat voice output, route Frivo's spoken audio to the virtual output you
+use for VRChat, then select the matching virtual input as VRChat's microphone.
+The exact device names depend on your Voicemeeter setup. Frivo does not
+install or configure Voicemeeter for you.
+
 ## Everyday use
 
 The Frivo window starts and monitors the local server. It shows the address
