@@ -12,7 +12,7 @@ opens in your web browser.
 
 ### Launcher
 
-
+![Frivo launcher](docs/screenshots/launcher.png)
 
 ### Settings
 
