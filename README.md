@@ -4,6 +4,24 @@ Frivo is a local Windows dashboard for conversational AI, voice output,
 profiles, and VRChat chatbox messages over OSC. It runs on your computer and
 opens in your web browser.
 
+## Screenshots
+
+### Dashboard
+
+![Frivo dashboard](docs/screenshots/dashboard.png)
+
+### Launcher
+
+![Frivo launcher](docs/screenshots/launcher.png)
+
+### Settings
+
+![Frivo settings](docs/screenshots/settings.png)
+
+### New profile
+
+![Create a new Frivo profile](docs/screenshots/newProfile.png)
+
 ## Download and install
 
 1. Download `FrivoSetup.exe` from the latest GitHub release.
