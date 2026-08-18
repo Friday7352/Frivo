@@ -4,6 +4,24 @@ Frivo is a local Windows dashboard for conversational AI, voice output,
 profiles, and VRChat chatbox messages over OSC. It runs on your computer and
 opens in your web browser.
 
+## Screenshots
+
+### Dashboard
+
+![Frivo dashboard](docs/screenshots/dashboard.png)
+
+### Launcher
+
+![Frivo launcher](docs/screenshots/launcher.png)
+
+### Settings
+
+![Frivo settings](docs/screenshots/settings.png)
+
+### New profile
+
+![Create a new Frivo profile](docs/screenshots/newProfile.png)
+
 ## Download and install
 
 1. Download `FrivoSetup.exe` from the latest GitHub release.
@@ -31,6 +49,34 @@ key, Frivo shows a helpful error and does not send the message.
 
 API providers may charge for their services. You are responsible for your
 own OpenAI and ElevenLabs accounts, usage, and costs.
+
+## Local Ollama models
+
+If you prefer not to use OpenAI for chat and translation, Frivo can use a
+locally hosted Ollama model instead. Install and run Ollama, then select
+**Ollama (local)** in **Settings** > **Providers** and choose your model.
+An OpenAI API key is not required when chat and translation use Ollama.
+
+For dictation and listening, Frivo can also use **Local Whisper** to
+transcribe audio on your computer or local network. Whisper transcribes the
+audio; Frivo then translates the resulting text with the translation provider
+you selected, such as Ollama or OpenAI.
+
+## Recommended audio routing: Voicemeeter
+
+Frivo works without Voicemeeter, but Voicemeeter and its virtual audio cables
+are recommended when using Frivo's listening features or sending Frivo's
+spoken replies into VRChat.
+
+Use a dedicated virtual cable for the program or game you want Frivo to
+listen to, then select that cable as Frivo's listening input. This lets
+Frivo hear that source without also capturing your microphone, other apps,
+or the rest of your system audio.
+
+For VRChat voice output, route Frivo's spoken audio to the virtual output you
+use for VRChat, then select the matching virtual input as VRChat's microphone.
+The exact device names depend on your Voicemeeter setup. Frivo does not
+install or configure Voicemeeter for you.
 
 ## Everyday use
 
