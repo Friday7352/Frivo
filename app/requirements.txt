@@ -1,0 +1,9 @@
+# Frivo Python dependencies. Compatible with Python 3.9–3.13.
+
+Flask>=3.0,<4.0
+requests>=2.31
+openai>=1.30
+# HTTPS certificate support. Browser dictation requires a secure context.
+cryptography>=42.0
+# Production WSGI server.
+cheroot>=10.0

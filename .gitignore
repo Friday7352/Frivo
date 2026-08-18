@@ -1,0 +1,30 @@
+# Private Frivo data — never publish these files.
+config.json
+profiles.json
+usage.json
+launcher.json
+server.log
+*.log
+
+# Environment variables and credentials.
+.env
+.env.*
+*.pem
+*.key
+*.pfx
+*.p12
+ca.crt
+ca.key
+
+# Local Python and build artifacts.
+.venv/
+__pycache__/
+*.py[cod]
+dist/
+build/FrivoHost.exe
+
+# Editor and operating-system files.
+.vscode/
+.vs/
+Thumbs.db
+Desktop.ini

@@ -1,0 +1,1318 @@
+<!DOCTYPE html>
+<!-- === index.html ===
+     RYZEN SERVER  ->  voice_chat_web\templates\index.html -->
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Frivo</title>
+  <link rel="icon" href="{{ url_for('static', filename='Frivo.ico') }}" sizes="any">
+  <link rel="apple-touch-icon" href="{{ url_for('static', filename='icon.png') }}">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <!-- Only the mono face is loaded. The interface font is the system one,
+       which is both faster and the main reason a UI reads as native rather
+       than as a web page. -->
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v={{ asset_version }}">
+  <script>
+    // Applied before the first paint. Reading the preference in app.js
+    // instead would mean the page renders dark and then flips, which is
+    // the flash every themed site is judged on.
+    (function () {
+      try {
+        var saved = localStorage.getItem("voice_console_theme");
+        document.documentElement.dataset.theme = saved === "light" ? "light" : "dark";
+      } catch (e) {
+        document.documentElement.dataset.theme = "dark";
+      }
+    })();
+  </script>
+</head>
+<body>
+
+  <!-- Icon definitions, referenced by <use> so the same glyph isn't pasted
+       into the markup five times. -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <defs>
+      <symbol id="i-wave" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              stroke-width="2" stroke-linecap="round">
+        <path d="M3 12h1M7 8v8M11 4v16M15 7v10M19 10v4M21 12h1"/>
+      </symbol>
+      <symbol id="i-globe" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              stroke-width="1.8" stroke-linecap="round">
+        <circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a15 15 0 0 1 0 18a15 15 0 0 1 0-18"/>
+      </symbol>
+      <symbol id="i-speaker" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M4 9v6h4l5 4V5L8 9H4z"/><path d="M17 9a4 4 0 0 1 0 6"/>
+      </symbol>
+      <symbol id="i-gem" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              stroke-width="1.7" stroke-linejoin="round">
+        <path d="M6 3h12l4 6-10 12L2 9l4-6z"/><path d="M2 9h20M9 3l3 6 3-6M12 9v12"/>
+      </symbol>
+      <symbol id="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 13A9 9 0 1 1 11 3a7 7 0 0 0 10 10z"/>
+      </symbol>
+      <symbol id="i-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              stroke-width="2" stroke-linecap="round">
+        <path d="M12 5v14M5 12h14"/>
+      </symbol>
+      <symbol id="i-mic" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+        <path d="M19 10v2a7 7 0 0 1-14 0v-2"/><path d="M12 19v4M8 23h8"/>
+      </symbol>
+      <symbol id="i-send" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M3.4 20.4 21 12 3.4 3.6 3.4 10.2 15 12 3.4 13.8z"/>
+      </symbol>
+      <symbol id="i-dots" viewBox="0 0 24 24" fill="currentColor">
+        <circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/>
+      </symbol>
+      <symbol id="i-people" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M16 20v-1.5A3.5 3.5 0 0 0 12.5 15h-5A3.5 3.5 0 0 0 4 18.5V20"/>
+        <circle cx="10" cy="8" r="3.2"/><path d="M20 20v-1.5a3.5 3.5 0 0 0-2.6-3.4M15.6 5.2a3.2 3.2 0 0 1 0 6"/>
+      </symbol>
+      <symbol id="i-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M9 6l6 6-6 6"/>
+      </symbol>
+      <symbol id="i-gear" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="3.2"/>
+        <path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-1.8-.3 1.6 1.6 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1A1.6 1.6 0 0 0 9 19.4a1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0 .3-1.8 1.6 1.6 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1A1.6 1.6 0 0 0 4.6 9a1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3H9a1.6 1.6 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 1 1.5 1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8V9a1.6 1.6 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1z"/>
+      </symbol>
+      <symbol id="i-key" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="8" cy="15" r="4"/><path d="M10.9 12.1 20 3M17 6l2.5 2.5M14.5 8.5 17 11"/>
+      </symbol>
+      <symbol id="i-db" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v6c0 1.7 3.6 3 8 3s8-1.3 8-3V6"/>
+        <path d="M4 12v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/>
+      </symbol>
+      <symbol id="i-chip" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="7" y="7" width="10" height="10" rx="2"/><rect x="3.5" y="3.5" width="17" height="17" rx="3"/>
+        <path d="M9 1.5v2M15 1.5v2M9 20.5v2M15 20.5v2M1.5 9h2M1.5 15h2M20.5 9h2M20.5 15h2"/>
+      </symbol>
+      <symbol id="i-translate" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M3 5h8M7 3v2c0 3.5-2 6.5-4 8M5.5 9.5c1 2 3 3.8 5 4.8"/>
+        <path d="M12 21l4.2-10 4.2 10M13.7 17.5h5"/>
+      </symbol>
+      <symbol id="i-server" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="3" y="3.5" width="18" height="7" rx="2"/><rect x="3" y="13.5" width="18" height="7" rx="2"/>
+        <path d="M7 7h.01M7 17h.01"/>
+      </symbol>
+      <symbol id="i-spark" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/><path d="M18 16l.9 2.1L21 19l-2.1.9L18 22l-.9-2.1L15 19l2.1-.9z"/>
+      </symbol>
+      <symbol id="i-osc" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="2.5"/>
+        <path d="M7.8 7.8a6 6 0 0 0 0 8.4M16.2 16.2a6 6 0 0 0 0-8.4M4.9 4.9a10 10 0 0 0 0 14.2M19.1 19.1a10 10 0 0 0 0-14.2"/>
+      </symbol>
+      <symbol id="i-close" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              stroke-width="2" stroke-linecap="round">
+        <path d="M6 6l12 12M18 6L6 18"/>
+      </symbol>
+      <symbol id="i-search" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              stroke-width="2" stroke-linecap="round">
+        <circle cx="11" cy="11" r="7"/><path d="M16.5 16.5 21 21"/>
+      </symbol>
+      <symbol id="i-refresh" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M20 11a8 8 0 1 0-.6 4"/><path d="M20 4v7h-7"/>
+      </symbol>
+      <symbol id="i-play" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M8 5.5v13l11-6.5z"/>
+      </symbol>
+      <symbol id="i-stop" viewBox="0 0 24 24" fill="currentColor">
+        <rect x="7" y="7" width="10" height="10" rx="1.5"/>
+      </symbol>
+      <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M5 12.5l5 5L19 7"/>
+      </symbol>
+      <symbol id="i-ear" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M6 8a6 6 0 1 1 12 0c0 3-2 4-3 5.5S13 17 13 19a3 3 0 0 1-6 0"/>
+        <path d="M10 8a2 2 0 1 1 4 0c0 1.5-2 2-2 3.5"/>
+      </symbol>
+    </defs>
+  </svg>
+
+  <div class="console">
+
+    <!-- ============================================================
+         Sidebar — everything that configures the voice
+         ============================================================ -->
+    <aside class="sidebar panel-frame">
+
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">
+          <svg width="22" height="22"><use href="#i-wave"/></svg>
+        </span>
+        <h1>Frivo</h1>
+        <span class="lamp" id="readyLamp" title="Ready state" aria-hidden="true"></span>
+      </div>
+
+      <div class="side-scroll" id="controlsCol">
+
+        <!-- Profile -->
+        <section class="side-group">
+          <span class="eyebrow">Profile</span>
+          <div class="side-card side-card-tight">
+            <div class="side-row">
+              <svg class="icon-18" aria-hidden="true"><use href="#i-globe"/></svg>
+              <select id="profileSelect" class="side-pick" aria-label="Active profile">
+                <option value="">Default</option>
+              </select>
+            </div>
+            <div class="side-actions">
+              <button id="newProfileBtn" class="btn-ghost" type="button">New</button>
+              <button id="editProfileBtn" class="btn-ghost" type="button">Edit</button>
+              <button id="deleteProfileBtn" class="btn-ghost btn-danger" type="button">Delete</button>
+            </div>
+          </div>
+        </section>
+
+        <!-- Voice. Not inside the profile editor: the voice can be changed
+             on whatever profile is live without opening a dialog, and what
+             is chosen here is saved to that profile. -->
+        <section class="side-group">
+          <span class="eyebrow">Voice</span>
+          <div class="side-card">
+            <div class="side-row">
+              <div class="voice-picker" id="voicePicker">
+                <button type="button" class="voice-trigger" id="voiceTrigger"
+                        aria-haspopup="listbox" aria-expanded="false"
+                        title="Change the speaking voice">
+                  <span class="voice-trigger-text">
+                    <span class="voice-trigger-name" id="voiceTriggerName">Loading voices…</span>
+                    <span class="voice-trigger-tags" id="voiceTriggerTags"></span>
+                  </span>
+                </button>
+
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Language -->
+        <section class="side-group">
+          <span class="eyebrow">Language</span>
+          <div class="side-card">
+            <div class="side-row">
+              <div class="voice-picker" id="languagePicker">
+                <button type="button" class="voice-trigger" id="languageTrigger"
+                        aria-haspopup="listbox" aria-expanded="false"
+                        title="Change the reply language">
+                  <span class="voice-trigger-text">
+                    <span class="voice-trigger-name" id="languageTriggerName">English</span>
+                  </span>
+                </button>
+                <!-- Still the store for the selection: fillLanguages() builds
+                     its option groups and everything else reads .value from
+                     it, so the dialog only changes how it's chosen. -->
+                <select id="languageSelect" class="is-hidden" aria-label="Reply language"></select>
+              </div>
+              <!-- Only offered when the active profile suggests a language
+                   other than the one selected. One click, rather than
+                   switching for you. -->
+              <button id="languageSuggestBtn" class="btn-ghost btn-sm is-hidden" type="button"></button>
+            </div>
+            <p class="side-row-sub" id="languageNote">Replies and speech</p>
+          </div>
+        </section>
+
+        <!-- Volume -->
+        <section class="side-group">
+          <span class="eyebrow">Volume</span>
+          <div class="side-card">
+            <div class="volume-row">
+              <span class="icon-btn" aria-hidden="true">
+                <svg class="icon-18"><use href="#i-speaker"/></svg>
+              </span>
+              <input type="range" id="masterVolumeSlider" min="0" max="150" step="5" value="100"
+                     aria-label="Output volume">
+              <span class="volume-value" id="masterVolumeValue">100%</span>
+            </div>
+          </div>
+        </section>
+
+        <!-- Reply length, priced live -->
+        <section class="side-group">
+          <div class="side-card fader-panel">
+            <div class="fader-head">
+              <span class="eyebrow">Reply length</span>
+              <span class="fader-value" id="lengthValue">80 words</span>
+            </div>
+            <div class="fader-track">
+              <input type="range" id="lengthSlider"
+                     min="{{ min_words }}" max="{{ max_words_limit }}" step="5" value="80"
+                     aria-label="Target reply length in words">
+              <div class="ticks" aria-hidden="true">
+                <span>A sentence</span>
+                <span>A paragraph</span>
+                <span>A monologue</span>
+              </div>
+            </div>
+            <p class="fader-note">
+              Asks for about <strong id="lengthEcho">80</strong> words —
+              roughly <strong id="creditEcho">480</strong> credits
+              (<span id="secondsEcho">29</span>s of audio) per reply.
+            </p>
+            <button id="promptToggle" class="link-btn" type="button">Show what's sent to the model</button>
+          </div>
+        </section>
+
+        <!-- Prompt inspector, folded into the column it explains -->
+        <section id="promptPanel" class="panel-inline is-hidden">
+          <h2 class="eyebrow">Sent as the system message</h2>
+          <p class="panel-lede">
+            The full instruction the model receives before your message, for the
+            profile and length selected right now.
+          </p>
+
+          <div class="prompt-block">
+            <span class="prompt-tag">Personality text <em id="promptSource"></em></span>
+            <pre id="promptYours"></pre>
+          </div>
+
+          <div class="prompt-block">
+            <span class="prompt-tag">Added by the app</span>
+            <pre id="promptAppended"></pre>
+          </div>
+
+          <p class="prompt-foot"><span id="promptMeta"></span></p>
+        </section>
+
+        <!-- Balance + the health of whatever local services are in use.
+             Both are money-or-silence problems, so they sit together at the
+             bottom of the column where a glance finds them. -->
+        <section class="side-group">
+          <div class="credit-block">
+            <button class="credit-card" id="creditsToggle" type="button"
+                    aria-expanded="false" aria-controls="creditsPanel"
+                    title="What's left, and what's been spent">
+              <span class="credit-icon" aria-hidden="true">
+                <svg class="icon-18"><use href="#i-gem"/></svg>
+              </span>
+              <span class="credit-name">Credits</span>
+              <span id="elevenCredits" class="credit-readout is-hidden"></span>
+              <span class="readout" id="sessionCredits">0 credits this session</span>
+            </button>
+
+            <!-- What the balance can't say on one line: what this app has
+                 spent today, and what it has spent since the page loaded.
+                 Today's figure is counted by the server, so it survives a
+                 reload and is the same on every device. -->
+            <div class="credit-panel is-hidden" id="creditsPanel">
+              <div class="credit-line">
+                <span class="credit-line-label">Used today</span>
+                <span class="credit-line-value" id="creditsToday">—</span>
+              </div>
+              <div class="credit-line">
+                <span class="credit-line-label">This session</span>
+                <span class="credit-line-value" id="creditsSession">0</span>
+              </div>
+              <div class="credit-line credit-line--plan">
+                <span class="credit-line-label" id="creditsPlanLabel">Plan</span>
+                <span class="credit-line-value" id="creditsPlan">—</span>
+              </div>
+              <p class="credit-foot" id="creditsReset"></p>
+              <button id="creditsRefresh" class="link-btn" type="button">Refresh balance</button>
+            </div>
+          </div>
+          <!-- Only appears when a local service is selected; see loadLocalStatus() -->
+          <button id="serviceStatus" class="service-status is-hidden" type="button"
+                  title="Click to re-check"></button>
+        </section>
+
+      </div><!-- /side-scroll -->
+
+      <div class="side-foot">
+        <span class="theme-name">
+          <svg class="icon-18" aria-hidden="true"><use href="#i-moon"/></svg>
+          Dark Mode
+        </span>
+        <label class="switch" title="Switch between the dark and light themes">
+          <input type="checkbox" id="themeToggle" checked>
+          <span class="switch-track" aria-hidden="true"></span>
+        </label>
+      </div>
+    </aside>
+
+    <!-- ============================================================
+         Conversation
+         ============================================================ -->
+    <main class="main panel-frame">
+
+      <header class="chat-head">
+        <span class="eyebrow">Conversation</span>
+        <div class="chat-head-actions">
+          <button id="clearChatBtn" class="btn-ghost btn-sm" type="button"
+                  title="Clear the messages on screen and the model's memory of them">
+            Clear chat
+          </button>
+          <div class="menu-wrap">
+            <button id="moreBtn" class="menu-btn" type="button" aria-haspopup="menu"
+                    aria-expanded="false" aria-label="More">
+              <svg class="icon-18"><use href="#i-dots"/></svg>
+            </button>
+            <div class="menu-pop is-hidden" id="morePop" role="menu">
+              <button id="settingsToggle" class="btn-ghost" type="button" role="menuitem">
+                <svg class="icon-16"><use href="#i-gear"/></svg> Settings
+              </button>
+              <button id="listenToggle" class="btn-ghost" type="button" role="menuitem">
+                <svg class="icon-16"><use href="#i-ear"/></svg> Listening panel
+              </button>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <section id="log" class="transcript" aria-live="polite">
+        <div id="logBody" class="transcript-body">
+          <div class="empty" id="emptyState">
+            <p>Nothing yet. Type below and the reply comes back spoken.</p>
+          </div>
+        </div>
+      </section>
+
+      <div class="composer-wrap">
+        <div class="composer">
+          <button id="composerMoreBtn" class="composer-round" type="button"
+                  aria-expanded="true" aria-controls="composerToggles"
+                  title="Show or hide the Speak and OSC switches">
+            <svg class="icon-18"><use href="#i-plus"/></svg>
+          </button>
+
+          <input type="text" id="messageInput" placeholder="Say something…" autocomplete="off">
+
+          <button id="dictateBtn" class="btn-mic" type="button" aria-label="Dictate"
+                  title="Click to start dictation, click again to stop and transcribe">
+            <svg class="icon-18"><use href="#i-mic"/></svg>
+          </button>
+
+          <label class="switch" title="Send the message automatically once you stop talking">
+            <span class="switch-label">Auto</span>
+            <input type="checkbox" id="autoSendToggle">
+            <span class="switch-track" aria-hidden="true"></span>
+          </label>
+
+          <button id="sendBtn" class="btn-send" type="button" aria-label="Send">
+            <svg class="icon-18"><use href="#i-send"/></svg>
+          </button>
+        </div>
+
+        <!-- The two switches that decide what a message costs and where it
+             goes. Under the pill rather than in it: each needs a word to be
+             understandable, and five controls on one line is what used to
+             push the send button off the edge. -->
+        <div class="composer-toggles" id="composerToggles">
+          <label class="toggle-chip switch" id="speakSwitch"
+                 title="Generate the ElevenLabs voice. Off = text only, costs nothing.">
+            <span class="switch-label">Speak</span>
+            <input type="checkbox" id="speakToggle" checked>
+            <span class="switch-track" aria-hidden="true"></span>
+          </label>
+          <label class="toggle-chip switch" id="oscSwitch"
+                 title="Show the spoken reply in your VRChat chatbox as it plays (OSC)">
+            <span class="switch-label">OSC</span>
+            <input type="checkbox" id="oscToggle">
+            <span class="switch-track" aria-hidden="true"></span>
+          </label>
+        </div>
+
+        <p id="status" class="status composer-status" role="status"></p>
+      </div>
+    </main>
+
+    <!-- ============================================================
+         Listening — translates what other people are saying
+         ============================================================ -->
+    <aside id="listenPanel" class="listen-panel panel-frame">
+
+      <div class="listen-head">
+        <div class="listen-head-top">
+          <span class="listen-mark" aria-hidden="true">
+            <svg width="22" height="22"><use href="#i-wave"/></svg>
+          </span>
+          <div class="listen-title">
+            <h2 class="eyebrow">Listening</h2>
+            <span class="listen-state">
+              <span class="lamp" id="listenLamp" aria-hidden="true"></span>
+              <span class="readout" id="listenStatus">Idle</span>
+            </span>
+          </div>
+          <span class="people-chip" id="listenPeople" title="Distinct voices heard so far">
+            <svg class="icon-16"><use href="#i-people"/></svg>
+            <span id="listenPeopleCount">0 people</span>
+          </span>
+        </div>
+
+        <div class="listen-actions">
+          <button id="listenStartBtn" class="btn btn-sm listen-start" type="button">Start listening</button>
+          <button id="listenDockBtn" class="btn-ghost btn-sm dock-only" type="button"
+                  title="Pin this panel to the side of the screen">Dock</button>
+          <button id="listenResetSpeakersBtn" class="btn-ghost btn-sm" type="button"
+                  title="Forget the voices learned so far — use when the people around you change">Reset voices</button>
+          <button id="listenClearBtn" class="btn-ghost btn-sm" type="button">Clear</button>
+        </div>
+      </div>
+
+      <div class="listen-body">
+
+        <div class="field listen-target">
+          <label for="listenTargetLang">Show me in <span class="field-hint">— what you want to read</span></label>
+          <select id="listenTargetLang"></select>
+        </div>
+
+
+        <div class="listen-log-wrap">
+          <div id="listenLog" class="listen-log" aria-live="polite">
+            <p class="empty-note" id="listenEmpty">Nothing heard yet.</p>
+          </div>
+          <button id="listenJumpBtn" class="listen-jump is-hidden" type="button">
+            New messages ↓
+          </button>
+        </div>
+
+        <!-- Compact level meter + gate, mirrored from Setup so the gate can
+             be watched and adjusted without opening the panel. -->
+        <!-- Input level and the gate that decides what counts as speech.
+             One block rather than a loose bar and a loose slider: the two
+             only mean anything read together — the bar is how loud it is
+             now, the marker is the line it has to cross. -->
+        <section class="gate">
+          <header class="gate-head">
+            <span class="gate-title">Input level</span>
+            <span class="gate-state" id="listenGateState">Quiet</span>
+          </header>
+
+          <div class="gate-meter" id="listenMeterMini">
+            <div class="gate-track" aria-hidden="true">
+              <div class="gate-fill" id="listenMeterFillMini"></div>
+              <div class="gate-mark" id="listenMeterMarkMini"></div>
+            </div>
+          </div>
+
+          <div class="gate-controls">
+            <span class="gate-icon" aria-hidden="true">
+              <svg class="icon-16"><use href="#i-mic"/></svg>
+            </span>
+            <input type="range" id="listenThresholdMini" min="1" max="120" step="1" value="12"
+                   aria-label="Loudness gate"
+                   title="Ignore anyone quieter than this">
+            <span class="gate-value" id="listenThresholdMiniValue">12</span>
+          </div>
+        </section>
+      </div>
+
+      <p class="listen-foot">
+        <span class="listen-mark" aria-hidden="true">
+          <svg class="icon-16"><use href="#i-wave"/></svg>
+        </span>
+        Click a message to put it in your reply box.
+      </p>
+    </aside>
+
+
+    <!-- ============================================================
+         Settings — a page in the main column, sidebar still live
+         ============================================================
+         Grouped lists: a titled section, then a card of rows. A row shows
+         a label and its value; anything needing more than that gets a
+         chevron and a page of its own rather than being crammed inline. -->
+    <section id="settingsPanel" class="settings-panel is-hidden" aria-label="Settings">
+      <header class="settings-head">
+        <h2 class="eyebrow" id="settingsTitle">Settings</h2>
+        <div class="settings-head-actions">
+          <button id="saveSettings" class="btn">Save settings</button>
+          <button id="closeSettings" class="btn-ghost" type="button">Close</button>
+        </div>
+      </header>
+
+      <div class="settings-scroll" id="settingsScroll">
+
+        <!-- ---------- top level ---------- -->
+        <div id="settingsRoot" class="settings-stack">
+
+          <!-- Keys + general. No section title: it's what the page opens on. -->
+          <section class="settings-section settings-section--bare">
+            <div class="settings-section-body">
+              <div class="settings-card">
+                <button class="srow" type="button" data-settings-page="openai">
+                  <span class="srow-icon"><svg class="icon-18"><use href="#i-key"/></svg></span>
+                  <span class="srow-main"><span class="srow-label">OpenAI API Key</span></span>
+                  <span class="srow-status">
+                    <span class="lamp lamp-sm" id="openaiStatus"></span>
+                    <span id="openaiStatusText">Not set</span>
+                  </span>
+                  <span class="srow-spacer"></span>
+                  <span class="srow-secret" id="openaiKeyMask"></span>
+                  <span class="srow-chevron"><svg class="icon-16"><use href="#i-chevron"/></svg></span>
+                </button>
+
+                <button class="srow" type="button" data-settings-page="eleven">
+                  <span class="srow-icon"><svg class="icon-18"><use href="#i-db"/></svg></span>
+                  <span class="srow-main"><span class="srow-label">ElevenLabs API Key</span></span>
+                  <span class="srow-status">
+                    <span class="lamp lamp-sm" id="elevenStatus"></span>
+                    <span id="elevenStatusText">Not set</span>
+                  </span>
+                  <span class="srow-spacer"></span>
+                  <span class="srow-secret" id="elevenKeyMask"></span>
+                  <span class="srow-chevron"><svg class="icon-16"><use href="#i-chevron"/></svg></span>
+                </button>
+
+                <button class="srow" type="button" data-settings-page="general">
+                  <span class="srow-icon"><svg class="icon-18"><use href="#i-gear"/></svg></span>
+                  <span class="srow-main">
+                    <span class="srow-label">General</span>
+                    <span class="srow-sub">App behavior and appearance</span>
+                  </span>
+                  <span class="srow-spacer"></span>
+                  <span class="srow-chevron"><svg class="icon-16"><use href="#i-chevron"/></svg></span>
+                </button>
+              </div>
+            </div>
+          </section>
+
+          <!-- Voice & Speech -->
+          <section class="settings-section">
+            <div class="settings-section-icon"><svg width="22" height="22"><use href="#i-wave"/></svg></div>
+            <div class="settings-section-body">
+              <div class="settings-section-head">
+                <div>
+                  <h3 class="settings-section-title">Voice &amp; Speech</h3>
+                </div>
+              </div>
+              <div class="settings-card">
+                <!-- Opens the sidebar's picker, which is still on screen —
+                     one voice list, not a second copy that can disagree. -->
+                <button class="srow" type="button" id="settingsVoiceRow">
+                  <span class="srow-main"><span class="srow-label">Voice</span></span>
+                  <span class="srow-spacer"></span>
+                  <span class="srow-value" id="settingsVoiceValue">—</span>
+                  <span class="srow-chevron"><svg class="icon-16"><use href="#i-chevron"/></svg></span>
+                </button>
+
+                <div class="srow">
+                  <span class="srow-main"><span class="srow-label">Speaking Speed</span></span>
+                  <span class="srow-slider">
+                    <input type="range" id="speakingSpeedSlider" min="70" max="120" step="1" value="100"
+                           aria-label="Speaking speed">
+                  </span>
+                  <span class="srow-number" id="speakingSpeedValue">100%</span>
+                </div>
+
+                <div class="srow">
+                  <span class="srow-main"><span class="srow-label">Volume</span></span>
+                  <span class="srow-slider">
+                    <input type="range" id="settingsVolumeSlider" min="0" max="150" step="5" value="100"
+                           aria-label="Output volume">
+                  </span>
+                  <span class="srow-number" id="settingsVolumeValue">100%</span>
+                </div>
+
+                <button class="srow" type="button" data-settings-page="reply-length">
+                  <span class="srow-main"><span class="srow-label">Reply Length</span></span>
+                  <span class="srow-spacer"></span>
+                  <span class="srow-value srow-value--accent" id="settingsLengthValue">80 words</span>
+                  <span class="srow-chevron"><svg class="icon-16"><use href="#i-chevron"/></svg></span>
+                </button>
+              </div>
+              <p class="settings-note">
+                Speed is applied by ElevenLabs as the voice is generated, so it costs
+                nothing extra and doesn't change the credits a reply uses.
+              </p>
+            </div>
+          </section>
+
+          <!-- Model -->
+          <section class="settings-section">
+            <div class="settings-section-icon"><svg width="22" height="22"><use href="#i-chip"/></svg></div>
+            <div class="settings-section-body">
+              <div class="settings-section-head">
+                <div><h3 class="settings-section-title">Model</h3></div>
+              </div>
+              <div class="settings-card">
+                <button class="srow" type="button" data-settings-page="model">
+                  <span class="srow-main"><span class="srow-label">Model</span></span>
+                  <span class="srow-spacer"></span>
+                  <span class="srow-value" id="settingsModelValue">—</span>
+                  <span class="srow-chevron"><svg class="icon-16"><use href="#i-chevron"/></svg></span>
+                </button>
+
+                <div class="srow">
+                  <span class="srow-main"><span class="srow-label">Temperature</span></span>
+                  <span class="srow-slider">
+                    <input type="range" id="temperatureSlider" min="0" max="200" step="5" value="70"
+                           aria-label="Temperature">
+                  </span>
+                  <span class="srow-number" id="temperatureValue">0.7</span>
+                </div>
+
+                <button class="srow" type="button" data-settings-page="max-tokens">
+                  <span class="srow-main"><span class="srow-label">Max Tokens</span></span>
+                  <span class="srow-spacer"></span>
+                  <span class="srow-value srow-value--mono" id="settingsMaxTokensValue">Auto</span>
+                  <span class="srow-chevron"><svg class="icon-16"><use href="#i-chevron"/></svg></span>
+                </button>
+              </div>
+              <p class="settings-note">
+                Temperature is how much the model varies its wording — lower is steadier,
+                higher is more surprising. The reasoning models (o-series, GPT-5) only run
+                at their own fixed setting and ignore this.
+              </p>
+            </div>
+          </section>
+
+          <!-- Translation -->
+          <section class="settings-section">
+            <div class="settings-section-icon"><svg width="22" height="22"><use href="#i-translate"/></svg></div>
+            <div class="settings-section-body">
+              <div class="settings-section-head">
+                <div>
+                  <h3 class="settings-section-title">Translation</h3>
+                  <p class="settings-section-sub">Used for the listening panel and the hover translations</p>
+                </div>
+              </div>
+              <div class="settings-card">
+                <button class="srow" type="button" data-settings-page="translation-provider">
+                  <span class="srow-main"><span class="srow-label">Provider</span></span>
+                  <span class="srow-spacer"></span>
+                  <span class="srow-value" id="settingsTranslationProviderValue">—</span>
+                  <span class="srow-chevron"><svg class="icon-16"><use href="#i-chevron"/></svg></span>
+                </button>
+                <button class="srow" type="button" data-settings-page="translation-model">
+                  <span class="srow-main"><span class="srow-label">Model</span></span>
+                  <span class="srow-spacer"></span>
+                  <span class="srow-value" id="settingsTranslationModelValue">—</span>
+                  <span class="srow-chevron"><svg class="icon-16"><use href="#i-chevron"/></svg></span>
+                </button>
+              </div>
+            </div>
+          </section>
+
+          <!-- Live Listening -->
+          <section class="settings-section">
+            <div class="settings-section-icon"><svg width="22" height="22"><use href="#i-ear"/></svg></div>
+            <div class="settings-section-body">
+              <div class="settings-section-head">
+                <div>
+                  <h3 class="settings-section-title">Live Listening</h3>
+                  <p class="settings-section-sub">Real-time voice translation and transcription</p>
+                </div>
+                <label class="switch" title="Show the listening panel">
+                  <input type="checkbox" id="listenPanelToggle">
+                  <span class="switch-track" aria-hidden="true"></span>
+                </label>
+              </div>
+              <div class="settings-card" id="listenSetupCard">
+        <div class="field">
+          <label for="listenDeviceSelect">Audio source <span class="field-hint">— e.g. your Voicemeeter cable</span></label>
+          <div class="row">
+            <select id="listenDeviceSelect"></select>
+            <button id="listenRefreshDevicesBtn" class="btn-ghost btn-sm" type="button">Reload</button>
+          </div>
+        </div>
+
+        <div class="field">
+          <label for="listenThreshold">
+            Loudness gate <span class="field-hint">— ignore anyone quieter than this</span>
+          </label>
+          <div class="meter-row">
+            <div class="meter" id="listenMeter" aria-hidden="true">
+              <div class="meter-fill" id="listenMeterFill"></div>
+              <div class="meter-mark" id="listenMeterMark"></div>
+            </div>
+          </div>
+          <input type="range" id="listenThreshold" min="1" max="120" step="1" value="12"
+                 aria-label="Loudness gate">
+          <p class="field-note">
+            The marker is the gate; the bar is the current level. Set it just above
+            background chatter — in VRChat, volume tracks distance, so the loudest
+            voice is normally whoever you're facing.
+          </p>
+        </div>
+
+        <div class="field">
+          <label for="listenSegmentSeconds">Commit every <span class="field-hint">— don't wait for a pause longer than this</span></label>
+          <select id="listenSegmentSeconds">
+            <option value="3">3 seconds — busiest rooms, most fragmented</option>
+            <option value="6" selected>6 seconds — good default</option>
+            <option value="10">10 seconds — calmer conversations</option>
+            <option value="30">30 seconds — effectively only on pauses</option>
+          </select>
+          <p class="field-note">
+            A line is normally finished when the speaker pauses. When nobody pauses —
+            people answering over each other — this commits anyway so text keeps
+            flowing. Shorter values respond faster but split sentences more often.
+          </p>
+        </div>
+
+        <div class="field">
+          <label class="switch switch-row">
+            <input type="checkbox" id="listenLiveToggle">
+            <span class="switch-label">Live updates <span class="field-hint">— show text while they're still talking</span></span>
+            <span class="switch-track" aria-hidden="true"></span>
+          </label>
+          <p class="field-note">
+            Off, each line appears once the person stops speaking. On, it updates roughly
+            every second and corrects itself as more of the sentence arrives. Speaker
+            labels are still worked out from the finished sentence either way.
+          </p>
+        </div>
+
+        <div class="field">
+          <label for="listenSpeakerThreshold">
+            Voice matching <span class="field-hint">— how alike two clips must be to count as one person</span>
+          </label>
+          <div class="row">
+            <input type="range" id="listenSpeakerThreshold" min="30" max="90" step="1" value="45">
+            <span class="readout" id="listenSpeakerThresholdValue">0.65</span>
+          </div>
+          <p class="field-note">
+            Lower it if one person keeps getting split into several speakers. Raise it if
+            two different people get merged into one. Applies immediately.
+          </p>
+        </div>
+      
+              </div>
+            </div>
+          </section>
+
+          <!-- Dictation -->
+          <section class="settings-section">
+            <div class="settings-section-icon"><svg width="22" height="22"><use href="#i-mic"/></svg></div>
+            <div class="settings-section-body">
+              <div class="settings-section-head">
+                <div><h3 class="settings-section-title">Dictation</h3></div>
+              </div>
+              <div class="settings-card">
+                <div class="srow srow--stacked">
+                  <label class="srow-label" for="micSelect">Microphone <span class="field-hint">— used by Accurate dictation</span></label>
+                  <div class="row">
+                    <select id="micSelect"></select>
+                    <button id="refreshMicsBtn" class="btn-ghost btn-sm" type="button">Reload</button>
+                  </div>
+                  <p class="field-note" id="micNote">Click Reload once to grant microphone access and see device names.</p>
+                </div>
+                <div class="srow srow--stacked">
+                  <span class="srow-label">Dictation mode</span>
+                  <div class="radio-row" id="dictationModeRadios" role="radiogroup" aria-label="Dictation mode"></div>
+                  <p class="field-note" id="dictationModeNote"></p>
+                </div>
+                <div class="srow srow--stacked">
+                  <label class="srow-label" for="dictationLangSelect">Dictation language <span class="field-hint">— the language you speak in</span></label>
+                  <select id="dictationLangSelect"></select>
+                  <p class="field-note">Separate from the reply language, so you can speak English and have it reply in another language.</p>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- Providers -->
+          <section class="settings-section">
+            <div class="settings-section-icon"><svg width="22" height="22"><use href="#i-server"/></svg></div>
+            <div class="settings-section-body">
+              <div class="settings-section-head">
+                <div>
+                  <h3 class="settings-section-title">Providers</h3>
+                  <p class="settings-section-sub">Where each job runs</p>
+                </div>
+              </div>
+              <div class="settings-card">
+                <label class="srow">
+                  <span class="srow-main"><span class="srow-label">Fall back to OpenAI if a local service is down</span></span>
+                  <span class="switch">
+                    <input type="checkbox" id="allowFallbackToggle">
+                    <span class="switch-track" aria-hidden="true"></span>
+                  </span>
+                </label>
+                <div class="srow srow--stacked">
+                  <span class="srow-label">Chat replies</span>
+                  <div class="radio-row" id="chatProviderRadios" role="radiogroup" aria-label="Chat provider"></div>
+                  <p class="field-note" id="chatProviderNote"></p>
+                </div>
+                <div class="srow srow--stacked">
+                  <span class="srow-label">Transcription <span class="field-hint">— Accurate dictation mode</span></span>
+                  <div class="radio-row" id="transcriptionProviderRadios" role="radiogroup" aria-label="Transcription provider"></div>
+                  <p class="field-note" id="transcriptionProviderNote"></p>
+                </div>
+                <button class="srow" type="button" data-settings-page="ollama">
+                  <span class="srow-main"><span class="srow-label">Ollama</span></span>
+                  <span class="srow-spacer"></span>
+                  <span class="srow-value" id="settingsOllamaValue">Not set</span>
+                  <span class="srow-chevron"><svg class="icon-16"><use href="#i-chevron"/></svg></span>
+                </button>
+                <button class="srow" type="button" data-settings-page="whisper">
+                  <span class="srow-main"><span class="srow-label">Local Whisper</span></span>
+                  <span class="srow-spacer"></span>
+                  <span class="srow-value" id="settingsWhisperValue">Not set</span>
+                  <span class="srow-chevron"><svg class="icon-16"><use href="#i-chevron"/></svg></span>
+                </button>
+              </div>
+              <p class="settings-note">
+                Everything defaults to OpenAI. With fallback off, an unreachable local
+                service returns an error instead of quietly using OpenAI — so choosing
+                local stays chosen, and you never pay for something you set up to be free
+                without knowing.
+              </p>
+            </div>
+          </section>
+
+          <!-- VRChat chatbox -->
+          <section class="settings-section">
+            <div class="settings-section-icon"><svg width="22" height="22"><use href="#i-osc"/></svg></div>
+            <div class="settings-section-body">
+              <div class="settings-section-head">
+                <div>
+                  <h3 class="settings-section-title">VRChat chatbox</h3>
+                  <p class="settings-section-sub">OSC</p>
+                </div>
+              </div>
+              <div class="settings-card">
+                <button class="srow" type="button" data-settings-page="osc">
+                  <span class="srow-main"><span class="srow-label">PC address</span></span>
+                  <span class="srow-spacer"></span>
+                  <span class="srow-value" id="settingsOscValue">Off</span>
+                  <span class="srow-chevron"><svg class="icon-16"><use href="#i-chevron"/></svg></span>
+                </button>
+                <button class="srow" type="button" data-settings-page="osc-timing">
+                  <span class="srow-main"><span class="srow-label">Page duration</span></span>
+                  <span class="srow-spacer"></span>
+                  <span class="srow-value srow-value--mono" id="settingsOscTimingValue">—</span>
+                  <span class="srow-chevron"><svg class="icon-16"><use href="#i-chevron"/></svg></span>
+                </button>
+                <label class="srow">
+                  <span class="srow-main"><span class="srow-label">Play VRChat's chatbox notification sound</span></span>
+                  <span class="switch">
+                    <input type="checkbox" id="oscSfxToggle">
+                    <span class="switch-track" aria-hidden="true"></span>
+                  </span>
+                </label>
+              </div>
+            </div>
+          </section>
+
+          <!-- Personality -->
+          <section class="settings-section">
+            <div class="settings-section-icon"><svg width="22" height="22"><use href="#i-spark"/></svg></div>
+            <div class="settings-section-body">
+              <div class="settings-section-head">
+                <div>
+                  <h3 class="settings-section-title">Default personality</h3>
+                  <p class="settings-section-sub">Used when no profile is selected</p>
+                </div>
+              </div>
+              <div class="settings-card">
+                <div class="srow srow--stacked">
+                  <span class="srow-label">Response style</span>
+                  <div class="radio-row" id="responseStyleRadios" role="radiogroup" aria-label="Response style"></div>
+                </div>
+                <div class="srow srow--stacked">
+                  <label class="srow-label" for="personalityPresetSelect">Personality preset <span class="field-hint">— used when the box below is empty</span></label>
+                  <select id="personalityPresetSelect"></select>
+                </div>
+                <div class="srow srow--stacked">
+                  <label class="srow-label" for="systemPrompt">Custom personality <span class="field-hint">— optional</span></label>
+                  <textarea id="systemPrompt" rows="4" placeholder="Leave blank to use the personality preset selected above."></textarea>
+                </div>
+              </div>
+            </div>
+          </section>
+
+        </div><!-- /settingsRoot -->
+
+        <!-- ---------- detail pages ---------- -->
+        <div id="settingsPages">
+
+          <div class="settings-page is-hidden" data-page="openai" data-title="OpenAI API Key">
+            <div class="settings-card">
+              <div class="field">
+                <label for="openaiKey">Key</label>
+                <div class="row">
+                  <input type="password" id="openaiKey" placeholder="sk-…">
+                  <a class="btn-ghost btn-sm" href="https://platform.openai.com/usage"
+                     target="_blank" rel="noopener noreferrer">Usage ↗</a>
+                </div>
+                <p class="field-note">
+                  Stored on this server in config.json, never sent anywhere but OpenAI.
+                  Paste a new one to replace it.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div class="settings-page is-hidden" data-page="eleven" data-title="ElevenLabs API Key">
+            <div class="settings-card">
+              <div class="field">
+                <label for="elevenKey">Key</label>
+                <input type="password" id="elevenKey" placeholder="Paste to change">
+                <p class="field-note">
+                  The voice itself is chosen in the sidebar, where it can be changed per
+                  profile without coming in here.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div class="settings-page is-hidden" data-page="general" data-title="General">
+            <div class="settings-card">
+              <label class="srow">
+                <span class="srow-main">
+                  <span class="srow-label">Dark mode</span>
+                  <span class="srow-sub">Light is the same design with its colours swapped</span>
+                </span>
+                <span class="switch">
+                  <input type="checkbox" id="themeToggleSettings" checked>
+                  <span class="switch-track" aria-hidden="true"></span>
+                </span>
+              </label>
+              <label class="srow">
+                <span class="srow-main">
+                  <span class="srow-label">Show Speak and OSC switches</span>
+                  <span class="srow-sub">Under the message box, beside Auto</span>
+                </span>
+                <span class="switch">
+                  <input type="checkbox" id="composerOptionsToggle" checked>
+                  <span class="switch-track" aria-hidden="true"></span>
+                </span>
+              </label>
+            </div>
+          </div>
+
+          <div class="settings-page is-hidden" data-page="reply-length" data-title="Reply Length">
+            <div class="settings-card">
+              <div class="field">
+                <label for="settingsLengthSlider">Target length</label>
+                <input type="range" id="settingsLengthSlider"
+                       min="{{ min_words }}" max="{{ max_words_limit }}" step="5" value="80"
+                       aria-label="Target reply length in words">
+                <div class="ticks" aria-hidden="true">
+                  <span>A sentence</span>
+                  <span>A paragraph</span>
+                  <span>A monologue</span>
+                </div>
+                <p class="field-note" id="settingsLengthNote"></p>
+              </div>
+            </div>
+            <p class="settings-note">
+              The word target is a writing instruction, not a cut-off — replies land near
+              it and always finish the sentence. This is the same control as the one in
+              the sidebar; moving either moves both.
+            </p>
+          </div>
+
+          <div class="settings-page is-hidden" data-page="model" data-title="Model">
+            <div class="settings-card">
+              <div class="field">
+                <label>Text model <span class="field-hint">— writes the actual reply</span></label>
+                <div class="model-list" id="textModelList" role="radiogroup" aria-label="Text model"></div>
+                <input type="text" id="textModelCustom" class="model-custom-input is-hidden" placeholder="Custom model ID, e.g. gpt-4.1">
+                <p class="model-estimate" id="textModelEstimate"></p>
+              </div>
+            </div>
+          </div>
+
+          <div class="settings-page is-hidden" data-page="max-tokens" data-title="Max Tokens">
+            <div class="settings-card">
+              <label class="srow">
+                <span class="srow-main">
+                  <span class="srow-label">Work it out automatically</span>
+                  <span class="srow-sub">From the reply-length target, as this app has always done</span>
+                </span>
+                <span class="switch">
+                  <input type="checkbox" id="maxTokensAutoToggle" checked>
+                  <span class="switch-track" aria-hidden="true"></span>
+                </span>
+              </label>
+              <div class="field" id="maxTokensManual">
+                <label for="maxTokensInput">Ceiling</label>
+                <input type="number" id="maxTokensInput" min="64" max="32000" step="8" placeholder="944">
+                <p class="field-note">
+                  A hard stop, not a target. Set it too low and a long reply gets rolled
+                  back to its last complete sentence rather than arriving mid-word.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div class="settings-page is-hidden" data-page="translation-provider" data-title="Translation provider">
+            <div class="settings-card">
+              <div class="field">
+                <label>Translation</label>
+                <div class="radio-row" id="translationProviderRadios" role="radiogroup" aria-label="Translation provider"></div>
+                <p class="field-note" id="translationProviderNote"></p>
+              </div>
+            </div>
+          </div>
+
+          <div class="settings-page is-hidden" data-page="translation-model" data-title="Translation model">
+            <div class="settings-card">
+              <div class="field">
+                <label>Translation model <span class="field-hint">— only for the English translation tooltip</span></label>
+                <div class="model-list" id="translationModelList" role="radiogroup" aria-label="Translation model"></div>
+                <input type="text" id="translationModelCustom" class="model-custom-input is-hidden" placeholder="Custom model ID, e.g. gpt-4.1-nano">
+                <p class="model-estimate" id="translationModelEstimate"></p>
+              </div>
+            </div>
+          </div>
+
+          <div class="settings-page is-hidden" data-page="ollama" data-title="Ollama">
+            <div class="settings-card" id="ollamaSettings">
+              <div class="field">
+                <label for="ollamaUrl">Ollama address</label>
+                <div class="row">
+                  <input type="text" id="ollamaUrl" placeholder="http://192.168.1.x:11434" autocomplete="off">
+                  <button id="testOllamaBtn" class="btn-ghost btn-sm" type="button">Test</button>
+                </div>
+                <label for="ollamaModel" class="sublabel">Model</label>
+                <input type="text" id="ollamaModel" placeholder="llama3.1:8b" autocomplete="off">
+                <label for="ollamaTranslationModel" class="sublabel">Translation model <span class="field-hint">— blank to reuse the model above</span></label>
+                <input type="text" id="ollamaTranslationModel" placeholder="(same as above)" autocomplete="off">
+                <p class="field-note" id="ollamaTestNote"></p>
+              </div>
+            </div>
+          </div>
+
+          <div class="settings-page is-hidden" data-page="whisper" data-title="Local Whisper">
+            <div class="settings-card" id="whisperSettings">
+              <div class="field">
+                <label for="whisperUrl">Local Whisper address</label>
+                <div class="row">
+                  <input type="text" id="whisperUrl" placeholder="http://192.168.1.x:9000" autocomplete="off">
+                  <button id="testWhisperBtn" class="btn-ghost btn-sm" type="button">Test</button>
+                </div>
+                <p class="field-note" id="whisperTestNote">Run whisper_server.py on the machine with the GPU.</p>
+
+                <label for="whisperStartCommand" class="sublabel">
+                  Start command <span class="field-hint">— optional; lets the status chip start it for you</span>
+                </label>
+                <input type="text" id="whisperStartCommand" autocomplete="off"
+                       placeholder="schtasks /run /s 192.168.1.250 /tn VoiceConsoleWhisper">
+                <p class="field-note">
+                  Runs on this server when you click the offline status chip. Leave blank to
+                  disable. Needs the scheduled task installed on the other machine
+                  (install_whisper_task.ps1) and its remote-management firewall rule enabled.
+                </p>
+
+                <label for="whisperModelSelect" class="sublabel">Whisper model <span class="field-hint">— switches live, no restart</span></label>
+                <div class="row">
+                  <select id="whisperModelSelect"></select>
+                  <button id="applyWhisperModelBtn" class="btn-ghost btn-sm" type="button">Apply</button>
+                </div>
+                <p class="field-note" id="whisperModelNote">Test the connection first to load the model list.</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="settings-page is-hidden" data-page="osc" data-title="VRChat PC address">
+            <div class="settings-card">
+              <div class="field">
+                <label for="oscHost">VRChat PC address</label>
+                <div class="row">
+                  <input type="text" id="oscHost" placeholder="192.168.1.x" autocomplete="off">
+                  <input type="number" id="oscPort" class="port-input" min="1" max="65535" placeholder="9000">
+                  <button id="testOscBtn" class="btn-ghost btn-sm" type="button">Test</button>
+                </div>
+                <p class="field-note" id="oscTestNote">
+                  The LAN address of whichever machine runs VRChat — 127.0.0.1 if that's this
+                  server. Leave blank to disable. VRChat listens on UDP 9000 by default, so
+                  that PC needs an inbound rule for it:
+                  <code>netsh advfirewall firewall add rule name="VRChat OSC" dir=in action=allow protocol=UDP localport=9000</code>
+                </p>
+              </div>
+            </div>
+            <p class="settings-note">
+              The reply appears in your chatbox word for word — the moment playback starts
+              if Speak is on, immediately if it isn't. Anything over 144 characters is sent
+              as pages; keep the reply-length fader near 25 words to land in one. Delivery
+              can't be confirmed: OSC is UDP, so nothing comes back either way.
+            </p>
+          </div>
+
+          <div class="settings-page is-hidden" data-page="osc-timing" data-title="Page duration">
+            <div class="settings-card">
+              <div class="field">
+                <label>
+                  How long each page stays up <span class="field-hint">— before the next replaces it</span>
+                </label>
+                <div class="row page-seconds-row">
+                  <label class="page-seconds">
+                    <span>Speak on</span>
+                    <input type="number" id="oscPageSpeaking" min="1.5" max="60" step="0.1">
+                    <span class="unit">s</span>
+                  </label>
+                  <label class="page-seconds">
+                    <span>Speak off</span>
+                    <input type="number" id="oscPageSilent" min="1.5" max="60" step="0.1">
+                    <span class="unit">s</span>
+                  </label>
+                </div>
+                <p class="field-note" id="oscPageNote">
+                  With the voice playing, the text is a caption and should keep pace with it.
+                  With it off the text is the whole message and has to be read, which takes
+                  longer. Only affects replies long enough to need more than one page.
+                </p>
+              </div>
+            </div>
+          </div>
+
+        </div><!-- /settingsPages -->
+      </div><!-- /settings-scroll -->
+    </section>
+
+  </div><!-- /console -->
+
+  <!-- ============================================================
+       Voice picker
+       ============================================================
+       A centred dialog rather than a dropdown hanging off the sidebar:
+       the list is the widest thing in the app — name, languages, gender,
+       preview and a menu on every row — and a 330px column was never
+       going to hold it without squeezing every column. -->
+  <div id="voicePop" class="overlay voice-overlay is-hidden">
+    <div class="voice-dialog" role="dialog" aria-modal="true" aria-labelledby="voiceDialogTitle">
+
+      <header class="voice-dialog-head">
+        <h2 class="voice-dialog-title" id="voiceDialogTitle">Select Voice</h2>
+        <button id="voiceCloseBtn" class="voice-close" type="button" aria-label="Close">
+          <svg class="icon-18"><use href="#i-close"/></svg>
+        </button>
+      </header>
+
+      <div class="voice-search-row">
+        <span class="voice-search-field">
+          <span class="voice-search-icon" aria-hidden="true">
+            <svg class="icon-16"><use href="#i-search"/></svg>
+          </span>
+          <input type="text" id="voiceSearch" class="voice-search" autocomplete="off"
+                 placeholder="Search voices…" aria-label="Search voices">
+        </span>
+        <select id="voiceSort" class="voice-sort" aria-label="Sort voices">
+          <option value="favorites">Favorites first</option>
+          <option value="name">Name</option>
+          <option value="language">Language</option>
+          <option value="category">Type</option>
+          <option value="recent">Recently added</option>
+        </select>
+        <button id="refreshVoicesBtn" class="voice-refresh" type="button"
+                title="Re-fetch the list from ElevenLabs" aria-label="Reload voices">
+          <svg class="icon-18"><use href="#i-refresh"/></svg>
+        </button>
+      </div>
+
+      <!-- Four fixed controls instead of a chip per label. The chip cloud
+           grew with the library and had to be scrolled; this is the same
+           filtering in a block that never changes size. -->
+      <div class="voice-filters" id="voiceFilters">
+        <button id="voiceFavFilter" class="filter-toggle" type="button">
+          <span class="filter-star" aria-hidden="true">★</span>Favorites
+        </button>
+        <select id="voiceLangFilter" class="filter-select" aria-label="Filter by language"></select>
+        <select id="voiceGenderFilter" class="filter-select" aria-label="Filter by gender"></select>
+        <select id="voiceTypeFilter" class="filter-select" aria-label="Filter by type"></select>
+      </div>
+
+      <div class="voice-list" id="voiceList" role="listbox" aria-label="Voices"></div>
+
+      <p class="voice-foot">
+        <span id="voiceFoot"></span>
+        <span class="voice-foot-actions">
+          <button id="voiceHiddenNote" class="link-btn is-hidden" type="button"></button>
+          <button id="voiceFilterClear" class="btn-ghost btn-sm is-hidden" type="button">Clear filters</button>
+        </span>
+      </p>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       Language picker
+       ============================================================
+       The same dialog as the voice list, for the same reason: a grouped,
+       searchable list of every language reads far better centred than
+       hanging off a 330px column. -->
+  <div id="languagePop" class="overlay voice-overlay is-hidden">
+    <div class="voice-dialog voice-dialog--narrow" role="dialog" aria-modal="true"
+         aria-labelledby="languageDialogTitle">
+
+      <header class="voice-dialog-head">
+        <h2 class="voice-dialog-title" id="languageDialogTitle">Select Language</h2>
+        <button id="languageCloseBtn" class="voice-close" type="button" aria-label="Close">
+          <svg class="icon-18"><use href="#i-close"/></svg>
+        </button>
+      </header>
+
+      <div class="voice-search-row voice-search-row--single">
+        <span class="voice-search-field">
+          <span class="voice-search-icon" aria-hidden="true">
+            <svg class="icon-16"><use href="#i-search"/></svg>
+          </span>
+          <input type="text" id="languageSearch" class="voice-search" autocomplete="off"
+                 placeholder="Search languages…" aria-label="Search languages">
+        </span>
+      </div>
+
+      <div class="voice-list" id="languageList" role="listbox" aria-label="Languages"></div>
+
+      <p class="voice-foot"><span id="languageFoot"></span></p>
+    </div>
+  </div>
+
+  <!-- Profile editor -->
+  <div id="profileModalOverlay" class="overlay is-hidden">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="profileModalTitle">
+      <h2 class="eyebrow" id="profileModalTitle">New profile</h2>
+
+      <div class="field">
+        <label for="profileName">Name</label>
+        <input type="text" id="profileName" placeholder="Late Night DJ">
+      </div>
+
+      <!-- Voice is selected from the active profile's sidebar control. -->
+      <p class="modal-note" id="profileVoiceNote"></p>
+
+      <div class="field">
+        <label>Response style</label>
+        <div class="radio-row" id="profileResponseStyleRadios" role="radiogroup" aria-label="Response style"></div>
+      </div>
+
+      <div class="field">
+        <label for="profileLanguageSelect">
+          Recommended language <span class="field-hint">— offered as one click, never forced</span>
+        </label>
+        <select id="profileLanguageSelect"></select>
+      </div>
+
+      <div class="field">
+        <label for="profilePersonalityPresetSelect">Personality preset (used when the box below is empty)</label>
+        <select id="profilePersonalityPresetSelect"></select>
+      </div>
+
+      <div class="field">
+        <label for="profileSystemPrompt">Personality (optional — leave blank to use the preset above)</label>
+        <textarea id="profileSystemPrompt" rows="5"
+          placeholder="Leave blank to use the preset above, or describe how this one talks — tone, quirks, what it refuses to do."></textarea>
+      </div>
+
+      <div class="actions">
+        <button id="profileModalSave" class="btn">Save profile</button>
+        <button id="profileModalCancel" class="btn-ghost">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="{{ url_for('static', filename='app.js') }}?v={{ asset_version }}"></script>
+</body>
+</html>
