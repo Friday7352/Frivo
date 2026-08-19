@@ -540,7 +540,7 @@ async function loadWhisperModels() {
     if (!res.ok || !data.available_models) {
       fillWhisperModelOptions(WHISPER_MODEL_FALLBACK, "medium");
       whisperModelNote.textContent =
-        (data.error || "Couldn't reach the Whisper server.") +
+        (data.error || "Couldn't reach Evora.") +
         " Showing the standard models — Apply will retry.";
       whisperModelNote.className = "field-note test-fail";
       return;
@@ -3215,9 +3215,9 @@ const DICTATION_MODES = [
   },
   {
     id: "live_local",
-    name: "Live (Whisper)",
+    name: "Live (Evora)",
     description:
-      "Text appears as you speak, transcribed by your own Whisper server about a second behind. Honours the microphone picked above and auto-detects language. Needs local Whisper selected under Providers.",
+      "Text appears as you speak, transcribed by your own Evora service about a second behind. Honours the microphone picked above and auto-detects language. Needs Evora selected under Providers.",
   },
   {
     id: "accurate",

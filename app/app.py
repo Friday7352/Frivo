@@ -1230,8 +1230,8 @@ TRANSCRIPTION_PROVIDERS = [
     },
     {
         "id": "local_whisper",
-        "name": "Local Whisper",
-        "note": "Free, private, and usually faster than the round trip to OpenAI. Needs whisper_server.py running on a machine with a GPU.",
+        "name": "Evora",
+        "note": "Free, private transcription on this computer or your network. Install Evora on the machine that will process audio.",
     },
 ]
 
@@ -1940,7 +1940,7 @@ def local_status():
         ok, message = probe_provider("whisper", timeout=2)
         services.append({
             "id": "whisper",
-            "name": "Whisper",
+            "name": "Evora",
             "ok": ok,
             "message": message,
             "url": whisper_base_url(),
@@ -1970,7 +1970,7 @@ def start_whisper():
         return jsonify({
             "error": (
                 "No start command configured. Set one under "
-                "Settings -> Providers -> Whisper start command."
+                "Settings -> Providers -> Evora start command."
             )
         }), 400
 
@@ -2128,13 +2128,13 @@ def listen():
                 if not fallback_allowed():
                     return jsonify({
                         "error": (
-                            "Whisper server unreachable. Automatic fallback to OpenAI "
+                            "Evora server unreachable. Automatic fallback to OpenAI "
                             "is off, so nothing was sent to a paid service."
                         )
                     }), 503
                 if not CFG["openai_api_key"]:
                     return jsonify({
-                        "error": "Whisper server unreachable and no OpenAI key set."
+                        "error": "Evora server unreachable and no OpenAI key set."
                     }), 502
                 original = openai_transcribe(file_tuple)
         else:
@@ -2212,7 +2212,7 @@ def listen_speakers():
             )
         return jsonify(response.json()), response.status_code
     except requests.exceptions.ConnectionError:
-        return jsonify({"error": "Whisper server isn't reachable."}), 502
+        return jsonify({"error": "Evora isn't reachable."}), 502
     except Exception as e:
         return jsonify({"error": str(e)}), 502
 
@@ -2245,7 +2245,7 @@ def whisper_model():
         payload = response.json()
         return jsonify(payload), response.status_code
     except requests.exceptions.ConnectionError:
-        return jsonify({"error": "Whisper server isn't reachable at that address."}), 502
+        return jsonify({"error": "Evora isn't reachable at that address."}), 502
     except Exception as e:
         return jsonify({"error": str(e)}), 502
 
@@ -2894,8 +2894,8 @@ def transcribe_audio():
                 log_server_event(f"Local Whisper unavailable ({e!r}) — fallback off, failing.")
                 return jsonify({
                     "error": (
-                        "Local Whisper isn't reachable, so nothing was transcribed. "
-                        "Start whisper_server.py, or switch Transcription to OpenAI "
+                        "Evora isn't reachable, so nothing was transcribed. "
+                        "Open Evora, or switch Transcription to OpenAI "
                         "in Settings. Automatic fallback is off, so no audio was "
                         "sent to a paid service."
                     )
@@ -2905,8 +2905,8 @@ def transcribe_audio():
             if not CFG["openai_api_key"]:
                 return jsonify({
                     "error": (
-                        "Local Whisper isn't reachable and there's no OpenAI key to fall "
-                        "back on. Check whisper_server.py is running, or set an OpenAI key."
+                        "Evora isn't reachable and there's no OpenAI key to fall "
+                        "back on. Open Evora, or set an OpenAI key."
                     )
                 }), 502
 
