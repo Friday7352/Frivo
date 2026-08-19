@@ -268,7 +268,7 @@ function Register-Uninstaller {
     New-Item -Path $RegKey -Force | Out-Null
     Set-ItemProperty -Path $RegKey -Name 'DisplayName'     -Value $AppName
     Set-ItemProperty -Path $RegKey -Name 'DisplayVersion'  -Value $AppVersion
-    Set-ItemProperty -Path $RegKey -Name 'Publisher'       -Value 'Frivo'
+    Set-ItemProperty -Path $RegKey -Name 'Publisher'       -Value 'Friday'
     Set-ItemProperty -Path $RegKey -Name 'InstallLocation' -Value $Target
     Set-ItemProperty -Path $RegKey -Name 'UninstallString' -Value (Get-UninstallCommand -InstallPath $Target)
     Set-ItemProperty -Path $RegKey -Name 'DisplayIcon'     -Value ('{0}\static\Frivo.ico' -f $Target)
