@@ -2458,19 +2458,14 @@ button.srow:hover .srow-chevron { color: var(--ink-dim); }
 .voice-preview.is-playing { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
 .voice-menu-btn { border-color: transparent; background: none; }
 
-/* The check that marks the voice in use, in the slot the menu occupies on
-   every other row — so the active row reads as chosen rather than as a row
-   with one more control on it. */
-.voice-current-mark {
-  flex: none;
-  width: 34px;
-  height: 34px;
-  display: grid;
-  place-items: center;
-  border-radius: 50%;
+/* The selected voice still has an action button so it can be favorited.
+   Its checkmark preserves the old at-a-glance selected state. */
+.voice-menu-btn.is-current {
   background: var(--accent);
+  border-color: var(--accent);
   color: var(--accent-ink);
 }
+.voice-menu-btn.is-current:hover { filter: brightness(1.08); }
 
 .voice-foot-actions { display: flex; align-items: center; gap: 12px; }
 
