@@ -2388,27 +2388,21 @@ function voiceRowNode(v) {
     row.appendChild(play);
   }
 
-  // The voice in use gets a tick where every other row has its menu, so the
-  // active row reads as chosen rather than as a row with an extra control.
-  if (isCurrent) {
-    const check = document.createElement("span");
-    check.className = "voice-current-mark";
-    check.title = "In use";
-    check.appendChild(iconNode("i-check", "icon-16"));
-    row.appendChild(check);
-  } else {
-    const menuBtn = document.createElement("button");
-    menuBtn.type = "button";
-    menuBtn.className = "voice-menu-btn";
-    menuBtn.title = "More";
-    menuBtn.setAttribute("aria-label", `More options for ${v.name}`);
-    menuBtn.appendChild(iconNode("i-dots", "icon-18"));
-    menuBtn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      openVoiceMenu(menuBtn, v);
-    });
-    row.appendChild(menuBtn);
-  }
+  // Keep the action menu on the voice in use too. It used to be replaced by
+  // a non-interactive checkmark, which meant the selected voice could not be
+  // added to or removed from Favorites.
+  const menuBtn = document.createElement("button");
+  menuBtn.type = "button";
+  menuBtn.className = "voice-menu-btn";
+  menuBtn.classList.toggle("is-current", isCurrent);
+  menuBtn.title = isCurrent ? "Selected voice options" : "More";
+  menuBtn.setAttribute("aria-label", `More options for ${v.name}${isCurrent ? " (selected)" : ""}`);
+  menuBtn.appendChild(iconNode(isCurrent ? "i-check" : "i-dots", isCurrent ? "icon-16" : "icon-18"));
+  menuBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    openVoiceMenu(menuBtn, v);
+  });
+  row.appendChild(menuBtn);
 
   return row;
 }
@@ -5309,8 +5303,14 @@ document.addEventListener(
   "scroll",
   (e) => {
     if (!openPrettySelect) return;
-    if (openPrettySelect.pop.contains(e.target)) return;
-    closePrettySelect();
+    // Focusing the selected option can scroll the document, especially for
+    // a picker near the bottom of a settings page. That is not an outside
+    // interaction, and closing here made the list vanish before its option
+    // could be clicked. Only close when the trigger itself is moved by a
+    // scroll container; scrolling inside the list remains available.
+    const { pop, trigger } = openPrettySelect;
+    if (pop.contains(e.target) || e.target === document || e.target === document.documentElement || e.target === document.body) return;
+    if (e.target.contains && e.target.contains(trigger)) closePrettySelect();
   },
   true
 );
