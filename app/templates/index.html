@@ -856,7 +856,7 @@
                   <span class="srow-chevron"><svg class="icon-16"><use href="#i-chevron"/></svg></span>
                 </button>
                 <button class="srow" type="button" data-settings-page="whisper">
-                  <span class="srow-main"><span class="srow-label">Local Whisper</span></span>
+                  <span class="srow-main"><span class="srow-label">Evora</span></span>
                   <span class="srow-spacer"></span>
                   <span class="srow-value" id="settingsWhisperValue">Not set</span>
                   <span class="srow-chevron"><svg class="icon-16"><use href="#i-chevron"/></svg></span>
@@ -1086,15 +1086,15 @@
             </div>
           </div>
 
-          <div class="settings-page is-hidden" data-page="whisper" data-title="Local Whisper">
+          <div class="settings-page is-hidden" data-page="whisper" data-title="Evora">
             <div class="settings-card" id="whisperSettings">
               <div class="field">
-                <label for="whisperUrl">Local Whisper address</label>
+                <label for="whisperUrl">Evora address</label>
                 <div class="row">
                   <input type="text" id="whisperUrl" placeholder="http://192.168.1.x:9000" autocomplete="off">
                   <button id="testWhisperBtn" class="btn-ghost btn-sm" type="button">Test</button>
                 </div>
-                <p class="field-note" id="whisperTestNote">Run whisper_server.py on the machine with the GPU.</p>
+                <p class="field-note" id="whisperTestNote">Install and open Evora on the machine that will process audio.</p>
 
                 <label for="whisperStartCommand" class="sublabel">
                   Start command <span class="field-hint">— optional; lets the status chip start it for you</span>
@@ -1107,7 +1107,7 @@
                   (install_whisper_task.ps1) and its remote-management firewall rule enabled.
                 </p>
 
-                <label for="whisperModelSelect" class="sublabel">Whisper model <span class="field-hint">— switches live, no restart</span></label>
+                <label for="whisperModelSelect" class="sublabel">Evora model <span class="field-hint">— switches live, no restart</span></label>
                 <div class="row">
                   <select id="whisperModelSelect"></select>
                   <button id="applyWhisperModelBtn" class="btn-ghost btn-sm" type="button">Apply</button>
