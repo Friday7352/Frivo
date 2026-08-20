@@ -41,10 +41,10 @@ MinVersion=10.0
 ; Keep the complete setup payload together under {tmp}. It is deleted as
 ; soon as the Frivo installer window closes; only the selected Frivo folder
 ; and its per-user data remain afterwards.
-Source: "..\app\*";       DestDir: "{tmp}\FrivoSetupPayload\app";       Flags: ignoreversion recursesubdirs createallsubdirs deleteafterinstall
+Source: "..\app\*";       DestDir: "{tmp}\FrivoSetupPayload\app";       Flags: ignoreversion recursesubdirs createallsubdirs deleteafterinstall; Excludes: "config.json,profiles.json,usage.json,launcher.json,*.log,__pycache__\*,*.pyc"
 Source: "..\installer\*"; DestDir: "{tmp}\FrivoSetupPayload\installer"; Flags: ignoreversion recursesubdirs createallsubdirs deleteafterinstall
 Source: "FrivoHost.exe";   DestDir: "{tmp}\FrivoSetupPayload\installer"; Flags: ignoreversion deleteafterinstall
-Source: "..\README.txt";  DestDir: "{tmp}\FrivoSetupPayload";           Flags: ignoreversion deleteafterinstall
+Source: "..\README.md";   DestDir: "{tmp}\FrivoSetupPayload";           Flags: ignoreversion deleteafterinstall
 
 [Run]
 ; hidewizard keeps Inno's internal extraction window out of sight while the
