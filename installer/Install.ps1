@@ -990,6 +990,13 @@ $btnNext.Add_Click({
             return
         }
         $txtPath.Text = $check.Path
+
+        # Update keeps the saved shortcut, startup, and network choices, so
+        # there is nothing to configure. Go straight from destination to the
+        # installation work step instead of showing disabled checkboxes.
+        if ($script:installAction -eq 'Update') {
+            $current = @{ Panel = $pageOptions }
+        }
     }
 
     if ($current.Panel -eq $pageOptions) {
