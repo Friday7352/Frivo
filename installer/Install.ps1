@@ -327,6 +327,62 @@ function Register-Uninstaller {
     Set-ItemProperty -Path $RegKey -Name 'NoRepair'        -Value 1 -Type DWord
 }
 
+function Get-InstallSettings {
+    <#
+        Reads the choices made during setup. Older installations did not
+        store them, so infer those choices from their current Windows state
+        once and save the result during the next update.
+    #>
+    $settings = [pscustomobject] @{
+        DesktopShortcut = (Test-Path -LiteralPath (Join-Path ([Environment]::GetFolderPath('CommonDesktopDirectory')) 'Frivo.lnk'))
+        StartMenuShortcut = (Test-Path -LiteralPath (Join-Path ([Environment]::GetFolderPath('CommonStartMenu')) 'Programs\Frivo.lnk'))
+        Startup = $false
+        Firewall = $false
+    }
+
+    try {
+        $run = Get-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -ErrorAction Stop
+        $settings.Startup = -not [string]::IsNullOrWhiteSpace([string] $run.Frivo)
+    } catch { }
+    try {
+        $settings.Firewall = $null -ne (Get-NetFirewallRule -Name 'Frivo' -ErrorAction SilentlyContinue | Select-Object -First 1)
+    } catch { }
+
+    foreach ($key in $FrivoRegKeys) {
+        try {
+            if (-not (Test-Path -LiteralPath $key)) { continue }
+            $registered = Get-ItemProperty -Path $key -ErrorAction Stop
+            foreach ($item in @(
+                @{ Name = 'FrivoDesktopShortcut'; Property = 'DesktopShortcut' },
+                @{ Name = 'FrivoStartMenuShortcut'; Property = 'StartMenuShortcut' },
+                @{ Name = 'FrivoStartup'; Property = 'Startup' },
+                @{ Name = 'FrivoFirewall'; Property = 'Firewall' }
+            )) {
+                if ($registered.PSObject.Properties.Name -contains $item.Name) {
+                    $settings.($item.Property) = [bool] ([int] $registered.($item.Name))
+                }
+            }
+            break
+        } catch { }
+    }
+    return $settings
+}
+
+function Save-InstallSettings {
+    param(
+        [bool] $DesktopShortcut,
+        [bool] $StartMenuShortcut,
+        [bool] $Startup,
+        [bool] $Firewall
+    )
+
+    # This key is created by Register-Uninstaller immediately before us.
+    Set-ItemProperty -Path $RegKey -Name 'FrivoDesktopShortcut' -Value ([int] $DesktopShortcut) -Type DWord
+    Set-ItemProperty -Path $RegKey -Name 'FrivoStartMenuShortcut' -Value ([int] $StartMenuShortcut) -Type DWord
+    Set-ItemProperty -Path $RegKey -Name 'FrivoStartup' -Value ([int] $Startup) -Type DWord
+    Set-ItemProperty -Path $RegKey -Name 'FrivoFirewall' -Value ([int] $Firewall) -Type DWord
+}
+
 function Set-StartupEntry {
     param([string] $Target, [bool] $Enabled, [bool] $RemoveLegacyTasks, [scriptblock] $Log)
 
@@ -586,6 +642,8 @@ function Install-Frivo {
         Set-StartupEntry -Target $Target -Enabled $Startup -RemoveLegacyTasks $AllowKnownLegacyInstall -Log $Log
     }
     Register-Uninstaller -Target $Target -Log $Log
+    Save-InstallSettings -DesktopShortcut $DesktopShortcut -StartMenuShortcut $StartMenuShortcut `
+        -Startup $Startup -Firewall $Firewall
     & $Progress 95
     if ($Action -ne 'Update') {
         Set-FirewallRule -Enabled $Firewall -Target $Target -Log $Log
@@ -621,9 +679,12 @@ if ($Silent) {
         $effectiveAction = 'Repair'
     }
     $cleanFirst = ($effectiveAction -eq 'Repair')
+    $savedSettings = if ($effectiveAction -eq 'Update') { Get-InstallSettings } else { $null }
     Install-Frivo -Target $target `
-        -DesktopShortcut (-not $NoShortcut) -StartMenuShortcut (-not $NoShortcut) `
-        -Startup ([bool] $RunAtStartup) -Firewall ([bool] $AllowFirewall) `
+        -DesktopShortcut $(if ($savedSettings) { $savedSettings.DesktopShortcut } else { -not $NoShortcut }) `
+        -StartMenuShortcut $(if ($savedSettings) { $savedSettings.StartMenuShortcut } else { -not $NoShortcut }) `
+        -Startup $(if ($savedSettings) { $savedSettings.Startup } else { [bool] $RunAtStartup }) `
+        -Firewall $(if ($savedSettings) { $savedSettings.Firewall } else { [bool] $AllowFirewall }) `
         -CleanFirst $cleanFirst -AllowKnownLegacyInstall $knownExisting -Action $effectiveAction `
         -Log { param($m) if ($m) { Write-Host $m } } -Progress { param($p) } | Out-Null
     exit 0
@@ -641,6 +702,7 @@ Import-Module (Join-Path $ScriptDir 'Frivo.Ui.psm1') -Force
 $Theme = Get-FrivoTheme
 
 $existing = Get-ExistingInstall
+$existingInstallSettings = if ($existing.State -ne 'None') { Get-InstallSettings } else { $null }
 Write-SetupLog ('Existing install state: {0} at {1}' -f $existing.State, $existing.Path)
 
 $form = New-FrivoForm -Theme $Theme -Title ('{0} Setup' -f $AppName) -Width 620 -Height 500 `
@@ -754,6 +816,10 @@ $chkFirewall = New-FrivoCheck -Theme $Theme -Parent $cardNet -Text 'Allow connec
 [void] (New-FrivoLabel -Theme $Theme -Parent $cardNet `
     -Text 'Allows other devices on your private network to open Frivo.' `
     -X 38 -Y 36 -W 516 -H 18 -Font $Theme.FontSmall -Color $Theme.Dim)
+$updateSettingsNote = New-FrivoLabel -Theme $Theme -Parent $pageOptions `
+    -Text 'Your choices from the existing installation will be kept during this update.' `
+    -X 30 -Y 306 -W 560 -H 28 -Font $Theme.FontSmall -Color $Theme.Dim
+$updateSettingsNote.Visible = $false
 
 # ---------- installing ----------
 $pageInstall = New-Page
@@ -818,6 +884,31 @@ if ($existing.State -eq 'Installed') {
     $radioRepair.Text = 'Clean up and install'
     $repairNote.Text  = 'Removes the incomplete installation, then installs normally. Your settings are not affected.'
     $txtPath.Text     = $existing.Path
+}
+
+if ($existingInstallSettings) {
+    $chkDesktop.Checked  = $existingInstallSettings.DesktopShortcut
+    $chkStart.Checked    = $existingInstallSettings.StartMenuShortcut
+    $chkStartup.Checked  = $existingInstallSettings.Startup
+    $chkFirewall.Checked = $existingInstallSettings.Firewall
+}
+
+function Set-ConfigurationForAction {
+    param([ValidateSet('Install', 'Update', 'Repair')] [string] $Action)
+
+    $updating = ($Action -eq 'Update')
+    foreach ($control in @($chkDesktop, $chkStart, $chkStartup, $chkFirewall)) {
+        $control.Enabled = -not $updating
+    }
+    $updateSettingsNote.Visible = $updating
+}
+
+$radioUpdate.Add_CheckedChanged({ if ($radioUpdate.Checked) { Set-ConfigurationForAction -Action 'Update' } })
+$radioRepair.Add_CheckedChanged({ if ($radioRepair.Checked) { Set-ConfigurationForAction -Action 'Repair' } })
+if ($existing.State -eq 'Installed') {
+    Set-ConfigurationForAction -Action 'Update'
+} else {
+    Set-ConfigurationForAction -Action 'Install'
 }
 
 function Show-Page {
