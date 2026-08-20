@@ -189,9 +189,7 @@ function Clear-PartialInstall {
     & $Log 'Removing incomplete installation...'
     Write-SetupLog ('Cleaning partial install at {0}' -f $Target)
 
-    Get-CimInstance Win32_Process -Filter "Name = 'python.exe' OR Name = 'pythonw.exe'" -ErrorAction SilentlyContinue |
-        Where-Object { $_.ExecutablePath -and (Test-PathWithinDirectory -Path $_.ExecutablePath -Directory $Target) } |
-        ForEach-Object { try { Stop-Process -Id $_.ProcessId -Force -ErrorAction Stop } catch { } }
+    Stop-FrivoProcesses -Target $Target -Log $Log
 
     if (Test-Path -LiteralPath $Target) {
         # The venv is the part that most often survives half-written.
@@ -219,6 +217,39 @@ function Clear-PartialInstall {
 # ==================================================================
 # Work
 # ==================================================================
+
+function Stop-FrivoProcesses {
+    <#
+        The running app can hold images and scripts open, preventing an
+        update from replacing them. Only stop processes whose executable is
+        inside this exact Frivo installation; never touch another Python
+        application on the machine.
+    #>
+    param([string] $Target, [scriptblock] $Log)
+
+    $processes = @(Get-CimInstance Win32_Process `
+        -Filter "Name = 'python.exe' OR Name = 'pythonw.exe' OR Name = 'FrivoHost.exe'" `
+        -ErrorAction SilentlyContinue |
+        Where-Object { $_.ExecutablePath -and (Test-PathWithinDirectory -Path $_.ExecutablePath -Directory $Target) })
+
+    if ($processes.Count -eq 0) { return }
+
+    & $Log 'Closing the running Frivo application...'
+    foreach ($process in $processes) {
+        try {
+            Stop-Process -Id $process.ProcessId -Force -ErrorAction Stop
+            Write-SetupLog ('Stopped Frivo process {0} ({1}) before setup.' -f $process.ProcessId, $process.Name)
+        } catch {
+            Write-SetupLog ('Could not stop Frivo process {0}: {1}' -f $process.ProcessId, $_.Exception.Message)
+        }
+    }
+
+    # Stop-Process initiates termination; wait briefly for Windows to release
+    # file handles before copying the refreshed program files.
+    foreach ($process in $processes) {
+        try { Wait-Process -Id $process.ProcessId -Timeout 5 -ErrorAction Stop } catch { }
+    }
+}
 
 function Copy-AppFiles {
     param([string] $Target, [scriptblock] $Log)
@@ -434,6 +465,8 @@ function Install-Frivo {
     $requirementsChanged = $false
     if ($Action -eq 'Update') {
         $requirementsChanged = Test-RequirementsChanged -Target $Target
+        Stop-FrivoProcesses -Target $Target -Log $Log
+        & $Log 'Preserving the existing installation settings.'
     }
 
     & $Progress 5
