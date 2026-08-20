@@ -1,8 +1,8 @@
 # Frivo
 
 Frivo is a local Windows dashboard for conversational AI, voice output,
-profiles, and VRChat chatbox messages over OSC. It runs on your computer and
-opens in your web browser.
+profiles, private speech transcription through Evora, and VRChat chatbox
+messages over OSC. It runs on your computer and opens in your web browser.
 
 ## Screenshots
 
@@ -57,10 +57,27 @@ locally hosted Ollama model instead. Install and run Ollama, then select
 **Ollama (local)** in **Settings** > **Providers** and choose your model.
 An OpenAI API key is not required when chat and translation use Ollama.
 
-For dictation and listening, Frivo can also use **Local Whisper** to
-transcribe audio on your computer or local network. Whisper transcribes the
-audio; Frivo then translates the resulting text with the translation provider
-you selected, such as Ollama or OpenAI.
+## Local transcription with Evora
+
+[Evora](https://github.com/Friday7352/Evora) is Frivo's optional private,
+local transcription service. It converts audio to text on your own computer
+or another Windows PC on your local network. Frivo can then translate that
+text with the provider you selected, such as Ollama or OpenAI.
+
+Evora is a separate application and is not included in Frivo:
+
+1. Download `EvoraSetup.exe` from the
+   [latest Evora release](https://github.com/Friday7352/Evora/releases/latest).
+2. Install and start Evora. If it runs on another computer, allow private
+   network access during setup.
+3. In Frivo, open **Settings** > **Providers** > **Transcription** and enter
+   the address shown by the Evora launcher.
+4. Use `http://evora.local:9000` when both applications run on the same PC.
+   For another computer, use Evora's displayed network address, such as
+   `http://192.168.x.x:9000`.
+
+Evora can use a supported NVIDIA GPU for faster transcription and otherwise
+runs on the CPU. No cloud transcription account or API key is required.
 
 ## Recommended audio routing: Voicemeeter
 
