@@ -10,7 +10,7 @@
 
 #define AppName    "Frivo"
 #define AppVersion "1.1.1"
-#define AppPublisher "Frivo"
+#define AppPublisher "Friday"
 
 [Setup]
 AppName={#AppName}

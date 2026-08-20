@@ -9,7 +9,7 @@ using System.Windows.Forms;
 
 [assembly: AssemblyTitle("Frivo")]
 [assembly: AssemblyDescription("Frivo desktop host")]
-[assembly: AssemblyCompany("Frivo")]
+[assembly: AssemblyCompany("Friday")]
 [assembly: AssemblyProduct("Frivo")]
 [assembly: AssemblyVersion("1.1.1.0")]
 [assembly: AssemblyFileVersion("1.1.1.0")]
