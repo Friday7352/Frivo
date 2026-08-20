@@ -32,7 +32,7 @@ $SourceApp  = Join-Path $PackageDir 'app'
 Import-Module (Join-Path $ScriptDir 'Frivo.Setup.psm1') -Force
 
 $AppName    = 'Frivo'
-$AppVersion = '1.1.0'
+$AppVersion = '1.1.1'
 $LogPath    = Get-SetupLogPath
 $script:SetupDataDir = if ($DataPath) { $DataPath } else { Get-DataPath }
 
