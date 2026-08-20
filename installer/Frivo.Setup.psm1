@@ -600,6 +600,32 @@ function Update-PathFromRegistry {
 }
 
 
+function Sync-VenvDependencies {
+    <# Installs the packages required by the app into an existing venv. #>
+    param([string] $VenvPython, [string] $Target, [scriptblock] $Log)
+
+    # A venv can legitimately come up without pip — some Python builds ship
+    # no ensurepip, and pip is what everything after this depends on.
+    $pipCheck = Invoke-Tool -FilePath $VenvPython -Arguments @('-m', 'pip', '--version')
+    if ($pipCheck.ExitCode -ne 0) {
+        & $Log 'Bootstrapping the package installer...'
+        $boot = Invoke-Tool -FilePath $VenvPython -Arguments @('-m', 'ensurepip', '--upgrade', '--default-pip')
+        if ($boot.ExitCode -ne 0) {
+            throw ("The Python environment has no package installer and it could not be repaired.`r`n`r`n{0}" -f (Get-LastLines $boot.StdErr))
+        }
+    }
+
+    & $Log 'Installing dependencies. This may take a few minutes...'
+    $req = Join-Path $Target 'requirements.txt'
+    $r = Invoke-Tool -FilePath $VenvPython -Arguments @(
+        '-m', 'pip', 'install', '--no-input', '--disable-pip-version-check', '-r', $req
+    )
+    if ($r.ExitCode -ne 0) {
+        $detail = Get-LastLines ($r.StdErr + "`r`n" + $r.StdOut) 8
+        throw ("Installing the Python dependencies failed.`r`n`r`n{0}" -f $detail)
+    }
+}
+
 function New-Venv {
     param([string] $Target, $Python, [scriptblock] $Log)
 
@@ -620,26 +646,7 @@ function New-Venv {
         throw ("Could not create the Python environment.`r`n`r`n{0}" -f $detail)
     }
 
-    # A venv can legitimately come up without pip — some Python builds ship
-    # no ensurepip, and pip is what everything after this depends on.
-    $pipCheck = Invoke-Tool -FilePath $venvPython -Arguments @('-m', 'pip', '--version')
-    if ($pipCheck.ExitCode -ne 0) {
-        & $Log 'Bootstrapping the package installer...'
-        $boot = Invoke-Tool -FilePath $venvPython -Arguments @('-m', 'ensurepip', '--upgrade', '--default-pip')
-        if ($boot.ExitCode -ne 0) {
-            throw ("The Python environment has no package installer and it could not be repaired.`r`n`r`n{0}" -f (Get-LastLines $boot.StdErr))
-        }
-    }
-
-    & $Log 'Installing dependencies. This may take a few minutes...'
-    $req = Join-Path $Target 'requirements.txt'
-    $r = Invoke-Tool -FilePath $venvPython -Arguments @(
-        '-m', 'pip', 'install', '--no-input', '--disable-pip-version-check', '-r', $req
-    )
-    if ($r.ExitCode -ne 0) {
-        $detail = Get-LastLines ($r.StdErr + "`r`n" + $r.StdOut) 8
-        throw ("Installing the Python dependencies failed.`r`n`r`n{0}" -f $detail)
-    }
+    Sync-VenvDependencies -VenvPython $venvPython -Target $Target -Log $Log
 
     return $venvPython
 }
@@ -830,6 +837,6 @@ Export-ModuleMember -Function `
     Get-FrivoInstallMarkerPath, Test-FrivoInstallOwnership, Test-FrivoRecoverableResidue, Write-FrivoInstallMarker, Test-OtherFrivoInstall, Test-PathWithinDirectory,
     Test-IsAdministrator, Test-InstallPathUsable,
     Write-SetupLog, Invoke-Tool, ConvertTo-ArgumentString, Get-LastLines, Find-Python, Install-Python,
-    Update-PathFromRegistry, New-Venv, Get-SetupLogPath,
+    Update-PathFromRegistry, New-Venv, Sync-VenvDependencies, Get-SetupLogPath,
     Get-LocalHostname, Get-HostsFilePath, Add-FrivoHostsEntry, Remove-FrivoHostsEntry,
     Install-FrivoRootCertificate, Remove-FrivoRootCertificate, Get-LauncherShim, Get-WScriptPath
