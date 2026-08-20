@@ -168,6 +168,15 @@ and generated audio.
 Open **Settings** > **Apps** > **Installed apps**, choose **Frivo**, and
 select **Uninstall**.
 
+Running a newer Frivo setup also detects an existing installation and offers:
+
+- **Update** — refreshes Frivo's program files while retaining the existing
+  Python environment. Dependencies are only installed when `requirements.txt`
+  has changed.
+- **Repair** — rebuilds the program files and Python environment while keeping
+  your saved settings.
+- **Uninstall** — removes Frivo from the setup wizard.
+
 The uninstaller removes Frivo, its shortcuts, its Windows startup entry, the
 Frivo firewall rule, its local address and certificate. It asks whether to
 also remove Frivo's saved API keys and preferences. Leave that option
@@ -185,8 +194,8 @@ folder.
 ## Building from source
 
 For development, clone this repository and run `Install.bat` to use the
-source setup wizard. To create the public single-file installer, run:
-
-    powershell -ExecutionPolicy Bypass -File build\Build-Installer.ps1
+source setup wizard. To create a new public single-file installer,
+double-click `Build-Installer.bat` in the project folder. It builds the
+installer and, if needed, installs Inno Setup automatically.
 
 The finished installer is written to `dist\FrivoSetup.exe`.
