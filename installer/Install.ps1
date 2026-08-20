@@ -17,6 +17,8 @@ param(
     [switch] $NoShortcut,
     [switch] $RunAtStartup,
     [switch] $AllowFirewall,
+    [ValidateSet('Install', 'Update', 'Repair')]
+    [string] $Action = 'Install',
     # Retained across UAC elevation so settings stay with the person who
     # launched setup, even when they supply separate admin credentials.
     [string] $DataPath
@@ -243,6 +245,23 @@ function Copy-AppFiles {
     }
 }
 
+function Test-RequirementsChanged {
+    <#
+        Compares the requirements bundled with this setup to the copy in an
+        existing installation.  An update can reuse its virtual environment
+        when they are identical, which avoids downloading and reinstalling
+        the complete dependency set on every release.
+    #>
+    param([string] $Target)
+
+    $source = Join-Path $SourceApp 'requirements.txt'
+    $installed = Join-Path $Target 'requirements.txt'
+    if (-not (Test-Path -LiteralPath $installed -PathType Leaf)) { return $true }
+
+    return (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash -ne
+           (Get-FileHash -LiteralPath $installed -Algorithm SHA256).Hash
+}
+
 function New-Shortcut {
     param(
         [string] $Path, [string] $Target, [string] $WorkingDir,
@@ -400,6 +419,8 @@ function Install-Frivo {
         [bool]        $Firewall,
         [bool]        $CleanFirst,
         [bool]        $AllowKnownLegacyInstall,
+        [ValidateSet('Install', 'Update', 'Repair')]
+        [string]      $Action = 'Install',
         [scriptblock] $Log,
         [scriptblock] $Progress
     )
@@ -410,17 +431,27 @@ function Install-Frivo {
 
     if ($CleanFirst) { Clear-PartialInstall -Target $Target -Log $Log -AllowKnownLegacyInstall:$AllowKnownLegacyInstall }
 
+    $requirementsChanged = $false
+    if ($Action -eq 'Update') {
+        $requirementsChanged = Test-RequirementsChanged -Target $Target
+    }
+
     & $Progress 5
-    & $Log 'Checking for Python...'
-    $python = Find-Python
-    if (-not $python) {
-        Install-Python -Log $Log
+    $python = $null
+    if ($Action -ne 'Update') {
+        & $Log 'Checking for Python...'
         $python = Find-Python
         if (-not $python) {
-            throw 'Python was installed but is not yet on the system path. Restart Windows and run setup again.'
+            Install-Python -Log $Log
+            $python = Find-Python
+            if (-not $python) {
+                throw 'Python was installed but is not yet on the system path. Restart Windows and run setup again.'
+            }
         }
+        & $Log ('Using Python {0}' -f $python.Version)
+    } else {
+        & $Log 'Keeping the existing Python environment.'
     }
-    & $Log ('Using Python {0}' -f $python.Version)
     & $Progress 15
 
     if (-not (Test-Path -LiteralPath $Target)) {
@@ -432,22 +463,39 @@ function Install-Frivo {
     Copy-AppFiles -Target $Target -Log $Log
     & $Progress 30
 
-    $venvPython = New-Venv -Target $Target -Python $python -Log $Log
+    if ($Action -eq 'Update') {
+        $venvPython = Join-Path $Target '.venv\Scripts\python.exe'
+        if (-not (Test-Path -LiteralPath $venvPython -PathType Leaf)) {
+            throw 'The existing Python environment is incomplete. Choose Repair to rebuild Frivo.'
+        }
+        if ($requirementsChanged) {
+            & $Log 'Dependencies changed. Updating them...'
+            Sync-VenvDependencies -VenvPython $venvPython -Target $Target -Log $Log
+        } else {
+            & $Log 'Dependencies are unchanged; keeping the existing Python environment.'
+        }
+    } else {
+        $venvPython = New-Venv -Target $Target -Python $python -Log $Log
+    }
     & $Progress 65
 
-    & $Log 'Writing configuration files...'
-    $dataDir = $script:SetupDataDir
-    # PowerShell unwraps a one-item return value, so force an array before
-    # checking Count on a first install.
-    $created = @(New-FrivoDataFiles -Path $dataDir)
-    if ($created.Count -eq 0) {
-        & $Log 'Existing settings found and preserved.'
+    if ($Action -ne 'Update') {
+        & $Log 'Writing configuration files...'
+        $dataDir = $script:SetupDataDir
+        # PowerShell unwraps a one-item return value, so force an array before
+        # checking Count on a first install.
+        $created = @(New-FrivoDataFiles -Path $dataDir)
+        if ($created.Count -eq 0) {
+            & $Log 'Existing settings found and preserved.'
+        }
+        $script:certificateReady = Install-Certificate -Target $Target -VenvPython $venvPython -Log $Log
+        $script:localAddressReady = Install-LocalAddress -Log $Log
+    } else {
+        & $Log 'Keeping existing settings, certificate, and local address.'
+        $script:certificateReady = $true
     }
     & $Progress 70
-
-    $script:certificateReady = Install-Certificate -Target $Target -VenvPython $venvPython -Log $Log
     & $Progress 78
-    $script:localAddressReady = Install-LocalAddress -Log $Log
     & $Progress 82
 
     & $Log 'Creating launchers...'
@@ -471,7 +519,7 @@ function Install-Frivo {
     $launcherScript = Join-Path $Target 'installer\Launcher.ps1'
     $openArguments = ('--script "{0}"' -f $launcherScript)
 
-    if ($DesktopShortcut) {
+    if ($Action -ne 'Update' -and $DesktopShortcut) {
         & $Log 'Creating desktop shortcut...'
         if (Test-Path -LiteralPath $nativeLauncher -PathType Leaf) {
             New-Shortcut -Path (Join-Path ([Environment]::GetFolderPath('CommonDesktopDirectory')) 'Frivo.lnk') `
@@ -483,7 +531,7 @@ function Install-Frivo {
                          -WorkingDir $Target -Description $AppName -IconPath $iconPath
         }
     }
-    if ($StartMenuShortcut) {
+    if ($Action -ne 'Update' -and $StartMenuShortcut) {
         & $Log 'Creating Start Menu entry...'
         $programs = Join-Path ([Environment]::GetFolderPath('CommonStartMenu')) 'Programs'
         if (-not (Test-Path -LiteralPath $programs)) {
@@ -501,10 +549,14 @@ function Install-Frivo {
     }
     & $Progress 90
 
-    Set-StartupEntry -Target $Target -Enabled $Startup -RemoveLegacyTasks $AllowKnownLegacyInstall -Log $Log
+    if ($Action -ne 'Update') {
+        Set-StartupEntry -Target $Target -Enabled $Startup -RemoveLegacyTasks $AllowKnownLegacyInstall -Log $Log
+    }
     Register-Uninstaller -Target $Target -Log $Log
     & $Progress 95
-    Set-FirewallRule -Enabled $Firewall -Target $Target -Log $Log
+    if ($Action -ne 'Update') {
+        Set-FirewallRule -Enabled $Firewall -Target $Target -Log $Log
+    }
     & $Progress 100
 
     & $Log 'Installation complete.'
@@ -529,10 +581,17 @@ if ($Silent) {
     if ($existing.State -ne 'None' -and -not $knownExisting) {
         throw 'Frivo is already installed in a different folder. Uninstall it before choosing a new destination.'
     }
+    $effectiveAction = $Action
+    if ($effectiveAction -eq 'Install' -and $existing.State -eq 'Installed') {
+        $effectiveAction = 'Update'
+    } elseif ($effectiveAction -eq 'Install' -and $existing.State -eq 'Partial') {
+        $effectiveAction = 'Repair'
+    }
+    $cleanFirst = ($effectiveAction -eq 'Repair')
     Install-Frivo -Target $target `
         -DesktopShortcut (-not $NoShortcut) -StartMenuShortcut (-not $NoShortcut) `
         -Startup ([bool] $RunAtStartup) -Firewall ([bool] $AllowFirewall) `
-        -CleanFirst $knownExisting -AllowKnownLegacyInstall $knownExisting `
+        -CleanFirst $cleanFirst -AllowKnownLegacyInstall $knownExisting -Action $effectiveAction `
         -Log { param($m) if ($m) { Write-Host $m } } -Progress { param($p) } | Out-Null
     exit 0
 }
@@ -589,13 +648,17 @@ function New-Page {
 $pageExisting = New-Page
 $existingText = New-FrivoLabel -Theme $Theme -Parent $pageExisting -Text '' -X 28 -Y 10 -W 564 -H 88 -Font $Theme.FontUI -Color $Theme.Ink
 
-$cardExisting = New-FrivoCard -Theme $Theme -Parent $pageExisting -X 24 -Y 104 -W 572 -H 136
-$radioRepair = New-FrivoRadio -Theme $Theme -Parent $cardExisting -Text '' -X 18 -Y 14 -W 536 -Checked $true
-$repairNote  = New-FrivoLabel -Theme $Theme -Parent $cardExisting -Text '' -X 38 -Y 36 -W 516 -H 30 -Font $Theme.FontSmall -Color $Theme.Dim
-$radioRemove = New-FrivoRadio -Theme $Theme -Parent $cardExisting -Text ('Uninstall {0}' -f $AppName) -X 18 -Y 74 -W 536
+$cardExisting = New-FrivoCard -Theme $Theme -Parent $pageExisting -X 24 -Y 104 -W 572 -H 202
+$radioUpdate = New-FrivoRadio -Theme $Theme -Parent $cardExisting -Text 'Update Frivo' -X 18 -Y 14 -W 536 -Checked $true
+$updateNote  = New-FrivoLabel -Theme $Theme -Parent $cardExisting `
+    -Text 'Updates program files and keeps the existing Python environment. Dependencies are only updated when they change.' `
+    -X 38 -Y 36 -W 516 -H 30 -Font $Theme.FontSmall -Color $Theme.Dim
+$radioRepair = New-FrivoRadio -Theme $Theme -Parent $cardExisting -Text '' -X 18 -Y 76 -W 536
+$repairNote  = New-FrivoLabel -Theme $Theme -Parent $cardExisting -Text '' -X 38 -Y 98 -W 516 -H 30 -Font $Theme.FontSmall -Color $Theme.Dim
+$radioRemove = New-FrivoRadio -Theme $Theme -Parent $cardExisting -Text ('Uninstall {0}' -f $AppName) -X 18 -Y 138 -W 536
 $removeNote  = New-FrivoLabel -Theme $Theme -Parent $cardExisting `
     -Text 'Removes the program. You will be asked whether to keep your API keys and profiles.' `
-    -X 38 -Y 96 -W 516 -H 30 -Font $Theme.FontSmall -Color $Theme.Dim
+    -X 38 -Y 160 -W 516 -H 30 -Font $Theme.FontSmall -Color $Theme.Dim
 
 # ---------- welcome ----------
 $pageWelcome = New-Page
@@ -702,15 +765,23 @@ $certificateReady = $false
 $localAddressReady = $false
 $script:knownExisting = $false
 $script:installFailed = $false
+$script:installAction = 'Install'
 
 if ($existing.State -eq 'Installed') {
     $existingText.Text = ("{0} version {1} is already installed at:`r`n{2}`r`n`r`nSelect an option to continue." -f `
         $AppName, $(if ($existing.Version) { $existing.Version } else { 'unknown' }), $existing.Path)
-    $radioRepair.Text = 'Repair or reinstall'
-    $repairNote.Text  = 'Reinstalls the application files and dependencies. Your API keys, profiles and usage history are preserved.'
+    $radioRepair.Text = 'Repair Frivo'
+    $repairNote.Text  = 'Rebuilds program files and dependencies. Your API keys, profiles and usage history are preserved.'
     $txtPath.Text     = $existing.Path
 } elseif ($existing.State -eq 'Partial') {
     $existingText.Text = ("A previous installation of {0} did not complete.`r`n`r`nLocation:`r`n{1}`r`n`r`nSetup can remove the incomplete files and install again." -f $AppName, $existing.Path)
+    $radioUpdate.Visible = $false
+    $updateNote.Visible  = $false
+    $radioRepair.Checked = $true
+    $radioRepair.Location = New-Object System.Drawing.Point(18, 14)
+    $repairNote.Location  = New-Object System.Drawing.Point(38, 36)
+    $radioRemove.Location = New-Object System.Drawing.Point(18, 74)
+    $removeNote.Location  = New-Object System.Drawing.Point(38, 96)
     $radioRepair.Text = 'Clean up and install'
     $repairNote.Text  = 'Removes the incomplete installation, then installs normally. Your settings are not affected.'
     $txtPath.Text     = $existing.Path
@@ -748,7 +819,8 @@ $btnNext.Add_Click({
     }
     $current = $pages[$script:index]
 
-    # Existing-install page: uninstall instead of continuing.
+    # Existing-install page: uninstall instead of continuing; remember the
+    # requested update/repair behavior for the work step.
     if ($current.Panel -eq $pageExisting -and $radioRemove.Checked) {
         $un = Join-Path $existing.Path 'Uninstall.cmd'
         if (Test-Path -LiteralPath $un) {
@@ -761,6 +833,13 @@ $btnNext.Add_Click({
         }
         $form.Close()
         return
+    }
+    if ($current.Panel -eq $pageExisting) {
+        if ($radioUpdate.Visible -and $radioUpdate.Checked) {
+            $script:installAction = 'Update'
+        } else {
+            $script:installAction = 'Repair'
+        }
     }
 
     if ($current.Panel -eq $pageLocation) {
@@ -799,7 +878,8 @@ $btnNext.Add_Click({
                 -StartMenuShortcut $chkStart.Checked `
                 -Startup $chkStartup.Checked `
                 -Firewall $chkFirewall.Checked `
-                -CleanFirst $script:knownExisting -AllowKnownLegacyInstall $script:knownExisting `
+                -CleanFirst ($script:installAction -eq 'Repair') -AllowKnownLegacyInstall $script:knownExisting `
+                -Action $script:installAction `
                 -Log { param($m) Write-Log $m } `
                 -Progress { param($p) $bar.SetValue($p); [System.Windows.Forms.Application]::DoEvents() }
             $doneWarning.Visible = -not $script:certificateReady
