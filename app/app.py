@@ -225,6 +225,11 @@ DEFAULT_WHISPER_URL = "http://localhost:9000"
 LOCAL_CONNECT_TIMEOUT = 4
 LOCAL_READ_TIMEOUT = 180
 
+# A single Evora model cannot usefully process overlapping clips. Live
+# listening can otherwise send an in-progress clip and its final replacement
+# together, filling Evora's worker pool while the GPU works through a backlog.
+EVORA_TRANSCRIPTION_LOCK = threading.Lock()
+
 SERVER_LOG_PATH = os.path.join(DATA_DIR, "server.log")
 SERVER_LOG_LOCK = threading.Lock()
 
@@ -1312,12 +1317,13 @@ def local_whisper_transcribe(file_tuple, language=None):
     if language:
         data["language"] = language
 
-    response = requests.post(
-        f"{whisper_base_url()}/v1/audio/transcriptions",
-        files=files,
-        data=data,
-        timeout=(LOCAL_CONNECT_TIMEOUT, LOCAL_READ_TIMEOUT),
-    )
+    with EVORA_TRANSCRIPTION_LOCK:
+        response = requests.post(
+            f"{whisper_base_url()}/v1/audio/transcriptions",
+            files=files,
+            data=data,
+            timeout=(LOCAL_CONNECT_TIMEOUT, LOCAL_READ_TIMEOUT),
+        )
     response.raise_for_status()
     return (response.json().get("text") or "").strip()
 
@@ -1330,12 +1336,13 @@ def local_whisper_transcribe_verbose(file_tuple, want_speaker=True):
     translation is wrong" and "it heard the wrong person".
     """
     filename, audio_bytes, content_type = file_tuple
-    response = requests.post(
-        f"{whisper_base_url()}/v1/audio/transcriptions",
-        files={"file": (filename, audio_bytes, content_type)},
-        data={"speaker": "1" if want_speaker else "0"},
-        timeout=(LOCAL_CONNECT_TIMEOUT, LOCAL_READ_TIMEOUT),
-    )
+    with EVORA_TRANSCRIPTION_LOCK:
+        response = requests.post(
+            f"{whisper_base_url()}/v1/audio/transcriptions",
+            files={"file": (filename, audio_bytes, content_type)},
+            data={"speaker": "1" if want_speaker else "0"},
+            timeout=(LOCAL_CONNECT_TIMEOUT, LOCAL_READ_TIMEOUT),
+        )
     response.raise_for_status()
     payload = response.json()
     return (
