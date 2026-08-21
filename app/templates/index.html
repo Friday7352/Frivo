@@ -390,7 +390,7 @@
         <div class="composer">
           <button id="composerMoreBtn" class="composer-round" type="button"
                   aria-expanded="true" aria-controls="composerToggles"
-                  title="Show or hide the Speak and OSC switches">
+                  title="Show or hide the Speak and Chatbox switches">
             <svg class="icon-18"><use href="#i-plus"/></svg>
           </button>
 
@@ -424,8 +424,8 @@
             <span class="switch-track" aria-hidden="true"></span>
           </label>
           <label class="toggle-chip switch" id="oscSwitch"
-                 title="Show the spoken reply in your VRChat chatbox as it plays (OSC)">
-            <span class="switch-label">OSC</span>
+                 title="Show the spoken reply in your VRChat chatbox as it plays">
+            <span class="switch-label">Chatbox</span>
             <input type="checkbox" id="oscToggle">
             <span class="switch-track" aria-hidden="true"></span>
           </label>
@@ -905,6 +905,38 @@
             </div>
           </section>
 
+          <!-- OSC controls (mute-synced dictation) -->
+          <section class="settings-section">
+            <div class="settings-section-icon"><svg width="22" height="22"><use href="#i-osc"/></svg></div>
+            <div class="settings-section-body">
+              <div class="settings-section-head">
+                <div>
+                  <h3 class="settings-section-title">OSC controls</h3>
+                  <p class="settings-section-sub">Optional — separate from the chatbox above</p>
+                </div>
+              </div>
+              <div class="settings-card">
+                <label class="srow">
+                  <span class="srow-main">
+                    <span class="srow-label">Mute-synced dictation</span>
+                    <span class="srow-sub">Auto-disable dictation when you're muted in VRChat, auto-enable when you're not. Click the mic to override any time, same as always.</span>
+                  </span>
+                  <span class="switch">
+                    <input type="checkbox" id="oscControlToggle">
+                    <span class="switch-track" aria-hidden="true"></span>
+                  </span>
+                </label>
+                <button class="srow" type="button" data-settings-page="osc-listen">
+                  <span class="srow-main"><span class="srow-label">Listen port</span></span>
+                  <span class="srow-spacer"></span>
+                  <span class="srow-value srow-value--mono" id="settingsOscListenValue">9001</span>
+                  <span class="srow-chevron"><svg class="icon-16"><use href="#i-chevron"/></svg></span>
+                </button>
+                <p class="field-note" id="oscControlStatusNote">Off — dictation behaves as it always has.</p>
+              </div>
+            </div>
+          </section>
+
           <!-- Personality -->
           <section class="settings-section">
             <div class="settings-section-icon"><svg width="22" height="22"><use href="#i-spark"/></svg></div>
@@ -981,7 +1013,7 @@
               </label>
               <label class="srow">
                 <span class="srow-main">
-                  <span class="srow-label">Show Speak and OSC switches</span>
+                  <span class="srow-label">Show Speak and Chatbox switches</span>
                   <span class="srow-sub">Under the message box, beside Auto</span>
                 </span>
                 <span class="switch">
@@ -1167,6 +1199,27 @@
                 </p>
               </div>
             </div>
+          </div>
+
+          <div class="settings-page is-hidden" data-page="osc-listen" data-title="OSC listen port">
+            <div class="settings-card">
+              <div class="field">
+                <label for="oscListenPort">Listen port</label>
+                <input type="number" id="oscListenPort" class="port-input" min="1" max="65535" placeholder="9001">
+                <p class="field-note">
+                  Frivo listens on this UDP port for the avatar parameters VRChat sends out —
+                  9001 is VRChat's default. This only works when VRChat runs on this same PC:
+                  VRChat's OSC output always targets 127.0.0.1, so if VRChat is on a different
+                  machine you'd need an OSC router forwarding it here instead.
+                </p>
+              </div>
+            </div>
+            <p class="settings-note">
+              This is entirely separate from the chatbox address above — that one sends
+              messages <em>to</em> VRChat, this one only listens for what VRChat sends
+              <em>out</em>. Off by default; turning it on never changes anything else about
+              the app, and dictation still starts and stops on click exactly as it always has.
+            </p>
           </div>
 
         </div><!-- /settingsPages -->

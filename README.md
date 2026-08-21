@@ -1,8 +1,9 @@
 # Frivo
 
 Frivo is a local Windows dashboard for conversational AI, voice output,
-profiles, private speech transcription through Evora, and VRChat chatbox
-messages over OSC. It runs on your computer and opens in your web browser.
+profiles, private speech transcription through Evora, VRChat chatbox messages
+over OSC, and optional OSC-based mute-synced dictation. It runs on your
+computer and opens in your web browser.
 
 ## Screenshots
 
@@ -124,7 +125,7 @@ your avatar or send messages until you enable it.
    VRChat and Frivo run on the same PC.
 4. Leave the default port as `9000` unless your VRChat OSC configuration uses
    another port, then use **Test**.
-5. Turn on the **OSC** switch beside the message box when you want replies
+5. Turn on the **Chatbox** switch beside the message box when you want replies
    sent to the chatbox.
 
 VRChat chatbox messages are limited to 144 characters. Frivo automatically
@@ -134,6 +135,34 @@ so delivery cannot be confirmed by Frivo.
 
 If VRChat runs on another PC, that PC must allow inbound UDP traffic on the
 chosen OSC port (normally UDP 9000).
+
+## OSC controls (mute-synced dictation)
+
+A separate, optional feature — nothing here affects the chatbox above, or
+anything else about the app, unless you turn it on. With it off, Frivo behaves
+exactly as it always has.
+
+When enabled, Frivo listens for the avatar parameters VRChat itself sends out
+— specifically `MuteSelf`, the built-in parameter tracking your mic mute
+state — and uses it to keep dictation in sync with VRChat: dictation
+auto-disables the moment you mute, and auto-enables when you unmute. Clicking
+the mic button always still works exactly as it always has — it isn't locked
+out or overridden by this, it's just no longer the only way dictation turns on
+or off.
+
+1. In VRChat, enable OSC in the Options menu (the same setting the chatbox
+   feature above needs).
+2. In Frivo, open **Settings** > **OSC controls** and turn on **Mute-synced
+   dictation**.
+3. Leave **Listen port** at `9001` unless your VRChat OSC configuration uses
+   another port for its output.
+
+This only works when VRChat runs on the same PC as Frivo — VRChat always sends
+this data to `127.0.0.1`, with no setting to point it anywhere else. If VRChat
+runs on a different PC, this feature won't see anything unless something on
+your network (an OSC router) forwards that traffic to Frivo's machine; the
+chatbox feature above is unaffected either way, since it sends the other
+direction.
 
 ## Other devices on your network
 
