@@ -860,9 +860,10 @@ def queue_chatbox(text, host, port, sfx=True, page_seconds=OSC_PAGE_SECONDS_SPEA
 # button always still works — this only drives the same click handler the
 # button does, it doesn't lock anything out.
 #
-# VRChat only ever sends this to 127.0.0.1 — if VRChat runs on a different PC
-# than this server, an OSC router forwarding it here is needed for this
-# feature to see anything. Nothing about the rest of the app depends on it.
+# Binds 0.0.0.0, not 127.0.0.1, because VRChat need not be on this machine:
+# its OSC output destination is set with a launch option
+# (--osc=9000:<this-ip>:9001), so on a two-PC setup the packets arrive over
+# the network. Nothing about the rest of the app depends on this feature.
 
 DEFAULT_OSC_LISTEN_PORT = 9001
 
@@ -2834,13 +2835,25 @@ def osc_mute_status():
     with VRCHAT_MUTE_LOCK:
         muted = VRCHAT_MUTE_STATE.get("muted")
         updated_at = VRCHAT_MUTE_STATE.get("updated_at")
-    return jsonify(
-        {
-            "enabled": bool(CFG.get("osc_control_enabled", False)),
-            "muted": muted,
-            "updated_at": updated_at,
-        }
-    )
+
+    enabled = bool(CFG.get("osc_control_enabled", False))
+
+    payload = {
+        "enabled": enabled,
+        "muted": muted,
+        "updated_at": updated_at,
+    }
+
+    # Only worked out while the feature is on and nothing has been heard
+    # yet — which is exactly when the UI needs to offer the "point VRChat
+    # at this machine" hint, and stops the moment VRChat is talking. That
+    # keeps a per-3-second poll from doing socket work forever.
+    if enabled and muted is None:
+        addresses = [ip for ip in local_ip_addresses() if not ip.startswith("127.")]
+        payload["server_ip"] = addresses[0] if addresses else ""
+        payload["listen_port"] = CFG.get("osc_listen_port", DEFAULT_OSC_LISTEN_PORT)
+
+    return jsonify(payload)
 
 
 @app.route("/api/profiles", methods=["GET", "POST"])

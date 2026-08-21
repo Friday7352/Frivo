@@ -933,6 +933,25 @@
                   <span class="srow-chevron"><svg class="icon-16"><use href="#i-chevron"/></svg></span>
                 </button>
                 <p class="field-note" id="oscControlStatusNote">Off — dictation behaves as it always has.</p>
+                <!-- Shown only while the feature is on and nothing has been
+                     heard from VRChat, which is the one moment the launch
+                     option is worth explaining. Hidden again the instant a
+                     packet arrives. -->
+                <div class="srow srow--stacked is-hidden" id="oscControlHint">
+                  <span class="srow-label">VRChat on another PC?</span>
+                  <p class="field-note">
+                    Nothing heard yet. If VRChat runs on a different machine, paste this into
+                    Steam → right-click VRChat → Properties → Launch Options, then restart VRChat.
+                  </p>
+                  <div class="row">
+                    <input type="text" id="oscLaunchOption" readonly autocomplete="off">
+                    <button id="copyOscLaunchBtn" class="btn-ghost btn-sm" type="button">Copy</button>
+                  </div>
+                  <p class="field-note" id="oscLaunchOptionNote">
+                    Sends VRChat's OSC output here instead of to its own PC. Other OSC apps on
+                    that PC stop receiving while this is set — see the README if you need both.
+                  </p>
+                </div>
               </div>
             </div>
           </section>
@@ -1201,19 +1220,24 @@
             </div>
           </div>
 
-          <div class="settings-page is-hidden" data-page="osc-listen" data-title="OSC listen port">
+          <div class="settings-page is-hidden" data-page="osc-listen" data-title="Listen port">
             <div class="settings-card">
               <div class="field">
                 <label for="oscListenPort">Listen port</label>
                 <input type="number" id="oscListenPort" class="port-input" min="1" max="65535" placeholder="9001">
                 <p class="field-note">
                   Frivo listens on this UDP port for the avatar parameters VRChat sends out —
-                  9001 is VRChat's default. This only works when VRChat runs on this same PC:
-                  VRChat's OSC output always targets 127.0.0.1, so if VRChat is on a different
-                  machine you'd need an OSC router forwarding it here instead.
+                  9001 is VRChat's default, so this rarely needs changing.
                 </p>
               </div>
             </div>
+            <p class="settings-note">
+              If VRChat runs on this same machine, nothing else is needed. If it runs
+              elsewhere, point its output here with a launch option in Steam — the panel
+              above shows the exact line once this is switched on. The installer's firewall
+              rule already covers this port. See the README if you also run other OSC apps
+              on the VRChat PC.
+            </p>
             <p class="settings-note">
               This is entirely separate from the chatbox address above — that one sends
               messages <em>to</em> VRChat, this one only listens for what VRChat sends

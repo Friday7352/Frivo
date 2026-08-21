@@ -163,6 +163,9 @@ const oscSwitch = $("oscSwitch");
 const oscControlToggle = $("oscControlToggle");
 const oscListenPort = $("oscListenPort");
 const oscControlStatusNote = $("oscControlStatusNote");
+const oscControlHint = $("oscControlHint");
+const oscLaunchOption = $("oscLaunchOption");
+const copyOscLaunchBtn = $("copyOscLaunchBtn");
 
 const speakToggle = $("speakToggle");
 
@@ -1953,11 +1956,56 @@ function updateOscControlStatusNote() {
   }
 }
 
+/**
+ * The launch-option hint only earns its place while the feature is on and
+ * nothing has arrived — the two states where someone is looking at this
+ * panel wondering why it isn't working. Once VRChat is heard it goes away
+ * for good, rather than sitting there as permanent setup clutter.
+ */
+function updateOscControlHint(data) {
+  if (!oscControlHint) return;
+  const waiting = oscControlEnabled && lastKnownMuted === null;
+  oscControlHint.classList.toggle("is-hidden", !waiting);
+  if (!waiting || !oscLaunchOption) return;
+
+  // Server-supplied rather than guessed from location.hostname: the browser
+  // may be on a third machine, or reaching this over frivo.local, and the
+  // launch option needs the address VRChat should send to.
+  const ip = (data && data.server_ip) || "";
+  const port = (data && data.listen_port) || 9001;
+  oscLaunchOption.value = ip
+    ? `--osc=9000:${ip}:${port}`
+    : `--osc=9000:THIS-PC-IP:${port}`;
+}
+
 if (oscControlToggle) {
   oscControlToggle.addEventListener("change", () => {
     oscControlEnabled = oscControlToggle.checked;
     lastKnownMuted = null;
     updateOscControlStatusNote();
+    // Hidden until the next poll confirms the server agrees the feature is
+    // on — the toggle isn't saved yet at this point.
+    if (oscControlHint) oscControlHint.classList.add("is-hidden");
+  });
+}
+
+if (copyOscLaunchBtn) {
+  copyOscLaunchBtn.addEventListener("click", async () => {
+    const text = oscLaunchOption ? oscLaunchOption.value : "";
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      copyOscLaunchBtn.textContent = "Copied";
+      setTimeout(() => { copyOscLaunchBtn.textContent = "Copy"; }, 1500);
+    } catch (err) {
+      // Clipboard needs a secure context, which a LAN http:// address
+      // isn't. Select it instead so Ctrl+C still works.
+      if (oscLaunchOption) {
+        oscLaunchOption.focus();
+        oscLaunchOption.select();
+      }
+      setStatus("Couldn't copy automatically — it's selected, press Ctrl+C.", true);
+    }
   });
 }
 
@@ -1989,6 +2037,7 @@ async function pollMuteStatus() {
       oscControlEnabled = false;
       lastKnownMuted = null;
       updateOscControlStatusNote();
+      updateOscControlHint(data);
       return;
     }
     oscControlEnabled = true;
@@ -1996,6 +2045,7 @@ async function pollMuteStatus() {
       // VRChat hasn't sent a MuteSelf update yet — nothing to react to.
       // Dictation is left exactly as it is rather than guessed at.
       updateOscControlStatusNote();
+      updateOscControlHint(data);
       return;
     }
     // React only on an actual transition. Re-applying the same state every
@@ -2007,6 +2057,7 @@ async function pollMuteStatus() {
       else autoStartDictation();
     }
     updateOscControlStatusNote();
+    updateOscControlHint(data);
   } catch (err) {
     // Server unreachable — leave dictation exactly as it is.
   }
