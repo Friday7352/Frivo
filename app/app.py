@@ -622,24 +622,11 @@ def load_config():
         "whisper_start_command": "",
         # Optional OpenAI fallback when a selected local provider is unavailable.
         "allow_openai_fallback": False,
-        # VRChat chatbox over OSC. Blank host = the feature is off, since
-        # there's no sensible guess: the packets have to reach whichever
-        # machine is running VRChat, which usually isn't this one.
-        "osc_host": "",
-        "osc_port": DEFAULT_OSC_PORT,
-        "osc_page_seconds_speaking": OSC_PAGE_SECONDS_SPEAKING,
-        "osc_page_seconds_silent": OSC_PAGE_SECONDS_SILENT,
-        # VRChat plays a notification sound for each chatbox message. Left
-        # on to match typing into the chatbox by hand; turn it off if paged
-        # messages get annoying.
-        "osc_sfx": True,
-        # Separate feature: Frivo listens for VRChat's own OSC output and
-        # syncs dictation to your mute state. Off by default — nothing about
-        # the app's existing behaviour changes unless this is turned on.
-        # Independent of the chatbox settings above: those send TO VRChat,
-        # this only ever listens for what VRChat sends OUT.
-        "osc_control_enabled": False,
-        "osc_listen_port": DEFAULT_OSC_LISTEN_PORT,
+        # VRChat, through FrivOSC. Frivo no longer speaks OSC itself —
+        # FrivOSC runs on the VRChat PC and owns the protocol, the ports
+        # and the paging. All that is left here is whether the feature is
+        # on, so there is no address or port for anyone to get wrong.
+        "osc_enabled": False,
     }
     if os.path.exists(CONFIG_PATH):
         try:
@@ -659,338 +646,6 @@ def load_config():
 def save_config(cfg):
     with open(CONFIG_PATH, "w", encoding="utf-8") as f:
         json.dump(cfg, f, indent=2)
-
-
-# =============================================================================
-# OSC -> VRChat chatbox
-# =============================================================================
-# Puts whatever you send into your VRChat chatbox, so people who can't hear
-# the spoken reply can read what you said.
-#
-# OSC messages are sent directly over UDP. VRChat limits chatbox messages to
-# 144 characters and rate-limits sends, so text is paged through one worker.
-
-OSC_CHATBOX_LIMIT = 144
-DEFAULT_OSC_PORT = 9000
-
-# Text pages advance faster when speech is playing than when text is read.
-OSC_PAGE_SECONDS_SPEAKING = 1.6
-OSC_PAGE_SECONDS_SILENT = 4.0
-
-# Minimum pacing interval required to avoid VRChat chatbox rate limits.
-OSC_MIN_GAP_SECONDS = 1.5
-OSC_MAX_GAP_SECONDS = 60.0
-
-
-def clamp_page_seconds(value, default):
-    try:
-        seconds = float(value)
-    except (TypeError, ValueError):
-        return default
-    return max(OSC_MIN_GAP_SECONDS, min(OSC_MAX_GAP_SECONDS, seconds))
-
-
-def osc_string(text):
-    """OSC strings are null-terminated and padded to a multiple of 4 bytes."""
-    data = text.encode("utf-8") + b"\0"
-    padding = (4 - len(data) % 4) % 4
-    return data + b"\0" * padding
-
-
-def osc_message(address, *args):
-    tags = ","
-    payload = b""
-    for arg in args:
-        # bool first: in Python it's a subclass of int, so checking int
-        # first would pack True as the integer 1 and VRChat would reject
-        # the type tag.
-        if isinstance(arg, bool):
-            tags += "T" if arg else "F"
-        elif isinstance(arg, int):
-            tags += "i"
-            payload += struct.pack(">i", arg)
-        elif isinstance(arg, float):
-            tags += "f"
-            payload += struct.pack(">f", arg)
-        else:
-            tags += "s"
-            payload += osc_string(str(arg))
-    return osc_string(address) + osc_string(tags) + payload
-
-
-def chatbox_pages(text, limit=OSC_CHATBOX_LIMIT):
-    """
-    Splits text into chatbox-sized pages, breaking at sentence ends where it
-    can and word boundaries otherwise, so a page never ends mid-word.
-
-    When there's more than one page each gets a " (1/3)" counter — without
-    it a reader has no way to know the message they're looking at was the
-    middle of something, since VRChat only ever shows the most recent one.
-    """
-    text = " ".join((text or "").split())
-    if not text:
-        return []
-    if len(text) <= limit:
-        return [text]
-
-    def pack(budget):
-        pages, current = [], ""
-        # Two alternatives, not one: the first keeps end punctuation with
-        # the sentence it closes, and the second catches a run of .!? that
-        # isn't preceded by anything — a leading "!!!", or an ellipsis of
-        # its own between two sentences. Without it the regex simply skips
-        # over those characters and they vanish from the message.
-        for sentence in re.findall(r"[^.!?]+[.!?]*|[.!?]+", text) or [text]:
-            sentence = sentence.strip()
-            while len(sentence) > budget:
-                # One sentence longer than a whole page: break at the last
-                # space that fits, or hard-cut if there isn't one.
-                cut = sentence.rfind(" ", 0, budget + 1)
-                if cut <= 0:
-                    cut = budget
-                if current:
-                    pages.append(current)
-                    current = ""
-                pages.append(sentence[:cut].strip())
-                sentence = sentence[cut:].strip()
-            if not sentence:
-                continue
-            if not current:
-                current = sentence
-            elif len(current) + 1 + len(sentence) <= budget:
-                current = f"{current} {sentence}"
-            else:
-                pages.append(current)
-                current = sentence
-        if current:
-            pages.append(current)
-        return pages
-
-    pages = pack(limit)
-    if len(pages) <= 1:
-        return pages
-
-    # Re-pack with room for the counter. Its width depends on the number of
-    # pages, which depends on the packing — so pack, measure, pack again.
-    # One pass is enough in practice; the loop guards the case where making
-    # room for the suffix pushes the text into another page.
-    #
-    # The repacked list is adopted *before* the settled check, not after —
-    # keeping the wider packing once the count happened to match is what
-    # let a page come out at 150 characters with the counter attached.
-    for _ in range(3):
-        suffix = len(f" ({len(pages)}/{len(pages)})")
-        repacked = pack(limit - suffix)
-        settled = len(repacked) == len(pages)
-        pages = repacked
-        if settled:
-            break
-    total = len(pages)
-    return [f"{p} ({i}/{total})" for i, p in enumerate(pages, 1)]
-
-
-# One queue and worker enforce a global OSC pacing limit.
-OSC_QUEUE = queue.Queue(maxsize=40)
-OSC_WORKER = None
-OSC_WORKER_LOCK = threading.Lock()
-
-
-def osc_send(host, port, message):
-    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
-        sock.sendto(message, (host, int(port)))
-
-
-def osc_worker_loop():
-    last_send = 0.0
-    while True:
-        host, port, pages, sfx, page_seconds = OSC_QUEUE.get()
-        try:
-            for index, page in enumerate(pages):
-                # Floored regardless of the setting: the queue is shared, so
-                # this also spaces the last page of one message from the
-                # first page of the next.
-                wait = max(OSC_MIN_GAP_SECONDS, page_seconds)
-                gap = wait - (time.monotonic() - last_send)
-                if gap > 0:
-                    time.sleep(gap)
-                # The typing indicator stays lit while there are more pages
-                # coming, which is the only cue a reader gets that the
-                # message they're reading isn't the end of it.
-                more = index < len(pages) - 1
-                osc_send(host, port, osc_message("/chatbox/input", page, True, sfx))
-                osc_send(host, port, osc_message("/chatbox/typing", more))
-                last_send = time.monotonic()
-        except Exception as e:
-            # UDP gives no delivery signal, so the only failures visible
-            # here are local ones — an unresolvable host, mostly.
-            print(f"[osc] send failed: {e}", flush=True)
-        finally:
-            OSC_QUEUE.task_done()
-
-
-def ensure_osc_worker():
-    global OSC_WORKER
-    with OSC_WORKER_LOCK:
-        if OSC_WORKER is None or not OSC_WORKER.is_alive():
-            OSC_WORKER = threading.Thread(target=osc_worker_loop, daemon=True)
-            OSC_WORKER.start()
-
-
-def queue_chatbox(text, host, port, sfx=True, page_seconds=OSC_PAGE_SECONDS_SPEAKING):
-    pages = chatbox_pages(text)
-    if not pages:
-        return 0
-    ensure_osc_worker()
-    try:
-        OSC_QUEUE.put_nowait((host, int(port), pages, bool(sfx), float(page_seconds)))
-    except queue.Full:
-        raise RuntimeError("Too many messages queued for VRChat — slow down.")
-    return len(pages)
-
-
-# =============================================================================
-# OSC <- VRChat avatar parameters (mute-synced dictation)
-# =============================================================================
-# Separate from the chatbox feature above, and off by default. VRChat sends
-# a live stream of OSC messages about your avatar's state — including
-# MuteSelf, the built-in parameter that tracks your mic mute status — out to
-# 127.0.0.1:9001 by default. This listens for that one parameter and uses it
-# to automatically enable/disable dictation, so you don't have to remember to
-# click the mic every time you unmute in VRChat. Manually clicking the mic
-# button always still works — this only drives the same click handler the
-# button does, it doesn't lock anything out.
-#
-# Binds 0.0.0.0, not 127.0.0.1, because VRChat need not be on this machine:
-# its OSC output destination is set with a launch option
-# (--osc=9000:<this-ip>:9001), so on a two-PC setup the packets arrive over
-# the network. Nothing about the rest of the app depends on this feature.
-
-DEFAULT_OSC_LISTEN_PORT = 9001
-
-VRCHAT_MUTE_STATE = {"muted": None, "updated_at": None}
-VRCHAT_MUTE_LOCK = threading.Lock()
-
-OSC_LISTENER_THREAD = None
-OSC_LISTENER_STOP = threading.Event()
-OSC_LISTENER_LOCK = threading.Lock()
-
-
-def osc_read_string(data, offset):
-    """Reverse of osc_string(): read a null-terminated, 4-byte-padded string."""
-    end = data.index(b"\0", offset)
-    text = data[offset:end].decode("utf-8", errors="replace")
-    consumed = end + 1 - offset
-    padded = consumed + ((4 - consumed % 4) % 4)
-    return text, offset + padded
-
-
-def osc_parse_message(data):
-    """
-    Decodes a single incoming OSC message into (address, args). Anything
-    that doesn't parse — malformed or truncated packets, blob arguments —
-    comes back as ("", []) rather than raising: a listener on an open UDP
-    port has to expect noise, and one bad packet shouldn't take it down.
-    """
-    try:
-        address, offset = osc_read_string(data, 0)
-        if not address.startswith("/") or offset >= len(data) or data[offset:offset + 1] != b",":
-            return address, []
-        tags, offset = osc_read_string(data, offset)
-        args = []
-        for tag in tags[1:]:
-            if tag == "i":
-                args.append(struct.unpack_from(">i", data, offset)[0])
-                offset += 4
-            elif tag == "f":
-                args.append(struct.unpack_from(">f", data, offset)[0])
-                offset += 4
-            elif tag == "s":
-                value, offset = osc_read_string(data, offset)
-                args.append(value)
-            elif tag == "T":
-                args.append(True)
-            elif tag == "F":
-                args.append(False)
-            elif tag in ("N", "I"):
-                args.append(None)
-            else:
-                # Blob and other rarer tags aren't needed for avatar
-                # parameters — stop rather than guess how much to skip.
-                break
-        return address, args
-    except (ValueError, IndexError, struct.error, UnicodeError):
-        return "", []
-
-
-def handle_incoming_osc(address, args):
-    if address == "/avatar/parameters/MuteSelf" and args:
-        muted = bool(args[0])
-        with VRCHAT_MUTE_LOCK:
-            VRCHAT_MUTE_STATE["muted"] = muted
-            VRCHAT_MUTE_STATE["updated_at"] = time.time()
-
-
-def osc_listener_loop(port):
-    try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        sock.bind(("0.0.0.0", port))
-    except OSError as e:
-        print(f"[osc] listener couldn't bind UDP {port}: {e}", flush=True)
-        return
-    # A timeout rather than a blocking recvfrom is what lets this loop notice
-    # OSC_LISTENER_STOP without needing a cross-thread socket close, which is
-    # racy on some platforms.
-    sock.settimeout(1.0)
-    try:
-        while not OSC_LISTENER_STOP.is_set():
-            try:
-                data, _addr = sock.recvfrom(4096)
-            except socket.timeout:
-                continue
-            except OSError:
-                break
-            try:
-                address, args = osc_parse_message(data)
-                handle_incoming_osc(address, args)
-            except Exception:
-                continue
-    finally:
-        sock.close()
-
-
-def start_osc_listener(port):
-    """
-    (Re)starts the listener on the given port. Safe to call whether or not
-    one is already running — an existing thread is stopped and joined first,
-    so changing the port while the feature is on just restarts it cleanly
-    rather than silently no-opping.
-    """
-    global OSC_LISTENER_THREAD
-    with OSC_LISTENER_LOCK:
-        if OSC_LISTENER_THREAD is not None and OSC_LISTENER_THREAD.is_alive():
-            OSC_LISTENER_STOP.set()
-            OSC_LISTENER_THREAD.join(timeout=2.0)
-        OSC_LISTENER_STOP.clear()
-        with VRCHAT_MUTE_LOCK:
-            VRCHAT_MUTE_STATE["muted"] = None
-            VRCHAT_MUTE_STATE["updated_at"] = None
-        OSC_LISTENER_THREAD = threading.Thread(
-            target=osc_listener_loop, args=(port,), daemon=True
-        )
-        OSC_LISTENER_THREAD.start()
-
-
-def stop_osc_listener():
-    global OSC_LISTENER_THREAD
-    with OSC_LISTENER_LOCK:
-        OSC_LISTENER_STOP.set()
-        if OSC_LISTENER_THREAD is not None:
-            OSC_LISTENER_THREAD.join(timeout=2.0)
-            OSC_LISTENER_THREAD = None
-        with VRCHAT_MUTE_LOCK:
-            VRCHAT_MUTE_STATE["muted"] = None
-            VRCHAT_MUTE_STATE["updated_at"] = None
 
 
 def load_profiles():
@@ -1985,42 +1640,6 @@ def settings():
         if "allow_openai_fallback" in data:
             CFG["allow_openai_fallback"] = bool(data.get("allow_openai_fallback"))
 
-        if "osc_host" in data:
-            CFG["osc_host"] = (data.get("osc_host") or "").strip()
-        if "osc_port" in data:
-            try:
-                port = int(data.get("osc_port") or DEFAULT_OSC_PORT)
-                CFG["osc_port"] = port if 1 <= port <= 65535 else DEFAULT_OSC_PORT
-            except (TypeError, ValueError):
-                CFG["osc_port"] = DEFAULT_OSC_PORT
-        if "osc_sfx" in data:
-            CFG["osc_sfx"] = bool(data.get("osc_sfx"))
-        if "osc_page_seconds_speaking" in data:
-            CFG["osc_page_seconds_speaking"] = clamp_page_seconds(
-                data.get("osc_page_seconds_speaking"), OSC_PAGE_SECONDS_SPEAKING
-            )
-        if "osc_page_seconds_silent" in data:
-            CFG["osc_page_seconds_silent"] = clamp_page_seconds(
-                data.get("osc_page_seconds_silent"), OSC_PAGE_SECONDS_SILENT
-            )
-
-        if "osc_control_enabled" in data:
-            CFG["osc_control_enabled"] = bool(data.get("osc_control_enabled"))
-        if "osc_listen_port" in data:
-            try:
-                port = int(data.get("osc_listen_port") or DEFAULT_OSC_LISTEN_PORT)
-                CFG["osc_listen_port"] = port if 1 <= port <= 65535 else DEFAULT_OSC_LISTEN_PORT
-            except (TypeError, ValueError):
-                CFG["osc_listen_port"] = DEFAULT_OSC_LISTEN_PORT
-        # Applied after both fields above are settled, so a request that
-        # changes the enabled flag and the port together only restarts the
-        # listener once, on the final values — not once per field.
-        if "osc_control_enabled" in data or "osc_listen_port" in data:
-            if CFG.get("osc_control_enabled"):
-                start_osc_listener(CFG.get("osc_listen_port", DEFAULT_OSC_LISTEN_PORT))
-            else:
-                stop_osc_listener()
-
         save_config(CFG)
         return jsonify({"ok": True})
 
@@ -2041,19 +1660,7 @@ def settings():
             "whisper_url": CFG.get("whisper_url", DEFAULT_WHISPER_URL),
             "whisper_start_command": CFG.get("whisper_start_command", ""),
             "allow_openai_fallback": bool(CFG.get("allow_openai_fallback", False)),
-            "osc_host": CFG.get("osc_host", ""),
-            "osc_port": CFG.get("osc_port", DEFAULT_OSC_PORT),
-            "osc_sfx": bool(CFG.get("osc_sfx", True)),
-            "osc_chatbox_limit": OSC_CHATBOX_LIMIT,
-            "osc_page_seconds_speaking": CFG.get(
-                "osc_page_seconds_speaking", OSC_PAGE_SECONDS_SPEAKING
-            ),
-            "osc_page_seconds_silent": CFG.get(
-                "osc_page_seconds_silent", OSC_PAGE_SECONDS_SILENT
-            ),
-            "osc_min_page_seconds": OSC_MIN_GAP_SECONDS,
-            "osc_control_enabled": bool(CFG.get("osc_control_enabled", False)),
-            "osc_listen_port": CFG.get("osc_listen_port", DEFAULT_OSC_LISTEN_PORT),
+            "osc_enabled": bool(CFG.get("osc_enabled", False)),
             "elevenlabs_key_set": bool(CFG["elevenlabs_api_key"]),
             "voice_id": CFG["voice_id"],
             "voice_name": CFG.get("voice_name", ""),
@@ -2732,128 +2339,178 @@ def set_active_voice():
     return jsonify({"ok": True, "scope": "profile", "profile": match})
 
 
+# =============================================================================
+# FrivOSC — the VRChat bridge
+# =============================================================================
+# Frivo does not speak OSC. VRChat only ever sends and receives it on
+# 127.0.0.1, so a server on another machine cannot take part; FrivOSC runs
+# on the VRChat PC, where that loopback traffic already is, and talks to
+# Frivo over HTTP instead.
+#
+# That leaves Frivo with the easy half. Outbound: queue text, and FrivOSC
+# collects it. Inbound: FrivOSC reports the microphone. No ports, no
+# addresses, no paging, no rate limits — all of that now lives on the side
+# of the wire that can actually see VRChat.
+#
+# Everything here is in memory on purpose. A chatbox message that was not
+# collected before a restart is stale by definition, and the mute state is
+# only meaningful while a companion is connected to report it.
+
+# Held briefly and only by FrivOSC, so a small queue is the right size. If
+# it ever fills, the oldest go first: in a chatbox, a backlog nobody read
+# is worth less than the line being said now.
+FRIVOSC_OUTBOX_MAX = 20
+
+# How long a report stays trustworthy. FrivOSC heartbeats every 5s, so
+# three missed heartbeats means it is gone rather than quiet — and a
+# crashed companion must not leave the UI believing the mic is live.
+FRIVOSC_STALE_SECONDS = 15.0
+
+FRIVOSC_STATE = {
+    "connected_at": None,
+    "last_seen": None,
+    "version": "",
+    "hostname": "",
+    "muted": None,
+}
+FRIVOSC_OUTBOX = []
+FRIVOSC_LOCK = threading.Lock()
+
+
+def frivosc_touch(**fields):
+    with FRIVOSC_LOCK:
+        FRIVOSC_STATE["last_seen"] = time.time()
+        FRIVOSC_STATE.update(fields)
+
+
+def frivosc_status():
+    """
+    Connection state as the browser needs to reason about it.
+
+    `muted` is None whenever there is nothing trustworthy to report — no
+    companion, or one that has stopped heartbeating. That is deliberately
+    not the same as False: reporting "unmuted" for a companion that died
+    would have the UI enable dictation for a microphone it cannot see.
+    """
+    with FRIVOSC_LOCK:
+        last_seen = FRIVOSC_STATE["last_seen"]
+        fresh = last_seen is not None and (time.time() - last_seen) < FRIVOSC_STALE_SECONDS
+        return {
+            "connected": fresh,
+            "version": FRIVOSC_STATE["version"] if fresh else "",
+            "hostname": FRIVOSC_STATE["hostname"] if fresh else "",
+            "last_seen": last_seen,
+            "muted": FRIVOSC_STATE["muted"] if fresh else None,
+        }
+
+
+def frivosc_enqueue(text, speaking=True):
+    """Queues chatbox text for FrivOSC to collect. Returns the message id."""
+    text = " ".join((text or "").split())
+    if not text:
+        return None
+    message = {
+        "id": uuid.uuid4().hex,
+        "text": text,
+        "speaking": bool(speaking),
+        "sfx": True,
+        "queued_at": time.time(),
+    }
+    with FRIVOSC_LOCK:
+        FRIVOSC_OUTBOX.append(message)
+        while len(FRIVOSC_OUTBOX) > FRIVOSC_OUTBOX_MAX:
+            FRIVOSC_OUTBOX.pop(0)
+    return message["id"]
+
+
+@app.route("/api/frivosc/hello", methods=["POST"])
+def frivosc_hello():
+    """First contact. Also what Setup's Test button calls to prove a route."""
+    data = request.get_json(silent=True) or {}
+    with FRIVOSC_LOCK:
+        if FRIVOSC_STATE["connected_at"] is None:
+            FRIVOSC_STATE["connected_at"] = time.time()
+    frivosc_touch(
+        version=str(data.get("version") or ""),
+        hostname=str(data.get("hostname") or ""),
+    )
+    return jsonify({"ok": True, "server": APP_NAME, "poll_ms": 500})
+
+
+@app.route("/api/frivosc/state", methods=["POST"])
+def frivosc_state():
+    """Mute state, sent on change and as a heartbeat."""
+    data = request.get_json(silent=True) or {}
+    muted = data.get("muted")
+    frivosc_touch(muted=None if muted is None else bool(muted))
+    return jsonify({"ok": True})
+
+
+@app.route("/api/frivosc/outbox")
+def frivosc_outbox():
+    """
+    Pending chatbox messages, handed over and cleared in one step.
+
+    Polling this is also a heartbeat, so a companion that is connected but
+    has heard nothing from VRChat yet still counts as present.
+    """
+    frivosc_touch()
+    if not CFG.get("osc_enabled", False):
+        # Switched off mid-session: drop anything already queued rather
+        # than delivering it the moment it is switched back on.
+        with FRIVOSC_LOCK:
+            FRIVOSC_OUTBOX.clear()
+        return jsonify({"messages": [], "enabled": False})
+    with FRIVOSC_LOCK:
+        messages = list(FRIVOSC_OUTBOX)
+        FRIVOSC_OUTBOX.clear()
+    return jsonify({"messages": messages, "enabled": True})
+
+
+@app.route("/api/frivosc/ack", methods=["POST"])
+def frivosc_ack():
+    """
+    Acknowledgement that a message reached VRChat's chatbox.
+
+    Nothing is retried on the strength of this — OSC is UDP and delivery
+    was never observable. It exists so the page count can be reported back
+    and so a companion that is working says so.
+    """
+    data = request.get_json(silent=True) or {}
+    frivosc_touch()
+    return jsonify({"ok": True, "id": data.get("id"), "pages": data.get("pages")})
+
+
+@app.route("/api/frivosc/status")
+def frivosc_status_route():
+    """Polled by the browser: is FrivOSC there, and what is the mic doing."""
+    status = frivosc_status()
+    status["enabled"] = bool(CFG.get("osc_enabled", False))
+    return jsonify(status)
+
+
 @app.route("/api/osc/chatbox", methods=["POST"])
 def osc_chatbox():
     """
-    Puts text into the VRChat chatbox.
-
-    Returns as soon as the message is queued, not when it lands: OSC is UDP,
-    so there is no acknowledgement to wait for and nothing here can tell the
-    difference between VRChat receiving it and the packet being dropped. The
-    page count comes back so the UI can say how long it'll take to scroll
-    through rather than implying it appeared instantly.
+    Kept at its original address so the front end did not have to change
+    shape, but it now queues for FrivOSC instead of sending UDP itself.
     """
-    host = (CFG.get("osc_host") or "").strip()
-    if not host:
-        return jsonify({"error": "Set the VRChat PC's address in Settings first."}), 400
+    if not CFG.get("osc_enabled", False):
+        return jsonify({"error": "VRChat OSC is turned off in Settings."}), 400
+
+    status = frivosc_status()
+    if not status["connected"]:
+        return jsonify({"error": "FrivOSC isn't connected. Start it on your VRChat PC."}), 503
 
     data = request.get_json(force=True)
     text = (data.get("text") or "").strip()
     if not text:
         return jsonify({"error": "Nothing to send."}), 400
 
-    # Which pacing applies depends on whether this message is also being
-    # spoken: read-only text needs longer on screen than a caption running
-    # alongside a voice that's already saying it.
-    speaking = bool(data.get("speaking"))
-    page_seconds = clamp_page_seconds(
-        CFG.get(
-            "osc_page_seconds_speaking" if speaking else "osc_page_seconds_silent",
-            OSC_PAGE_SECONDS_SPEAKING if speaking else OSC_PAGE_SECONDS_SILENT,
-        ),
-        OSC_PAGE_SECONDS_SPEAKING if speaking else OSC_PAGE_SECONDS_SILENT,
-    )
-
-    try:
-        pages = queue_chatbox(
-            text,
-            host,
-            CFG.get("osc_port", DEFAULT_OSC_PORT),
-            CFG.get("osc_sfx", True),
-            page_seconds,
-        )
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-    return jsonify(
-        {
-            "ok": True,
-            "pages": pages,
-            "page_seconds": page_seconds,
-            "delivery": "unconfirmed",
-        }
-    )
-
-
-@app.route("/api/osc/test", methods=["POST"])
-def osc_test():
-    """
-    Sends a known string, so the one thing you can't otherwise check —
-    whether packets from this machine reach VRChat at all — can be checked
-    by looking at your own chatbox.
-
-    Takes the address from the request rather than the saved config, so the
-    field can be tried before it's saved.
-    """
-    data = request.get_json(force=True)
-    host = (data.get("osc_host") or CFG.get("osc_host") or "").strip()
-    port = data.get("osc_port") or CFG.get("osc_port", DEFAULT_OSC_PORT)
-    if not host:
-        return jsonify({"error": "Enter the VRChat PC's address first."}), 400
-
-    try:
-        osc_send(
-            host,
-            int(port),
-            osc_message("/chatbox/input", "Frivo is connected.", True, True),
-        )
-    except Exception as e:
-        # Reaching here means the packet couldn't even leave — a bad
-        # hostname, usually. A silent success proves much less.
-        return jsonify({"error": f"Couldn't send: {e}"}), 502
-
-    return jsonify(
-        {
-            "ok": True,
-            "host": host,
-            "port": int(port),
-            "note": "Sent. UDP has no receipt, so check your own chatbox in VRChat.",
-        }
-    )
-
-
-@app.route("/api/osc/mute-status")
-def osc_mute_status():
-    """
-    Polled by the browser to sync dictation with VRChat's mute state.
-
-    `muted` is null until at least one MuteSelf update has actually been
-    seen — that's the difference between "you're unmuted" and "VRChat
-    hasn't said anything yet", which the frontend needs in order to not
-    guess wrong the moment this feature is turned on.
-    """
-    with VRCHAT_MUTE_LOCK:
-        muted = VRCHAT_MUTE_STATE.get("muted")
-        updated_at = VRCHAT_MUTE_STATE.get("updated_at")
-
-    enabled = bool(CFG.get("osc_control_enabled", False))
-
-    payload = {
-        "enabled": enabled,
-        "muted": muted,
-        "updated_at": updated_at,
-    }
-
-    # Only worked out while the feature is on and nothing has been heard
-    # yet — which is exactly when the UI needs to offer the "point VRChat
-    # at this machine" hint, and stops the moment VRChat is talking. That
-    # keeps a per-3-second poll from doing socket work forever.
-    if enabled and muted is None:
-        addresses = [ip for ip in local_ip_addresses() if not ip.startswith("127.")]
-        payload["server_ip"] = addresses[0] if addresses else ""
-        payload["listen_port"] = CFG.get("osc_listen_port", DEFAULT_OSC_LISTEN_PORT)
-
-    return jsonify(payload)
+    message_id = frivosc_enqueue(text, speaking=bool(data.get("speaking")))
+    if not message_id:
+        return jsonify({"error": "Nothing to send."}), 400
+    return jsonify({"ok": True, "id": message_id, "delivery": "queued"})
 
 
 @app.route("/api/profiles", methods=["GET", "POST"])
@@ -3749,9 +3406,6 @@ def serve(host, port, cert_path, key_path):
             # Not on the main thread, or the platform lacks this signal.
             pass
 
-    if CFG.get("osc_control_enabled"):
-        start_osc_listener(CFG.get("osc_listen_port", DEFAULT_OSC_LISTEN_PORT))
-
     log_server_event(f"--- started on {scheme}://{host}:{port} via {SERVER_BACKEND} ---")
 
     def run_server():
@@ -3794,8 +3448,6 @@ def serve(host, port, cert_path, key_path):
 
     print("\nShutting down…")
 
-    stop_osc_listener()
-
     stopper = threading.Thread(target=server.stop, daemon=True)
     stopper.start()
     stopper.join(5)
@@ -3827,20 +3479,6 @@ if __name__ == "__main__":
         sys.stdout.reconfigure(line_buffering=True)
     except Exception:
         pass
-
-    if "--osc-relay" in sys.argv:
-        # The relay lives in its own file, deliberately: it needs nothing
-        # but the standard library, and the PC running VRChat usually has
-        # none of this app's dependencies installed. Reaching this point
-        # means Flask imported fine, so this is only a signpost for anyone
-        # following an older README — the real entry point is osc_relay.py.
-        print("The OSC relay is now its own script:")
-        print()
-        print("  python osc_relay.py --target <Frivo server's IP>")
-        print()
-        print("It needs no dependencies, so it runs on the VRChat PC as-is.")
-        print("Or double-click Start-OSC-Relay.bat in the Frivo folder.")
-        sys.exit(1)
 
     if "--prepare-certs" in sys.argv:
         # Used by the installer: create (or refresh) the CA and server
