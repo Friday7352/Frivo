@@ -158,6 +158,12 @@ const testOscBtn = $("testOscBtn");
 const oscTestNote = $("oscTestNote");
 const oscToggle = $("oscToggle");
 const oscSwitch = $("oscSwitch");
+
+// OSC controls — separate feature, mute-synced dictation.
+const oscControlToggle = $("oscControlToggle");
+const oscListenPort = $("oscListenPort");
+const oscControlStatusNote = $("oscControlStatusNote");
+
 const speakToggle = $("speakToggle");
 
 const responseStyleRadios = $("responseStyleRadios");
@@ -1543,6 +1549,11 @@ async function loadSettings() {
   // server has said whether there's anywhere to send to.
   oscToggle.checked = localStorage.getItem(OSC_ENABLED_KEY) === "1";
   syncOscSwitch();
+
+  if (oscControlToggle) oscControlToggle.checked = Boolean(data.osc_control_enabled);
+  if (oscListenPort) oscListenPort.value = data.osc_listen_port || 9001;
+  oscControlEnabled = Boolean(data.osc_control_enabled);
+  updateOscControlStatusNote();
   if (data.languages && data.languages.length) {
     // A language saved in this browser wins over the server default, so
     // switching devices doesn't silently change what you get.
@@ -1690,6 +1701,8 @@ saveSettingsBtn.addEventListener("click", async () => {
     osc_sfx: oscSfxToggle ? oscSfxToggle.checked : true,
     osc_page_seconds_speaking: oscPageSpeaking ? parseFloat(oscPageSpeaking.value) : 1.6,
     osc_page_seconds_silent: oscPageSilent ? parseFloat(oscPageSilent.value) : 4,
+    osc_control_enabled: oscControlToggle ? oscControlToggle.checked : false,
+    osc_listen_port: oscListenPort ? parseInt(oscListenPort.value, 10) || 9001 : 9001,
   };
   if (openaiKeyInput.value.trim()) body.openai_api_key = openaiKeyInput.value.trim();
   if (elevenKeyInput.value.trim()) body.elevenlabs_api_key = elevenKeyInput.value.trim();
@@ -1913,6 +1926,98 @@ testOscBtn.addEventListener("click", async () => {
     oscTestNote.classList.add("is-error");
   }
 });
+
+
+// ---------- OSC controls (mute-synced dictation) ----------
+// Separate from the chatbox feature above: this only ever listens for what
+// VRChat sends out, never sends anything to it. Off by default — until the
+// toggle in Settings is turned on, none of this runs, and dictation behaves
+// exactly as it always has.
+
+let oscControlEnabled = false;
+// null = no signal yet (feature off, or on but VRChat hasn't said anything).
+// This is distinct from false (confirmed unmuted) so the status note and the
+// very first poll don't guess.
+let lastKnownMuted = null;
+
+function updateOscControlStatusNote() {
+  if (!oscControlStatusNote) return;
+  if (!oscControlEnabled) {
+    oscControlStatusNote.textContent = "Off — dictation behaves as it always has.";
+  } else if (lastKnownMuted === null) {
+    oscControlStatusNote.textContent = "On — waiting to hear from VRChat.";
+  } else if (lastKnownMuted) {
+    oscControlStatusNote.textContent = "VRChat: muted — dictation auto-disabled.";
+  } else {
+    oscControlStatusNote.textContent = "VRChat: unmuted — dictation auto-enabled.";
+  }
+}
+
+if (oscControlToggle) {
+  oscControlToggle.addEventListener("change", () => {
+    oscControlEnabled = oscControlToggle.checked;
+    lastKnownMuted = null;
+    updateOscControlStatusNote();
+  });
+}
+
+// Same dispatch dictateBtn's own click handler uses, so an auto start/stop
+// behaves identically to clicking the mic — including which engine it uses.
+function autoStartDictation() {
+  if (isDictating) return;
+  activeDictationMode = currentDictationMode();
+  if (activeDictationMode === "live") startLiveDictation();
+  else if (activeDictationMode === "live_local") startLocalLiveDictation();
+  else startDictation();
+}
+
+function autoStopDictation() {
+  if (!isDictating) return;
+  if (activeDictationMode === "live") stopLiveDictation();
+  else if (activeDictationMode === "live_local") stopLocalLiveDictation();
+  else stopDictation();
+}
+
+const MUTE_STATUS_POLL_MS = 3000;
+let muteStatusTimer = null;
+
+async function pollMuteStatus() {
+  try {
+    const res = await fetch("/api/osc/mute-status");
+    const data = await res.json();
+    if (!res.ok || !data.enabled) {
+      oscControlEnabled = false;
+      lastKnownMuted = null;
+      updateOscControlStatusNote();
+      return;
+    }
+    oscControlEnabled = true;
+    if (data.muted === null) {
+      // VRChat hasn't sent a MuteSelf update yet — nothing to react to.
+      // Dictation is left exactly as it is rather than guessed at.
+      updateOscControlStatusNote();
+      return;
+    }
+    // React only on an actual transition. Re-applying the same state every
+    // 3 seconds would fight a manual click made in between polls — clicking
+    // the mic always has to win until VRChat's state genuinely changes.
+    if (data.muted !== lastKnownMuted) {
+      lastKnownMuted = data.muted;
+      if (data.muted) autoStopDictation();
+      else autoStartDictation();
+    }
+    updateOscControlStatusNote();
+  } catch (err) {
+    // Server unreachable — leave dictation exactly as it is.
+  }
+}
+
+function startMuteStatusPolling() {
+  clearInterval(muteStatusTimer);
+  pollMuteStatus();
+  muteStatusTimer = setInterval(pollMuteStatus, MUTE_STATUS_POLL_MS);
+}
+
 
 clearChatBtn.addEventListener("click", async () => {
   // "all" because the transcript can now span several profiles, each with
@@ -4977,6 +5082,12 @@ messageInput.addEventListener("keydown", (e) => {
     console.error("startLocalStatusPolling failed:", err);
   }
 
+  try {
+    startMuteStatusPolling();
+  } catch (err) {
+    console.error("startMuteStatusPolling failed:", err);
+  }
+
   setLamp("ready");
   if (!statusEl.textContent || statusEl.textContent === "") setStatus("Ready.");
 })();
@@ -5052,8 +5163,8 @@ function applyComposerOptions(open) {
   if (composerMoreBtn) {
     composerMoreBtn.setAttribute("aria-expanded", open ? "true" : "false");
     composerMoreBtn.title = open
-      ? "Hide the Speak and OSC switches"
-      : "Show the Speak and OSC switches";
+      ? "Hide the Speak and Chatbox switches"
+      : "Show the Speak and Chatbox switches";
   }
   try { localStorage.setItem(COMPOSER_OPTS_KEY, open ? "1" : "0"); } catch (e) { /* private mode */ }
 }
@@ -5589,6 +5700,9 @@ function refreshSettingsSummaries() {
       "settingsOscTimingValue",
       isFinite(on) && isFinite(off) ? `${on.toFixed(1)}s / ${off.toFixed(1)}s` : "—"
     );
+  }
+  if (oscListenPort) {
+    setSummary("settingsOscListenValue", String(parseInt(oscListenPort.value, 10) || 9001));
   }
 }
 

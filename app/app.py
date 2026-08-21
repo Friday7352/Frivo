@@ -633,6 +633,13 @@ def load_config():
         # on to match typing into the chatbox by hand; turn it off if paged
         # messages get annoying.
         "osc_sfx": True,
+        # Separate feature: Frivo listens for VRChat's own OSC output and
+        # syncs dictation to your mute state. Off by default — nothing about
+        # the app's existing behaviour changes unless this is turned on.
+        # Independent of the chatbox settings above: those send TO VRChat,
+        # this only ever listens for what VRChat sends OUT.
+        "osc_control_enabled": False,
+        "osc_listen_port": DEFAULT_OSC_LISTEN_PORT,
     }
     if os.path.exists(CONFIG_PATH):
         try:
@@ -839,6 +846,150 @@ def queue_chatbox(text, host, port, sfx=True, page_seconds=OSC_PAGE_SECONDS_SPEA
     except queue.Full:
         raise RuntimeError("Too many messages queued for VRChat — slow down.")
     return len(pages)
+
+
+# =============================================================================
+# OSC <- VRChat avatar parameters (mute-synced dictation)
+# =============================================================================
+# Separate from the chatbox feature above, and off by default. VRChat sends
+# a live stream of OSC messages about your avatar's state — including
+# MuteSelf, the built-in parameter that tracks your mic mute status — out to
+# 127.0.0.1:9001 by default. This listens for that one parameter and uses it
+# to automatically enable/disable dictation, so you don't have to remember to
+# click the mic every time you unmute in VRChat. Manually clicking the mic
+# button always still works — this only drives the same click handler the
+# button does, it doesn't lock anything out.
+#
+# VRChat only ever sends this to 127.0.0.1 — if VRChat runs on a different PC
+# than this server, an OSC router forwarding it here is needed for this
+# feature to see anything. Nothing about the rest of the app depends on it.
+
+DEFAULT_OSC_LISTEN_PORT = 9001
+
+VRCHAT_MUTE_STATE = {"muted": None, "updated_at": None}
+VRCHAT_MUTE_LOCK = threading.Lock()
+
+OSC_LISTENER_THREAD = None
+OSC_LISTENER_STOP = threading.Event()
+OSC_LISTENER_LOCK = threading.Lock()
+
+
+def osc_read_string(data, offset):
+    """Reverse of osc_string(): read a null-terminated, 4-byte-padded string."""
+    end = data.index(b"\0", offset)
+    text = data[offset:end].decode("utf-8", errors="replace")
+    consumed = end + 1 - offset
+    padded = consumed + ((4 - consumed % 4) % 4)
+    return text, offset + padded
+
+
+def osc_parse_message(data):
+    """
+    Decodes a single incoming OSC message into (address, args). Anything
+    that doesn't parse — malformed or truncated packets, blob arguments —
+    comes back as ("", []) rather than raising: a listener on an open UDP
+    port has to expect noise, and one bad packet shouldn't take it down.
+    """
+    try:
+        address, offset = osc_read_string(data, 0)
+        if not address.startswith("/") or offset >= len(data) or data[offset:offset + 1] != b",":
+            return address, []
+        tags, offset = osc_read_string(data, offset)
+        args = []
+        for tag in tags[1:]:
+            if tag == "i":
+                args.append(struct.unpack_from(">i", data, offset)[0])
+                offset += 4
+            elif tag == "f":
+                args.append(struct.unpack_from(">f", data, offset)[0])
+                offset += 4
+            elif tag == "s":
+                value, offset = osc_read_string(data, offset)
+                args.append(value)
+            elif tag == "T":
+                args.append(True)
+            elif tag == "F":
+                args.append(False)
+            elif tag in ("N", "I"):
+                args.append(None)
+            else:
+                # Blob and other rarer tags aren't needed for avatar
+                # parameters — stop rather than guess how much to skip.
+                break
+        return address, args
+    except (ValueError, IndexError, struct.error, UnicodeError):
+        return "", []
+
+
+def handle_incoming_osc(address, args):
+    if address == "/avatar/parameters/MuteSelf" and args:
+        muted = bool(args[0])
+        with VRCHAT_MUTE_LOCK:
+            VRCHAT_MUTE_STATE["muted"] = muted
+            VRCHAT_MUTE_STATE["updated_at"] = time.time()
+
+
+def osc_listener_loop(port):
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.bind(("0.0.0.0", port))
+    except OSError as e:
+        print(f"[osc] listener couldn't bind UDP {port}: {e}", flush=True)
+        return
+    # A timeout rather than a blocking recvfrom is what lets this loop notice
+    # OSC_LISTENER_STOP without needing a cross-thread socket close, which is
+    # racy on some platforms.
+    sock.settimeout(1.0)
+    try:
+        while not OSC_LISTENER_STOP.is_set():
+            try:
+                data, _addr = sock.recvfrom(4096)
+            except socket.timeout:
+                continue
+            except OSError:
+                break
+            try:
+                address, args = osc_parse_message(data)
+                handle_incoming_osc(address, args)
+            except Exception:
+                continue
+    finally:
+        sock.close()
+
+
+def start_osc_listener(port):
+    """
+    (Re)starts the listener on the given port. Safe to call whether or not
+    one is already running — an existing thread is stopped and joined first,
+    so changing the port while the feature is on just restarts it cleanly
+    rather than silently no-opping.
+    """
+    global OSC_LISTENER_THREAD
+    with OSC_LISTENER_LOCK:
+        if OSC_LISTENER_THREAD is not None and OSC_LISTENER_THREAD.is_alive():
+            OSC_LISTENER_STOP.set()
+            OSC_LISTENER_THREAD.join(timeout=2.0)
+        OSC_LISTENER_STOP.clear()
+        with VRCHAT_MUTE_LOCK:
+            VRCHAT_MUTE_STATE["muted"] = None
+            VRCHAT_MUTE_STATE["updated_at"] = None
+        OSC_LISTENER_THREAD = threading.Thread(
+            target=osc_listener_loop, args=(port,), daemon=True
+        )
+        OSC_LISTENER_THREAD.start()
+
+
+def stop_osc_listener():
+    global OSC_LISTENER_THREAD
+    with OSC_LISTENER_LOCK:
+        OSC_LISTENER_STOP.set()
+        if OSC_LISTENER_THREAD is not None:
+            OSC_LISTENER_THREAD.join(timeout=2.0)
+            OSC_LISTENER_THREAD = None
+        with VRCHAT_MUTE_LOCK:
+            VRCHAT_MUTE_STATE["muted"] = None
+            VRCHAT_MUTE_STATE["updated_at"] = None
 
 
 def load_profiles():
@@ -1852,6 +2003,23 @@ def settings():
                 data.get("osc_page_seconds_silent"), OSC_PAGE_SECONDS_SILENT
             )
 
+        if "osc_control_enabled" in data:
+            CFG["osc_control_enabled"] = bool(data.get("osc_control_enabled"))
+        if "osc_listen_port" in data:
+            try:
+                port = int(data.get("osc_listen_port") or DEFAULT_OSC_LISTEN_PORT)
+                CFG["osc_listen_port"] = port if 1 <= port <= 65535 else DEFAULT_OSC_LISTEN_PORT
+            except (TypeError, ValueError):
+                CFG["osc_listen_port"] = DEFAULT_OSC_LISTEN_PORT
+        # Applied after both fields above are settled, so a request that
+        # changes the enabled flag and the port together only restarts the
+        # listener once, on the final values — not once per field.
+        if "osc_control_enabled" in data or "osc_listen_port" in data:
+            if CFG.get("osc_control_enabled"):
+                start_osc_listener(CFG.get("osc_listen_port", DEFAULT_OSC_LISTEN_PORT))
+            else:
+                stop_osc_listener()
+
         save_config(CFG)
         return jsonify({"ok": True})
 
@@ -1883,6 +2051,8 @@ def settings():
                 "osc_page_seconds_silent", OSC_PAGE_SECONDS_SILENT
             ),
             "osc_min_page_seconds": OSC_MIN_GAP_SECONDS,
+            "osc_control_enabled": bool(CFG.get("osc_control_enabled", False)),
+            "osc_listen_port": CFG.get("osc_listen_port", DEFAULT_OSC_LISTEN_PORT),
             "elevenlabs_key_set": bool(CFG["elevenlabs_api_key"]),
             "voice_id": CFG["voice_id"],
             "voice_name": CFG.get("voice_name", ""),
@@ -2647,6 +2817,28 @@ def osc_test():
             "host": host,
             "port": int(port),
             "note": "Sent. UDP has no receipt, so check your own chatbox in VRChat.",
+        }
+    )
+
+
+@app.route("/api/osc/mute-status")
+def osc_mute_status():
+    """
+    Polled by the browser to sync dictation with VRChat's mute state.
+
+    `muted` is null until at least one MuteSelf update has actually been
+    seen — that's the difference between "you're unmuted" and "VRChat
+    hasn't said anything yet", which the frontend needs in order to not
+    guess wrong the moment this feature is turned on.
+    """
+    with VRCHAT_MUTE_LOCK:
+        muted = VRCHAT_MUTE_STATE.get("muted")
+        updated_at = VRCHAT_MUTE_STATE.get("updated_at")
+    return jsonify(
+        {
+            "enabled": bool(CFG.get("osc_control_enabled", False)),
+            "muted": muted,
+            "updated_at": updated_at,
         }
     )
 
@@ -3544,6 +3736,9 @@ def serve(host, port, cert_path, key_path):
             # Not on the main thread, or the platform lacks this signal.
             pass
 
+    if CFG.get("osc_control_enabled"):
+        start_osc_listener(CFG.get("osc_listen_port", DEFAULT_OSC_LISTEN_PORT))
+
     log_server_event(f"--- started on {scheme}://{host}:{port} via {SERVER_BACKEND} ---")
 
     def run_server():
@@ -3585,6 +3780,8 @@ def serve(host, port, cert_path, key_path):
         pass
 
     print("\nShutting down…")
+
+    stop_osc_listener()
 
     stopper = threading.Thread(target=server.stop, daemon=True)
     stopper.start()
