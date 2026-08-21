@@ -992,69 +992,6 @@ def stop_osc_listener():
             VRCHAT_MUTE_STATE["updated_at"] = None
 
 
-def run_osc_relay(target_host, target_port, listen_port):
-    """
-    Standalone mode (python app.py --osc-relay ...), not part of the web
-    server. For the common case where Frivo's server runs on a different PC
-    than VRChat: VRChat's OSC output always targets 127.0.0.1 with no
-    setting to redirect it, so mute-synced dictation sees nothing unless
-    something on the VRChat PC relays that traffic onward. Run this on the
-    SAME PC as VRChat, pointed at the Frivo server's address.
-
-    Forwards packets byte-for-byte rather than decoding and re-encoding
-    them — this doesn't need to understand OSC to relay it, and staying
-    format-agnostic means it keeps working for whatever avatar parameters a
-    future version of Frivo wants to read, not just MuteSelf.
-    """
-    listen_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    listen_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    try:
-        # 127.0.0.1 only, not 0.0.0.0: VRChat never sends this anywhere but
-        # loopback, so there's no reason to accept it from the network too.
-        listen_sock.bind(("127.0.0.1", listen_port))
-    except OSError as e:
-        print(f"Couldn't bind UDP 127.0.0.1:{listen_port}: {e}")
-        print(
-            "Something else is already using this port — maybe another copy "
-            "of the relay, or Frivo itself running here with OSC controls on."
-        )
-        sys.exit(1)
-
-    send_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-
-    print("Frivo OSC relay")
-    print(f"  Listening for VRChat on 127.0.0.1:{listen_port}")
-    print(f"  Forwarding to {target_host}:{target_port}")
-    print()
-    print("  Run this on the SAME PC as VRChat. In VRChat, enable OSC under")
-    print("  the Options menu if you haven't already — this relay is a")
-    print("  pass-through and can't do anything until VRChat is sending.")
-    print()
-    print("Press CTRL+C to quit")
-
-    packets = 0
-    try:
-        while True:
-            try:
-                data, _addr = listen_sock.recvfrom(65535)
-            except OSError:
-                break
-            try:
-                send_sock.sendto(data, (target_host, target_port))
-                packets += 1
-            except OSError as e:
-                # Most likely the target host doesn't exist / isn't
-                # reachable. Keep listening rather than exiting — the
-                # server may just not be up yet, or the network hiccuped.
-                print(f"[relay] forward to {target_host}:{target_port} failed: {e}")
-    except KeyboardInterrupt:
-        pass
-    finally:
-        print(f"\nStopping. Forwarded {packets} packet(s) this run.")
-        listen_sock.close()
-        send_sock.close()
-
-
 def load_profiles():
     if os.path.exists(PROFILES_PATH):
         try:
@@ -3879,47 +3816,18 @@ if __name__ == "__main__":
         pass
 
     if "--osc-relay" in sys.argv:
-        # Standalone mode: forwards VRChat's OSC output to a Frivo server on
-        # another PC, then exits — never starts the web server. See
-        # run_osc_relay()'s docstring for why this exists.
-        args = sys.argv[1:]
-
-        def _flag_value(name, default=None):
-            if name in args:
-                idx = args.index(name)
-                if idx + 1 < len(args):
-                    return args[idx + 1]
-            return default
-
-        target = _flag_value("--target")
-        if not target:
-            print("Usage: python app.py --osc-relay --target <Frivo server's IP>[:port] [--listen-port 9001]")
-            print()
-            print("Run this on the SAME PC as VRChat, when Frivo's own server runs on")
-            print("a different PC. Point --target at that other PC's LAN address —")
-            print(f"the same one you'd use for the chatbox's VRChat PC address field.")
-            sys.exit(1)
-
-        if ":" in target:
-            target_host, _, target_port_str = target.rpartition(":")
-            try:
-                target_port = int(target_port_str)
-            except ValueError:
-                print(f"Bad port in --target: {target!r}")
-                sys.exit(1)
-        else:
-            target_host = target
-            target_port = DEFAULT_OSC_LISTEN_PORT
-
-        listen_port_str = _flag_value("--listen-port", str(DEFAULT_OSC_LISTEN_PORT))
-        try:
-            listen_port = int(listen_port_str)
-        except ValueError:
-            print(f"Bad --listen-port: {listen_port_str!r}")
-            sys.exit(1)
-
-        run_osc_relay(target_host, target_port, listen_port)
-        sys.exit(0)
+        # The relay lives in its own file, deliberately: it needs nothing
+        # but the standard library, and the PC running VRChat usually has
+        # none of this app's dependencies installed. Reaching this point
+        # means Flask imported fine, so this is only a signpost for anyone
+        # following an older README — the real entry point is osc_relay.py.
+        print("The OSC relay is now its own script:")
+        print()
+        print("  python osc_relay.py --target <Frivo server's IP>")
+        print()
+        print("It needs no dependencies, so it runs on the VRChat PC as-is.")
+        print("Or double-click Start-OSC-Relay.bat in the Frivo folder.")
+        sys.exit(1)
 
     if "--prepare-certs" in sys.argv:
         # Used by the installer: create (or refresh) the CA and server
