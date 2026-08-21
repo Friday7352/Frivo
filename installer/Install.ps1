@@ -484,13 +484,36 @@ function Set-FirewallRule {
 
     & $Log 'Configuring Windows Firewall...'
     $pythonw = Join-Path $Target '.venv\Scripts\pythonw.exe'
+    # Deleting by name+program clears every rule this installer has ever
+    # added under that name, including the UDP one below, so a reinstall
+    # never stacks duplicates.
     Invoke-Tool -FilePath 'netsh.exe' -Arguments @(
         'advfirewall', 'firewall', 'delete', 'rule', 'name=Frivo', ('program=' + $pythonw)
     ) | Out-Null
+
+    # Scoped to the program rather than to a protocol and port. netsh takes
+    # one protocol per rule, and Frivo now listens on two: TCP 5000 for the
+    # dashboard, and UDP 9001 for VRChat's OSC output when mute-synced
+    # dictation is on. Two rules would mean two of everything here and in
+    # the launcher's repair path — and a third the next time a feature
+    # opens a socket.
+    #
+    # This grants no more than those two rules would in practice: it is
+    # still only this install's own pythonw.exe, still only the private
+    # profile, still only the local subnet. Nothing else in the process
+    # listens, so "any port" is those two ports. It is also what Windows
+    # itself writes when someone clicks Allow on a firewall prompt.
+    # ('program=' + $pythonw) — the parentheses are load-bearing. Inside an
+    # array literal the comma binds tighter than +, so 'program=' + $pythonw
+    # parses as ('action=allow', 'program=') + $pythonw: the path lands as
+    # its own element and netsh receives an empty program= plus a stray
+    # argument. It rejects that, and the failure is only logged, so the rule
+    # silently never existed. The delete call below always had the
+    # parentheses; this one did not.
     $r = Invoke-Tool -FilePath 'netsh.exe' -Arguments @(
         'advfirewall', 'firewall', 'add', 'rule', 'name=Frivo',
-        'dir=in', 'action=allow', 'program=' + $pythonw,
-        'profile=private', 'remoteip=localsubnet', 'protocol=TCP', 'localport=5000'
+        'dir=in', 'action=allow', ('program=' + $pythonw),
+        'profile=private', 'remoteip=localsubnet'
     )
     if ($r.ExitCode -ne 0) {
         & $Log 'The firewall rule could not be added. Continuing.'

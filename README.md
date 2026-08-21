@@ -157,39 +157,56 @@ or off.
 3. Leave **Listen port** at `9001` unless your VRChat OSC configuration uses
    another port for its output.
 
-This only works out of the box when VRChat runs on the same PC as Frivo —
-VRChat always sends this data to `127.0.0.1`, with no setting to point it
-anywhere else. The chatbox feature above is unaffected either way, since it
-sends the other direction.
+If VRChat and Frivo run on the **same PC**, that's everything — VRChat sends
+to `127.0.0.1:9001` by default and Frivo is already listening there. No
+firewall rule is needed, since the traffic never leaves the machine.
 
 ### VRChat and Frivo on different PCs
 
-If your setup is like this — Frivo's server on one PC, VRChat on another —
-mute-synced dictation needs a small relay running on the **VRChat PC** to
-forward that `127.0.0.1` traffic over to the Frivo server. This ships with
-Frivo, so no separate download:
+Nothing extra needs to run on the VRChat PC. VRChat can send its OSC output
+straight to another machine, set once as a launch option.
 
-1. On the VRChat PC, double-click **Start-OSC-Relay.bat** in this folder (or
-   run it from a terminal with the Frivo server's address as an argument:
-   `Start-OSC-Relay.bat 192.168.1.50`).
-2. Enter the Frivo server's LAN address when asked — the same one you'd put
-   in the chatbox feature's "VRChat PC address" field, just pointed the
-   other way.
-3. On the **Frivo server**, allow inbound UDP on the listen port, once, from
-   an elevated prompt:
+1. In Steam, right-click **VRChat** → **Properties** → **Launch Options**,
+   and enter:
 
-       netsh advfirewall firewall add rule name="Frivo OSC in" dir=in action=allow protocol=UDP localport=9001
+       --osc=9000:192.168.1.50:9001
 
-4. Leave the relay running alongside VRChat. It only forwards traffic; it
-   doesn't touch your avatar or send anything to VRChat's chatbox.
+   Replace `192.168.1.50` with the Frivo server's LAN address. The format is
+   `--osc=inPort:sendIP:outPort` — the first port is what VRChat listens on
+   (leave it at `9000`, that's what the chatbox feature sends to), and the
+   middle value is where VRChat sends its output.
 
-Under the hood this is `app/osc_relay.py`, so you can run it manually or from
-your own startup script:
+2. Restart VRChat so the launch option takes effect.
+
+The firewall is handled by the installer — its Frivo rule covers the OSC
+listener as well as the dashboard, so there is nothing to open by hand. If
+Frivo is running from source rather than installed, allow inbound UDP 9001
+once from an elevated prompt:
+
+    netsh advfirewall firewall add rule name="Frivo OSC in" dir=in action=allow protocol=UDP localport=9001
+
+**One caveat:** VRChat has a single OSC output destination, so this sends
+*all* of its output to the Frivo server instead of to `127.0.0.1`. If you run
+other OSC apps on the VRChat PC — face tracking, avatar tools, VRCOSC — they
+stop receiving data, because it's no longer going to that machine. If that
+applies to you, either point VRChat at an OSC router that fans out to both,
+or use the bundled relay described below.
+
+### Optional: the bundled relay
+
+`app/osc_relay.py` is an alternative for the case above — when you want
+VRChat's output to reach the Frivo server *and* stay available to local OSC
+apps. Leave VRChat's output pointed at `127.0.0.1` as normal, and run the
+relay on the VRChat PC to copy that traffic onward:
 
     python osc_relay.py --target 192.168.1.50
 
-`--listen-port` is also available if you ever change VRChat's OSC output port
-from its default.
+Or double-click **Start-OSC-Relay.bat**, which prompts for the address. It
+needs only Python itself — no `pip install`, none of Frivo's other
+requirements — so `osc_relay.py` can be copied to a VRChat PC on its own.
+
+Most people won't need this. The launch option above is simpler and runs
+nothing extra.
 
 **The relay needs only Python itself** — no `pip install`, none of Frivo's
 other requirements. It imports nothing outside the standard library, because

@@ -2,16 +2,24 @@
 """
 Frivo OSC relay — forwards VRChat's OSC output to a Frivo server on another PC.
 
-Why this exists
----------------
-VRChat sends its OSC output (avatar parameters, including MuteSelf — the
-built-in parameter tracking your mic mute state) to 127.0.0.1 and nowhere
-else. There is no setting in VRChat to point it at another machine. So when
-Frivo's server runs on a different PC than VRChat, Frivo's mute-synced
-dictation feature never sees anything.
+Most people do not need this
+----------------------------
+VRChat can send its OSC output to another machine directly, with a launch
+option — no relay, nothing extra running:
 
-This script runs on the SAME PC as VRChat, listens on that loopback port,
-and forwards every packet to the Frivo server's address.
+    --osc=9000:<frivo-server-ip>:9001
+
+That is the simpler answer when Frivo runs on a different PC than VRChat,
+and the README documents it as the main path.
+
+The catch is that VRChat has exactly one OSC output destination. Pointing it
+at the Frivo server means local OSC apps on the VRChat PC — face tracking,
+avatar tools, VRCOSC — stop receiving anything, because the data no longer
+goes to that machine at all.
+
+This relay is for that case. Leave VRChat's output pointed at 127.0.0.1 as
+normal so local apps keep working, and run this alongside them to copy the
+same traffic onward to the Frivo server.
 
 Standalone on purpose
 ---------------------
@@ -110,8 +118,8 @@ def run_relay(target_host, target_port, listen_port):
     print("  In VRChat, make sure OSC is enabled under the Options menu —")
     print("  this is a pass-through and has nothing to forward until it is.")
     print()
-    print("  The Frivo server needs to accept inbound UDP on its listen port.")
-    print("  On that PC, once, elevated:")
+    print("  If Frivo was installed with its installer, the firewall is already")
+    print("  handled. Running from source, allow inbound UDP on that PC once:")
     print(f'    netsh advfirewall firewall add rule name="Frivo OSC in" '
           f"dir=in action=allow protocol=UDP localport={target_port}")
     print()
