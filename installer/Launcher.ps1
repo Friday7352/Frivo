@@ -237,15 +237,10 @@ function Enable-FrivoFirewallRule {
         # $netshArgs, not $args: $args is an automatic variable holding the
         # function's own unbound arguments. Assigning to it works but is the
         # same shadowing class that has bitten this codebase twice.
-        #
-        # Program-scoped, matching Install.ps1's Set-FirewallRule — one rule
-        # covering both the dashboard's TCP 5000 and the OSC listener's UDP
-        # 9001. Two rules would need two elevated calls, and two UAC prompts
-        # behind one button reads as a bug.
         $netshArgs = ConvertTo-ArgumentString @(
             'advfirewall', 'firewall', 'add', 'rule', 'name=Frivo',
             'dir=in', 'action=allow', ('program=' + $PythonW),
-            'profile=private', 'remoteip=localsubnet'
+            'profile=private', 'remoteip=localsubnet', 'protocol=TCP', 'localport=5000'
         )
         Start-Process -FilePath 'netsh.exe' -ArgumentList $netshArgs -Verb RunAs -Wait -WindowStyle Hidden | Out-Null
         return (Test-FrivoFirewallRule)

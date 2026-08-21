@@ -871,88 +871,37 @@
             </div>
           </section>
 
-          <!-- VRChat chatbox -->
+          <!-- VRChat, through FrivOSC -->
           <section class="settings-section">
             <div class="settings-section-icon"><svg width="22" height="22"><use href="#i-osc"/></svg></div>
             <div class="settings-section-body">
               <div class="settings-section-head">
                 <div>
-                  <h3 class="settings-section-title">VRChat chatbox</h3>
-                  <p class="settings-section-sub">OSC</p>
-                </div>
-              </div>
-              <div class="settings-card">
-                <button class="srow" type="button" data-settings-page="osc">
-                  <span class="srow-main"><span class="srow-label">PC address</span></span>
-                  <span class="srow-spacer"></span>
-                  <span class="srow-value" id="settingsOscValue">Off</span>
-                  <span class="srow-chevron"><svg class="icon-16"><use href="#i-chevron"/></svg></span>
-                </button>
-                <button class="srow" type="button" data-settings-page="osc-timing">
-                  <span class="srow-main"><span class="srow-label">Page duration</span></span>
-                  <span class="srow-spacer"></span>
-                  <span class="srow-value srow-value--mono" id="settingsOscTimingValue">—</span>
-                  <span class="srow-chevron"><svg class="icon-16"><use href="#i-chevron"/></svg></span>
-                </button>
-                <label class="srow">
-                  <span class="srow-main"><span class="srow-label">Play VRChat's chatbox notification sound</span></span>
-                  <span class="switch">
-                    <input type="checkbox" id="oscSfxToggle">
-                    <span class="switch-track" aria-hidden="true"></span>
-                  </span>
-                </label>
-              </div>
-            </div>
-          </section>
-
-          <!-- OSC controls (mute-synced dictation) -->
-          <section class="settings-section">
-            <div class="settings-section-icon"><svg width="22" height="22"><use href="#i-osc"/></svg></div>
-            <div class="settings-section-body">
-              <div class="settings-section-head">
-                <div>
-                  <h3 class="settings-section-title">OSC controls</h3>
-                  <p class="settings-section-sub">Optional — separate from the chatbox above</p>
+                  <h3 class="settings-section-title">VRChat</h3>
+                  <p class="settings-section-sub">Through FrivOSC</p>
                 </div>
               </div>
               <div class="settings-card">
                 <label class="srow">
                   <span class="srow-main srow-main--flex">
-                    <span class="srow-label">Mute-synced dictation</span>
-                    <span class="srow-sub">Auto-disable dictation when you're muted in VRChat, auto-enable when you're not. Click the mic to override any time, same as always.</span>
+                    <span class="srow-label">VRChat OSC</span>
+                    <span class="srow-sub">Chatbox messages and microphone status. FrivOSC handles the ports and the paging, so there is nothing to configure here.</span>
                   </span>
                   <span class="switch">
-                    <input type="checkbox" id="oscControlToggle">
+                    <input type="checkbox" id="oscEnabledToggle">
                     <span class="switch-track" aria-hidden="true"></span>
                   </span>
                 </label>
-                <button class="srow" type="button" data-settings-page="osc-listen">
-                  <span class="srow-main"><span class="srow-label">Listen port</span></span>
+                <div class="srow">
+                  <span class="srow-main"><span class="srow-label">FrivOSC</span></span>
                   <span class="srow-spacer"></span>
-                  <span class="srow-value srow-value--mono" id="settingsOscListenValue">9001</span>
-                  <span class="srow-chevron"><svg class="icon-16"><use href="#i-chevron"/></svg></span>
-                </button>
-                <p class="field-note" id="oscControlStatusNote">Off — dictation behaves as it always has.</p>
-                <!-- Shown only while the feature is on and nothing has been
-                     heard from VRChat, which is the one moment the launch
-                     option is worth explaining. Hidden again the instant a
-                     packet arrives. -->
-                <div class="srow srow--stacked is-hidden" id="oscControlHint">
-                  <span class="srow-label">VRChat on another PC?</span>
-                  <p class="field-note">
-                    Nothing heard yet. If VRChat runs on a different machine, paste this into
-                    Steam → right-click VRChat → Properties → Launch Options, then restart VRChat.
-                  </p>
-                  <div class="row">
-                    <input type="text" id="oscLaunchOption" readonly autocomplete="off">
-                    <button id="copyOscLaunchBtn" class="btn-ghost btn-sm" type="button">Copy</button>
-                  </div>
-                  <p class="field-note" id="oscLaunchOptionNote">
-                    Sends VRChat's OSC output here instead of to its own PC. Other OSC apps on
-                    that PC stop receiving while this is set — see the README if you need both.
-                  </p>
+                  <span class="srow-value" id="frivoscStatusValue">Not connected</span>
                 </div>
               </div>
+              <p class="settings-note">
+                FrivOSC runs on the computer you play VRChat on. Install it there and it finds
+                Frivo by itself — no address, no ports, no launch options.
+              </p>
             </div>
           </section>
 
@@ -1166,84 +1115,6 @@
                 <p class="field-note" id="whisperModelNote">Test the connection first to load the model list.</p>
               </div>
             </div>
-          </div>
-
-          <div class="settings-page is-hidden" data-page="osc" data-title="VRChat PC address">
-            <div class="settings-card">
-              <div class="field">
-                <label for="oscHost">VRChat PC address</label>
-                <div class="row">
-                  <input type="text" id="oscHost" placeholder="192.168.1.x" autocomplete="off">
-                  <input type="number" id="oscPort" class="port-input" min="1" max="65535" placeholder="9000">
-                  <button id="testOscBtn" class="btn-ghost btn-sm" type="button">Test</button>
-                </div>
-                <p class="field-note" id="oscTestNote">
-                  The LAN address of whichever machine runs VRChat — 127.0.0.1 if that's this
-                  server. Leave blank to disable. VRChat listens on UDP 9000 by default, so
-                  that PC needs an inbound rule for it:
-                  <code>netsh advfirewall firewall add rule name="VRChat OSC" dir=in action=allow protocol=UDP localport=9000</code>
-                </p>
-              </div>
-            </div>
-            <p class="settings-note">
-              The reply appears in your chatbox word for word — the moment playback starts
-              if Speak is on, immediately if it isn't. Anything over 144 characters is sent
-              as pages; keep the reply-length fader near 25 words to land in one. Delivery
-              can't be confirmed: OSC is UDP, so nothing comes back either way.
-            </p>
-          </div>
-
-          <div class="settings-page is-hidden" data-page="osc-timing" data-title="Page duration">
-            <div class="settings-card">
-              <div class="field">
-                <label>
-                  How long each page stays up <span class="field-hint">— before the next replaces it</span>
-                </label>
-                <div class="row page-seconds-row">
-                  <label class="page-seconds">
-                    <span>Speak on</span>
-                    <input type="number" id="oscPageSpeaking" min="1.5" max="60" step="0.1">
-                    <span class="unit">s</span>
-                  </label>
-                  <label class="page-seconds">
-                    <span>Speak off</span>
-                    <input type="number" id="oscPageSilent" min="1.5" max="60" step="0.1">
-                    <span class="unit">s</span>
-                  </label>
-                </div>
-                <p class="field-note" id="oscPageNote">
-                  With the voice playing, the text is a caption and should keep pace with it.
-                  With it off the text is the whole message and has to be read, which takes
-                  longer. Only affects replies long enough to need more than one page.
-                </p>
-              </div>
-            </div>
-          </div>
-
-          <div class="settings-page is-hidden" data-page="osc-listen" data-title="Listen port">
-            <div class="settings-card">
-              <div class="field">
-                <label for="oscListenPort">Listen port</label>
-                <input type="number" id="oscListenPort" class="port-input" min="1" max="65535" placeholder="9001">
-                <p class="field-note">
-                  Frivo listens on this UDP port for the avatar parameters VRChat sends out —
-                  9001 is VRChat's default, so this rarely needs changing.
-                </p>
-              </div>
-            </div>
-            <p class="settings-note">
-              If VRChat runs on this same machine, nothing else is needed. If it runs
-              elsewhere, point its output here with a launch option in Steam — the panel
-              above shows the exact line once this is switched on. The installer's firewall
-              rule already covers this port. See the README if you also run other OSC apps
-              on the VRChat PC.
-            </p>
-            <p class="settings-note">
-              This is entirely separate from the chatbox address above — that one sends
-              messages <em>to</em> VRChat, this one only listens for what VRChat sends
-              <em>out</em>. Off by default; turning it on never changes anything else about
-              the app, and dictation still starts and stops on click exactly as it always has.
-            </p>
           </div>
 
         </div><!-- /settingsPages -->

@@ -84,10 +84,11 @@ Assert-True 'program= is one fused argument, not split in two' (@($a | Where-Obj
 Assert-True 'private profile only' ($a -contains 'profile=private')
 Assert-True 'local subnet only' ($a -contains 'remoteip=localsubnet')
 
-# The point of the change: no protocol/port pin, so UDP 9001 is covered
-# without a second rule and without the user running netsh by hand.
-Assert-True 'no protocol pin (so UDP 9001 is covered too)' (@($a | Where-Object { $_ -like 'protocol=*' }).Count -eq 0)
-Assert-True 'no localport pin' (@($a | Where-Object { $_ -like 'localport=*' }).Count -eq 0)
+# Scoped to the dashboard's port and nothing else. Frivo speaks no OSC of
+# its own any more — FrivOSC owns that, from the VRChat PC, over outbound
+# HTTP — so there is no second port for this rule to cover.
+Assert-True 'pinned to TCP' ($a -contains 'protocol=TCP')
+Assert-True 'pinned to port 5000' ($a -contains 'localport=5000')
 
 Write-Host "`nSet-FirewallRule — disabled"
 $script:calls.Clear()
@@ -120,7 +121,7 @@ $lfn = $last.Find({
 }, $true)
 Assert-True 'Enable-FrivoFirewallRule exists' ($null -ne $lfn)
 $body = $lfn.Extent.Text
-Assert-True 'launcher rule is program-scoped, not port-pinned' ($body -notmatch 'localport=')
+Assert-True 'launcher rule is pinned to port 5000' ($body -match 'localport=5000')
 Assert-True 'launcher rule keeps localsubnet scoping' ($body -match 'remoteip=localsubnet')
 Assert-True 'launcher rule keeps private profile' ($body -match 'profile=private')
 Assert-True 'does not assign to the automatic $args variable' ($body -notmatch '\$args\s*=')

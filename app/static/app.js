@@ -149,23 +149,10 @@ const applyWhisperModelBtn = $("applyWhisperModelBtn");
 const whisperModelNote = $("whisperModelNote");
 const whisperStartCommand = $("whisperStartCommand");
 
-const oscHost = $("oscHost");
-const oscPort = $("oscPort");
-const oscSfxToggle = $("oscSfxToggle");
-const oscPageSpeaking = $("oscPageSpeaking");
-const oscPageSilent = $("oscPageSilent");
-const testOscBtn = $("testOscBtn");
-const oscTestNote = $("oscTestNote");
+const oscEnabledToggle = $("oscEnabledToggle");
+const frivoscStatusValue = $("frivoscStatusValue");
 const oscToggle = $("oscToggle");
 const oscSwitch = $("oscSwitch");
-
-// OSC controls — separate feature, mute-synced dictation.
-const oscControlToggle = $("oscControlToggle");
-const oscListenPort = $("oscListenPort");
-const oscControlStatusNote = $("oscControlStatusNote");
-const oscControlHint = $("oscControlHint");
-const oscLaunchOption = $("oscLaunchOption");
-const copyOscLaunchBtn = $("copyOscLaunchBtn");
 
 const speakToggle = $("speakToggle");
 
@@ -1535,28 +1522,16 @@ async function loadSettings() {
   defaultVoiceName = data.voice_name || "";
   renderVoiceTrigger();
 
-  if (oscHost) oscHost.value = data.osc_host || "";
-  if (oscPort) oscPort.value = data.osc_port || 9000;
-  if (oscSfxToggle) oscSfxToggle.checked = data.osc_sfx !== false;
-  if (oscPageSpeaking) oscPageSpeaking.value = data.osc_page_seconds_speaking ?? 1.6;
-  if (oscPageSilent) oscPageSilent.value = data.osc_page_seconds_silent ?? 4;
-  // The floor comes from the server so there's one definition of it, rather
-  // than the field allowing something the backend will silently raise.
-  if (data.osc_min_page_seconds != null) {
-    [oscPageSpeaking, oscPageSilent].forEach((el) => {
-      if (el) el.min = data.osc_min_page_seconds;
-    });
-  }
-  oscConfigured = Boolean((data.osc_host || "").trim());
+  if (oscEnabledToggle) oscEnabledToggle.checked = Boolean(data.osc_enabled);
+  oscEnabled_setting = Boolean(data.osc_enabled);
+  // "Configured" now means the feature is on and a companion is actually
+  // there. There is no address left to get wrong.
+  oscConfigured = oscEnabled_setting && frivoscConnected;
   // The toggle is remembered per browser, but can't be honoured before the
   // server has said whether there's anywhere to send to.
   oscToggle.checked = localStorage.getItem(OSC_ENABLED_KEY) === "1";
   syncOscSwitch();
 
-  if (oscControlToggle) oscControlToggle.checked = Boolean(data.osc_control_enabled);
-  if (oscListenPort) oscListenPort.value = data.osc_listen_port || 9001;
-  oscControlEnabled = Boolean(data.osc_control_enabled);
-  updateOscControlStatusNote();
   if (data.languages && data.languages.length) {
     // A language saved in this browser wins over the server default, so
     // switching devices doesn't silently change what you get.
@@ -1699,13 +1674,7 @@ saveSettingsBtn.addEventListener("click", async () => {
     whisper_url: whisperUrl ? whisperUrl.value.trim() : "",
     whisper_start_command: whisperStartCommand ? whisperStartCommand.value.trim() : "",
     allow_openai_fallback: allowFallbackToggle ? allowFallbackToggle.checked : false,
-    osc_host: oscHost ? oscHost.value.trim() : "",
-    osc_port: oscPort ? parseInt(oscPort.value, 10) || 9000 : 9000,
-    osc_sfx: oscSfxToggle ? oscSfxToggle.checked : true,
-    osc_page_seconds_speaking: oscPageSpeaking ? parseFloat(oscPageSpeaking.value) : 1.6,
-    osc_page_seconds_silent: oscPageSilent ? parseFloat(oscPageSilent.value) : 4,
-    osc_control_enabled: oscControlToggle ? oscControlToggle.checked : false,
-    osc_listen_port: oscListenPort ? parseInt(oscListenPort.value, 10) || 9001 : 9001,
+    osc_enabled: oscEnabledToggle ? oscEnabledToggle.checked : false,
   };
   if (openaiKeyInput.value.trim()) body.openai_api_key = openaiKeyInput.value.trim();
   if (elevenKeyInput.value.trim()) body.elevenlabs_api_key = elevenKeyInput.value.trim();
@@ -1737,7 +1706,11 @@ saveSettingsBtn.addEventListener("click", async () => {
 
 
 const OSC_ENABLED_KEY = "voice_console_osc_enabled";
+// Whether the chatbox can actually go anywhere: the feature switched on in
+// Settings, AND a companion currently connected to carry it.
 let oscConfigured = false;
+let oscEnabled_setting = false;
+let frivoscConnected = false;
 
 
 const CREDITS_POLL_MS = 60000;
@@ -1867,18 +1840,73 @@ function oscEnabled() {
 }
 
 function syncOscSwitch() {
-  // Left usable but explained when there's no address yet — hiding it would
-  // just raise the question of where the VRChat option went.
+  // Left usable but explained when it cannot deliver — hiding it would just
+  // raise the question of where the VRChat option went.
   oscSwitch.title = oscConfigured
     ? "Show the spoken reply in your VRChat chatbox as it plays"
-    : "Set the VRChat PC's address in Settings to use this";
+    : oscEnabled_setting
+      ? "Waiting for FrivOSC on your VRChat PC"
+      : "Turn on VRChat OSC in Settings to use this";
   oscSwitch.classList.toggle("is-unset", !oscConfigured);
+}
+
+// ---------- FrivOSC status ----------
+// Frivo speaks no OSC of its own. FrivOSC runs on the VRChat PC and reports
+// in; all this does is show whether it is there, and keep the composer
+// switch honest about whether a message would actually arrive.
+
+const FRIVOSC_POLL_MS = 5000;
+let frivoscTimer = null;
+
+function describeFrivosc(data) {
+  // Deliberately just "Connected". The hostname reads as "Connected — PA…"
+  // at this row's width, which tells nobody anything; the machine's name is
+  // visible in FrivOSC's own window, on the machine in question.
+  if (!data || !data.enabled) return "Off";
+  return data.connected ? "Connected" : "Not connected";
+}
+
+async function pollFrivoscStatus() {
+  try {
+    const res = await fetch("/api/frivosc/status");
+    const data = await res.json();
+    if (!res.ok) return;
+    frivoscConnected = Boolean(data.connected);
+    oscEnabled_setting = Boolean(data.enabled);
+    oscConfigured = frivoscConnected && oscEnabled_setting;
+    setSummary("frivoscStatusValue", describeFrivosc(data));
+    syncOscSwitch();
+  } catch (err) {
+    // Frivo's own server is unreachable; the page has louder problems.
+  }
+}
+
+function startFrivoscPolling() {
+  clearInterval(frivoscTimer);
+  pollFrivoscStatus();
+  frivoscTimer = setInterval(pollFrivoscStatus, FRIVOSC_POLL_MS);
+}
+
+if (oscEnabledToggle) {
+  oscEnabledToggle.addEventListener("change", () => {
+    // Reflected immediately so the composer switch does not look stale
+    // between here and the next poll; the server is the authority and the
+    // poll will correct this if saving failed.
+    oscEnabled_setting = oscEnabledToggle.checked;
+    oscConfigured = oscEnabled_setting && frivoscConnected;
+    syncOscSwitch();
+  });
 }
 
 function sendToChatbox(text, { speaking = false } = {}) {
   if (!text) return;
   if (!oscConfigured) {
-    setStatus("VRChat chatbox is on, but no address is set in Settings.", true);
+    setStatus(
+      oscEnabled_setting
+        ? "VRChat chatbox is on, but FrivOSC isn't connected."
+        : "VRChat chatbox is on, but VRChat OSC is off in Settings.",
+      true
+    );
     return;
   }
   // OSC delivery is independent of the chat request. Speaking controls the
@@ -1902,173 +1930,16 @@ function sendToChatbox(text, { speaking = false } = {}) {
 oscToggle.addEventListener("change", () => {
   localStorage.setItem(OSC_ENABLED_KEY, oscToggle.checked ? "1" : "0");
   if (oscToggle.checked && !oscConfigured) {
-    setStatus("Set the VRChat PC's address in Settings for this to do anything.", true);
+    setStatus(
+      oscEnabled_setting
+        ? "Waiting for FrivOSC to connect from your VRChat PC."
+        : "Turn on VRChat OSC in Settings for this to do anything.",
+      true
+    );
   } else {
     setStatus(oscToggle.checked ? "Sending to the VRChat chatbox." : "VRChat chatbox off.");
   }
 });
-
-testOscBtn.addEventListener("click", async () => {
-  oscTestNote.textContent = "Sending…";
-  try {
-    const res = await fetch("/api/osc/test", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        osc_host: oscHost.value.trim(),
-        osc_port: parseInt(oscPort.value, 10) || 9000,
-      }),
-    });
-    const data = await res.json();
-    oscTestNote.textContent = res.ok
-      ? `Sent to ${data.host}:${data.port}. ${data.note}`
-      : data.error;
-    oscTestNote.classList.toggle("is-error", !res.ok);
-  } catch (err) {
-    oscTestNote.textContent = err.message;
-    oscTestNote.classList.add("is-error");
-  }
-});
-
-
-// ---------- OSC controls (mute-synced dictation) ----------
-// Separate from the chatbox feature above: this only ever listens for what
-// VRChat sends out, never sends anything to it. Off by default — until the
-// toggle in Settings is turned on, none of this runs, and dictation behaves
-// exactly as it always has.
-
-let oscControlEnabled = false;
-// null = no signal yet (feature off, or on but VRChat hasn't said anything).
-// This is distinct from false (confirmed unmuted) so the status note and the
-// very first poll don't guess.
-let lastKnownMuted = null;
-
-function updateOscControlStatusNote() {
-  if (!oscControlStatusNote) return;
-  if (!oscControlEnabled) {
-    oscControlStatusNote.textContent = "Off — dictation behaves as it always has.";
-  } else if (lastKnownMuted === null) {
-    oscControlStatusNote.textContent = "On — waiting to hear from VRChat.";
-  } else if (lastKnownMuted) {
-    oscControlStatusNote.textContent = "VRChat: muted — dictation auto-disabled.";
-  } else {
-    oscControlStatusNote.textContent = "VRChat: unmuted — dictation auto-enabled.";
-  }
-}
-
-/**
- * The launch-option hint only earns its place while the feature is on and
- * nothing has arrived — the two states where someone is looking at this
- * panel wondering why it isn't working. Once VRChat is heard it goes away
- * for good, rather than sitting there as permanent setup clutter.
- */
-function updateOscControlHint(data) {
-  if (!oscControlHint) return;
-  const waiting = oscControlEnabled && lastKnownMuted === null;
-  oscControlHint.classList.toggle("is-hidden", !waiting);
-  if (!waiting || !oscLaunchOption) return;
-
-  // Server-supplied rather than guessed from location.hostname: the browser
-  // may be on a third machine, or reaching this over frivo.local, and the
-  // launch option needs the address VRChat should send to.
-  const ip = (data && data.server_ip) || "";
-  const port = (data && data.listen_port) || 9001;
-  oscLaunchOption.value = ip
-    ? `--osc=9000:${ip}:${port}`
-    : `--osc=9000:THIS-PC-IP:${port}`;
-}
-
-if (oscControlToggle) {
-  oscControlToggle.addEventListener("change", () => {
-    oscControlEnabled = oscControlToggle.checked;
-    lastKnownMuted = null;
-    updateOscControlStatusNote();
-    // Hidden until the next poll confirms the server agrees the feature is
-    // on — the toggle isn't saved yet at this point.
-    if (oscControlHint) oscControlHint.classList.add("is-hidden");
-  });
-}
-
-if (copyOscLaunchBtn) {
-  copyOscLaunchBtn.addEventListener("click", async () => {
-    const text = oscLaunchOption ? oscLaunchOption.value : "";
-    if (!text) return;
-    try {
-      await navigator.clipboard.writeText(text);
-      copyOscLaunchBtn.textContent = "Copied";
-      setTimeout(() => { copyOscLaunchBtn.textContent = "Copy"; }, 1500);
-    } catch (err) {
-      // Clipboard needs a secure context, which a LAN http:// address
-      // isn't. Select it instead so Ctrl+C still works.
-      if (oscLaunchOption) {
-        oscLaunchOption.focus();
-        oscLaunchOption.select();
-      }
-      setStatus("Couldn't copy automatically — it's selected, press Ctrl+C.", true);
-    }
-  });
-}
-
-// Same dispatch dictateBtn's own click handler uses, so an auto start/stop
-// behaves identically to clicking the mic — including which engine it uses.
-function autoStartDictation() {
-  if (isDictating) return;
-  activeDictationMode = currentDictationMode();
-  if (activeDictationMode === "live") startLiveDictation();
-  else if (activeDictationMode === "live_local") startLocalLiveDictation();
-  else startDictation();
-}
-
-function autoStopDictation() {
-  if (!isDictating) return;
-  if (activeDictationMode === "live") stopLiveDictation();
-  else if (activeDictationMode === "live_local") stopLocalLiveDictation();
-  else stopDictation();
-}
-
-const MUTE_STATUS_POLL_MS = 3000;
-let muteStatusTimer = null;
-
-async function pollMuteStatus() {
-  try {
-    const res = await fetch("/api/osc/mute-status");
-    const data = await res.json();
-    if (!res.ok || !data.enabled) {
-      oscControlEnabled = false;
-      lastKnownMuted = null;
-      updateOscControlStatusNote();
-      updateOscControlHint(data);
-      return;
-    }
-    oscControlEnabled = true;
-    if (data.muted === null) {
-      // VRChat hasn't sent a MuteSelf update yet — nothing to react to.
-      // Dictation is left exactly as it is rather than guessed at.
-      updateOscControlStatusNote();
-      updateOscControlHint(data);
-      return;
-    }
-    // React only on an actual transition. Re-applying the same state every
-    // 3 seconds would fight a manual click made in between polls — clicking
-    // the mic always has to win until VRChat's state genuinely changes.
-    if (data.muted !== lastKnownMuted) {
-      lastKnownMuted = data.muted;
-      if (data.muted) autoStopDictation();
-      else autoStartDictation();
-    }
-    updateOscControlStatusNote();
-    updateOscControlHint(data);
-  } catch (err) {
-    // Server unreachable — leave dictation exactly as it is.
-  }
-}
-
-function startMuteStatusPolling() {
-  clearInterval(muteStatusTimer);
-  pollMuteStatus();
-  muteStatusTimer = setInterval(pollMuteStatus, MUTE_STATUS_POLL_MS);
-}
-
 
 clearChatBtn.addEventListener("click", async () => {
   // "all" because the transcript can now span several profiles, each with
@@ -5134,9 +5005,9 @@ messageInput.addEventListener("keydown", (e) => {
   }
 
   try {
-    startMuteStatusPolling();
+    startFrivoscPolling();
   } catch (err) {
-    console.error("startMuteStatusPolling failed:", err);
+    console.error("startFrivoscPolling failed:", err);
   }
 
   setLamp("ready");
@@ -5741,20 +5612,6 @@ function refreshSettingsSummaries() {
 
   setSummary("settingsOllamaValue", ollamaUrl && ollamaUrl.value.trim() ? ollamaUrl.value.trim() : "Not set");
   setSummary("settingsWhisperValue", whisperUrl && whisperUrl.value.trim() ? whisperUrl.value.trim() : "Not set");
-  setSummary("settingsOscValue", oscHost && oscHost.value.trim() ? oscHost.value.trim() : "Off");
-  // Both page timings on one line, so the row says what's behind it without
-  // having to be opened.
-  if (oscPageSpeaking && oscPageSilent) {
-    const on = parseFloat(oscPageSpeaking.value);
-    const off = parseFloat(oscPageSilent.value);
-    setSummary(
-      "settingsOscTimingValue",
-      isFinite(on) && isFinite(off) ? `${on.toFixed(1)}s / ${off.toFixed(1)}s` : "—"
-    );
-  }
-  if (oscListenPort) {
-    setSummary("settingsOscListenValue", String(parseInt(oscListenPort.value, 10) || 9001));
-  }
 }
 
 // The summaries are derived from controls that several different code paths
