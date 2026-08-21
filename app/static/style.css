@@ -1811,6 +1811,13 @@ button.srow:active { background: var(--fill-strong); }
 
 .srow-icon { flex: none; display: grid; place-items: center; color: var(--accent); }
 .srow-main { min-width: 0; flex: none; }
+/* Opt-in for a row whose sub-label is long enough to need wrapping (only
+   used beside an inline .switch, never a .srow-spacer row — those size
+   .srow-main to its label on purpose, see the comment below). Without
+   this, flex:none sizes text to one line at its natural width, which for
+   a long sub just pushes the row (and the switch with it) wider than the
+   panel instead of wrapping. */
+.srow-main--flex { flex: 1 1 auto; }
 .srow-label { display: block; color: var(--ink); }
 .srow-sub {
   display: block;

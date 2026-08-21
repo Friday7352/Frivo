@@ -157,12 +157,33 @@ or off.
 3. Leave **Listen port** at `9001` unless your VRChat OSC configuration uses
    another port for its output.
 
-This only works when VRChat runs on the same PC as Frivo — VRChat always sends
-this data to `127.0.0.1`, with no setting to point it anywhere else. If VRChat
-runs on a different PC, this feature won't see anything unless something on
-your network (an OSC router) forwards that traffic to Frivo's machine; the
-chatbox feature above is unaffected either way, since it sends the other
-direction.
+This only works out of the box when VRChat runs on the same PC as Frivo —
+VRChat always sends this data to `127.0.0.1`, with no setting to point it
+anywhere else. The chatbox feature above is unaffected either way, since it
+sends the other direction.
+
+### VRChat and Frivo on different PCs
+
+If your setup is like this — Frivo's server on one PC, VRChat on another —
+mute-synced dictation needs a small relay running on the **VRChat PC** to
+forward that `127.0.0.1` traffic over to the Frivo server. This ships with
+Frivo, so no separate download:
+
+1. On the VRChat PC, double-click **Start-OSC-Relay.bat** in this folder (or
+   run it from a terminal with the Frivo server's address as an argument:
+   `Start-OSC-Relay.bat 192.168.1.50`).
+2. Enter the Frivo server's LAN address when asked — the same one you'd put
+   in the chatbox feature's "VRChat PC address" field, just pointed the
+   other way.
+3. Leave it running alongside VRChat. It only relays traffic; it doesn't
+   touch your avatar or send anything to VRChat's chatbox.
+
+Under the hood this is `app.py --osc-relay --target <address>`, in case you'd
+rather run it manually or from your own startup script — `--listen-port` is
+also available if you ever change VRChat's OSC output port from its default.
+The relay is a dumb byte-for-byte forwarder: it doesn't need an OpenAI or
+ElevenLabs key, doesn't touch `%APPDATA%\Frivo`, and doesn't do anything
+Frivo's normal server-mode startup does — it only relays.
 
 ## Other devices on your network
 
