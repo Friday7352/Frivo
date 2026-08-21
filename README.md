@@ -175,15 +175,28 @@ Frivo, so no separate download:
 2. Enter the Frivo server's LAN address when asked — the same one you'd put
    in the chatbox feature's "VRChat PC address" field, just pointed the
    other way.
-3. Leave it running alongside VRChat. It only relays traffic; it doesn't
-   touch your avatar or send anything to VRChat's chatbox.
+3. On the **Frivo server**, allow inbound UDP on the listen port, once, from
+   an elevated prompt:
 
-Under the hood this is `app.py --osc-relay --target <address>`, in case you'd
-rather run it manually or from your own startup script — `--listen-port` is
-also available if you ever change VRChat's OSC output port from its default.
-The relay is a dumb byte-for-byte forwarder: it doesn't need an OpenAI or
-ElevenLabs key, doesn't touch `%APPDATA%\Frivo`, and doesn't do anything
-Frivo's normal server-mode startup does — it only relays.
+       netsh advfirewall firewall add rule name="Frivo OSC in" dir=in action=allow protocol=UDP localport=9001
+
+4. Leave the relay running alongside VRChat. It only forwards traffic; it
+   doesn't touch your avatar or send anything to VRChat's chatbox.
+
+Under the hood this is `app/osc_relay.py`, so you can run it manually or from
+your own startup script:
+
+    python osc_relay.py --target 192.168.1.50
+
+`--listen-port` is also available if you ever change VRChat's OSC output port
+from its default.
+
+**The relay needs only Python itself** — no `pip install`, none of Frivo's
+other requirements. It imports nothing outside the standard library, because
+the PC running VRChat usually isn't the one with Frivo's dependencies set up.
+Copying `osc_relay.py` on its own to a VRChat PC with any Python 3 install is
+enough; it doesn't read your config, doesn't need API keys, and doesn't touch
+`%APPDATA%\Frivo`. All it does is forward UDP packets byte-for-byte.
 
 ## Other devices on your network
 

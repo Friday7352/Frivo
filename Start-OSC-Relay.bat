@@ -38,8 +38,9 @@ if "!TARGET!"=="" (
 where python >nul 2>&1
 if errorlevel 1 (
   echo Python was not found on this PC.
-  echo Install Python, or run this on a PC that already has Frivo's
-  echo requirements installed ^(pip install -r requirements.txt^).
+  echo.
+  echo Install Python from python.org and run this again. The relay needs
+  echo nothing else — no pip install, none of Frivo's other requirements.
   pause
   exit /b 1
 )
@@ -49,7 +50,7 @@ echo Starting relay -^> !TARGET!:9001
 echo In VRChat, make sure OSC is enabled under the Options menu.
 echo Press CTRL+C to stop.
 echo.
-python app.py --osc-relay --target "!TARGET!"
+python osc_relay.py --target "!TARGET!"
 
 echo.
 pause
