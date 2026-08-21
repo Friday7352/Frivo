@@ -211,6 +211,38 @@ function New-FrivoForm {
     return $f
 }
 
+function Get-FrivoImage {
+    <#
+        Loads an image WITHOUT holding the file open.
+
+        Image.FromFile keeps a lock on the file for the lifetime of the
+        image, so a window showing a logo from the install folder stops
+        that folder being deleted — which is how the uninstaller came to
+        report "Remove static [FAILED]".
+
+        FromStream alone is not enough either: GDI+ keeps reading from the
+        stream lazily, so the stream has to outlive the image. Copying into
+        a new Bitmap gives an image that owns its pixels outright, so both
+        the file and the stream can be released immediately.
+    #>
+    param([string] $Path)
+    if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $null }
+    $stream = $null
+    $loaded = $null
+    try {
+        # The comma matters: it passes the byte array as one argument
+        # instead of splatting it into many.
+        $stream = New-Object System.IO.MemoryStream(, [System.IO.File]::ReadAllBytes($Path))
+        $loaded = [System.Drawing.Image]::FromStream($stream)
+        return (New-Object System.Drawing.Bitmap($loaded))
+    } catch {
+        return $null
+    } finally {
+        if ($loaded) { $loaded.Dispose() }
+        if ($stream) { $stream.Dispose() }
+    }
+}
+
 function New-FrivoHeader {
     <#
         The logo + title + subtitle block every Frivo window opens with.
@@ -229,7 +261,7 @@ function New-FrivoHeader {
     $logo.SizeMode = 'Zoom'
     $logo.BackColor = [System.Drawing.Color]::Transparent
     if ($LogoPngPath -and (Test-Path -LiteralPath $LogoPngPath)) {
-        try { $logo.Image = [System.Drawing.Image]::FromFile($LogoPngPath) } catch { }
+        $logo.Image = Get-FrivoImage $LogoPngPath
     }
     $Form.Controls.Add($logo)
 
@@ -417,6 +449,6 @@ function New-FrivoProgress {
     return $bar
 }
 
-Export-ModuleMember -Function Get-FrivoTheme, Set-FrivoRounded, New-FrivoForm, New-FrivoHeader,
+Export-ModuleMember -Function Get-FrivoImage, Get-FrivoTheme, Set-FrivoRounded, New-FrivoForm, New-FrivoHeader,
     New-FrivoCard, New-FrivoLabel, New-FrivoButton, New-FrivoCheck, New-FrivoRadio,
     New-FrivoTextBox, New-FrivoProgress, Set-FrivoWindowChrome, Set-FrivoTaskbarIcon
