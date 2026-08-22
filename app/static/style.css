@@ -846,7 +846,14 @@ input[type="range"]::-moz-range-thumb {
 .credit-panel .link-btn { margin-top: 8px; }
 .credit-icon { flex: none; color: var(--accent); }
 .credit-name {
-  flex: none;
+  /* Not flex: none. A no-shrink child with no width sizes to unwrapped
+     max-content, so a longer label ("ElevenLabs credits", not "Credits")
+     silently pushes the balance out of the card instead of ellipsing. */
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: var(--text-subhead);
   font-weight: 500;
   color: var(--ink);
@@ -874,6 +881,14 @@ input[type="range"]::-moz-range-thumb {
 
 /* The local-service chip. app.js assigns className directly, so this must
    style on the base class alone plus its two state classes. */
+/* One chip per service, stacked. They go down independently, so they are
+   reported independently. */
+.service-status-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
 .service-status {
   display: flex;
   align-items: center;

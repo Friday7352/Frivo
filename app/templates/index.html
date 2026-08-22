@@ -304,7 +304,7 @@
               <span class="credit-icon" aria-hidden="true">
                 <svg class="icon-18"><use href="#i-gem"/></svg>
               </span>
-              <span class="credit-name">Credits</span>
+              <span class="credit-name">ElevenLabs credits</span>
               <span id="elevenCredits" class="credit-readout is-hidden"></span>
               <span class="readout" id="sessionCredits">0 credits this session</span>
             </button>
@@ -330,9 +330,9 @@
               <button id="creditsRefresh" class="link-btn" type="button">Refresh balance</button>
             </div>
           </div>
-          <!-- Only appears when a local service is selected; see loadLocalStatus() -->
-          <button id="serviceStatus" class="service-status is-hidden" type="button"
-                  title="Click to re-check"></button>
+          <!-- One chip per service, built by loadLocalStatus(). Empty and
+               hidden until something local is actually selected. -->
+          <div id="serviceStatus" class="service-status-list is-hidden"></div>
         </section>
 
       </div><!-- /side-scroll -->

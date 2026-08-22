@@ -1,4 +1,4 @@
-# Scans every installer script for the "unparenthesised + inside an array
+# Scans every PowerShell script in the repo for the "unparenthesised + inside an array
 # literal" bug found in Set-FirewallRule.
 #
 # In PowerShell, comma binds tighter than +, so
@@ -24,7 +24,15 @@ $RepoRoot = (Resolve-Path -LiteralPath $RepoRoot).Path
 $found = 0
 $scanned = 0
 
-foreach ($file in (Get-ChildItem -Path (Join-Path $RepoRoot 'installer') -Include *.ps1,*.psm1 -Recurse)) {
+# Every PowerShell file in the repo, not just installer/. The build scripts
+# assemble compiler and netsh-style argument arrays the same way, and this
+# class of bug never throws — the wrong command just quietly does nothing —
+# so it has to be searched for rather than waited for.
+$scanRoots = @('installer', 'build', 'tests') |
+    ForEach-Object { Join-Path $RepoRoot $_ } |
+    Where-Object { Test-Path -LiteralPath $_ }
+
+foreach ($file in (Get-ChildItem -Path $scanRoots -Include *.ps1,*.psm1 -Recurse)) {
     $scanned++
     $errors = $null
     $ast = [System.Management.Automation.Language.Parser]::ParseFile($file.FullName, [ref]$null, [ref]$errors)
