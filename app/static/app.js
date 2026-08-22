@@ -270,53 +270,70 @@ const serviceStatus = $("serviceStatus");
 const LOCAL_STATUS_POLL_MS = 30000;
 let localStatusTimer = null;
 
+function serviceChipTitle(service) {
+  const lines = [
+    `${service.name} at ${service.url}`,
+    service.message,
+    `Used for: ${service.used_for.join(", ")}.`,
+  ];
+  // FrivOSC has nothing to fall back to — if it is down, VRChat just gets
+  // nothing. Only the providers with an OpenAI path behind them get the
+  // warning about paying for it.
+  if (!service.ok && service.fallback !== false) {
+    lines.push("Falling back to OpenAI, which costs credits.");
+  }
+  lines.push("Click to re-check.");
+  return lines.join("\n");
+}
+
+function renderServiceChips(services, canStart) {
+  serviceStatus.replaceChildren();
+  services.forEach((service) => {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "service-status " + (service.ok ? "is-ok" : "is-down");
+    chip.dataset.serviceId = service.id;
+
+    const startable = !service.ok && service.id === "whisper" && canStart;
+    chip.dataset.startable = startable ? "1" : "";
+    chip.textContent = startable ? `${service.name} — click to start` : service.name;
+    chip.title = startable
+      ? `${service.message}\nClick to run the configured start command.`
+      : serviceChipTitle(service);
+
+    serviceStatus.append(chip);
+  });
+}
+
+function findChip(id) {
+  return serviceStatus.querySelector(`[data-service-id="${id}"]`);
+}
+
+// Set while the Evora start flow is running. That flow reports its own
+// progress into the chip over the better part of a minute, and the poll
+// below would otherwise rebuild the row underneath it and wipe the text.
+let serviceChipsHeld = false;
+
 async function loadLocalStatus() {
-  if (!serviceStatus) return;
+  if (!serviceStatus || serviceChipsHeld) return;
   try {
     const res = await fetch("/api/local-status");
     const data = await res.json();
 
     if (!res.ok || data.none_selected) {
       serviceStatus.classList.add("is-hidden");
+      serviceStatus.replaceChildren();
+      canStartWhisper = false;
       return;
     }
 
     serviceStatus.classList.remove("is-hidden");
-    const down = data.services.filter((s) => !s.ok);
-
-    if (!down.length) {
-      canStartWhisper = false;
-      const names = data.services.map((s) => s.name).join(" + ");
-      serviceStatus.className = "service-status is-ok";
-      serviceStatus.textContent = names;
-      serviceStatus.title =
-        data.services
-          .map((s) => `${s.name} (${s.url}) — ${s.message}`)
-          .join("\n") + "\n\nClick to re-check.";
-      return;
-    }
-
-    serviceStatus.className = "service-status is-down";
-    const whisperDown = down.some((s) => s.id === "whisper");
+    const whisperDown = data.services.some((s) => s.id === "whisper" && !s.ok);
     canStartWhisper = Boolean(data.can_start_whisper) && whisperDown;
-    serviceStatus.textContent =
-      down.length === 1 ? `${down[0].name} offline` : `${down.length} services offline`;
-    if (canStartWhisper) serviceStatus.textContent += " — click to start";
-    serviceStatus.title =
-      down
-        .map(
-          (s) =>
-            `${s.name} at ${s.url} is not reachable.\n` +
-            `${s.message}\n` +
-            `Used for: ${s.used_for.join(", ")}.` +
-            // FrivOSC has nothing to fall back to — if it is down, VRChat
-            // just gets nothing. Only the providers with an OpenAI path
-            // behind them get the warning about paying for it.
-            (s.fallback === false
-              ? ""
-              : " Falling back to OpenAI, which costs credits.")
-        )
-        .join("\n\n") + "\n\nClick to re-check.";
+    // One chip per service rather than one chip for all of them: they go
+    // down independently and for unrelated reasons, and "2 services
+    // offline" made you hover to find out which.
+    renderServiceChips(data.services, canStartWhisper);
   } catch (err) {
     // The app's own server is unreachable — the page has bigger problems
     // than a provider being down, and its own errors will say so.
@@ -332,44 +349,56 @@ function startLocalStatusPolling() {
 
 let canStartWhisper = false;
 
-if (serviceStatus) {
-  serviceStatus.addEventListener("click", async () => {
-    if (!canStartWhisper) {
-      serviceStatus.textContent = "Checking…";
-      serviceStatus.className = "service-status";
-      loadLocalStatus();
-      return;
-    }
-
-    serviceStatus.textContent = "Starting…";
-    serviceStatus.className = "service-status";
-    try {
-      const res = await fetch("/api/start-whisper", { method: "POST" });
-      const data = await res.json();
-      if (!res.ok) {
-        serviceStatus.className = "service-status is-down";
-        serviceStatus.textContent = "Start failed";
-        serviceStatus.title = data.error || "The start command failed.";
-        return;
-      }
-    } catch (err) {
-      serviceStatus.className = "service-status is-down";
-      serviceStatus.textContent = "Start failed";
-      serviceStatus.title = err.message;
+async function startWhisperFromChip(chip) {
+  serviceChipsHeld = true;
+  chip.className = "service-status";
+  chip.textContent = "Starting…";
+  chip.title = "";
+  try {
+    let res = await fetch("/api/start-whisper", { method: "POST" });
+    let data = await res.json();
+    if (!res.ok) {
+      chip.className = "service-status is-down";
+      chip.textContent = "Start failed";
+      chip.title = data.error || "The start command failed.";
       return;
     }
 
     // Loading a model takes a while, so poll rather than reporting a
     // result the moment the command returns — the command succeeding only
     // means the task was triggered, not that the service is up.
-    serviceStatus.textContent = "Starting… loading model";
+    chip.textContent = "Starting… loading model";
     for (let i = 0; i < 40; i += 1) {
       await new Promise((r) => setTimeout(r, 2000));
-      const res = await fetch("/api/local-status");
-      const data = await res.json();
+      res = await fetch("/api/local-status");
+      data = await res.json();
       const whisper = (data.services || []).find((s) => s.id === "whisper");
       if (whisper && whisper.ok) break;
     }
+  } catch (err) {
+    chip.className = "service-status is-down";
+    chip.textContent = "Start failed";
+    chip.title = err.message;
+    return;
+  } finally {
+    serviceChipsHeld = false;
+  }
+  loadLocalStatus();
+}
+
+if (serviceStatus) {
+  // Delegated, because the chips are rebuilt on every poll.
+  serviceStatus.addEventListener("click", (event) => {
+    const chip = event.target.closest("[data-service-id]");
+    if (!chip) return;
+
+    if (chip.dataset.startable === "1" && canStartWhisper) {
+      startWhisperFromChip(chip);
+      return;
+    }
+
+    chip.className = "service-status";
+    chip.textContent = "Checking…";
     loadLocalStatus();
   });
 }
