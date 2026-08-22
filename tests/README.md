@@ -44,9 +44,27 @@ same shape anywhere else: a `+` expression sitting directly inside an array
 literal. This class of bug never throws — the wrong command just quietly
 does nothing — so it needs to be searched for rather than waited for.
 
+## test-frivosc-bridge.py
+
+    python3 tests/test-frivosc-bridge.py
+
+Frivo's half of the FrivOSC bridge, driven through Flask's test client
+against the real `app.py`: the outbox queue and its bound, the
+acknowledgements, the connected/not-connected rule, the settings switch,
+and the entry FrivOSC gets in the header status chip beside Evora.
+
+Two assertions are there because of bugs that shipped. `osc_enabled` was
+read on the way out of the settings endpoint but never written on the way
+in, so the switch flipped itself back off on every save — and the first
+version of this test passed anyway, because an earlier assertion had set
+the value directly in `CFG` and left it there. Every case now starts from
+`reset()`. The other is that FrivOSC must be marked as having no OpenAI
+fallback: it is not a provider, and a chatbox that cannot reach VRChat
+does not quietly start costing credits.
+
 ## Not covered here
 
-`app.py`, `app.js`, `index.html`, and `style.css` have no automated suite.
+`app.js`, `index.html`, and `style.css` have no automated suite.
 They are checked per change with `python -m py_compile`, `node --check`, an
 HTML tag-balance parse, a cross-check that every `$("id")` in the JS exists
 in the template, and Playwright renders for anything visual.

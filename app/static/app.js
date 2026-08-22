@@ -308,7 +308,13 @@ async function loadLocalStatus() {
           (s) =>
             `${s.name} at ${s.url} is not reachable.\n` +
             `${s.message}\n` +
-            `Used for: ${s.used_for.join(", ")}. Falling back to OpenAI, which costs credits.`
+            `Used for: ${s.used_for.join(", ")}.` +
+            // FrivOSC has nothing to fall back to — if it is down, VRChat
+            // just gets nothing. Only the providers with an OpenAI path
+            // behind them get the warning about paying for it.
+            (s.fallback === false
+              ? ""
+              : " Falling back to OpenAI, which costs credits.")
         )
         .join("\n\n") + "\n\nClick to re-check.";
   } catch (err) {
@@ -1871,11 +1877,19 @@ async function pollFrivoscStatus() {
     const res = await fetch("/api/frivosc/status");
     const data = await res.json();
     if (!res.ok) return;
+    const wasConnected = frivoscConnected;
+    const wasEnabled = oscEnabled_setting;
     frivoscConnected = Boolean(data.connected);
     oscEnabled_setting = Boolean(data.enabled);
     oscConfigured = frivoscConnected && oscEnabled_setting;
     setSummary("frivoscStatusValue", describeFrivosc(data));
     syncOscSwitch();
+    // FrivOSC also appears in the header chip alongside Evora, which polls
+    // far more slowly. Nudging it on a change keeps the two from disagreeing
+    // for half a minute after FrivOSC comes up or goes away.
+    if (frivoscConnected !== wasConnected || oscEnabled_setting !== wasEnabled) {
+      loadLocalStatus();
+    }
   } catch (err) {
     // Frivo's own server is unreachable; the page has louder problems.
   }
