@@ -295,23 +295,51 @@ function Test-RequirementsChanged {
 
 function Update-ShellIconCache {
     <#
-        Windows caches shortcut icons by path. Replacing an .ico with new
-        artwork at the same path therefore changes nothing on screen — the
-        desktop keeps drawing the old picture, sometimes for weeks, and it
-        reads as "the new icon did not install".
+        Makes replaced icon artwork actually appear.
 
-        ie4uinit rebuilds that cache. Best effort by design: a stale icon is
-        a cosmetic problem and must never fail an install.
+        Windows caches icons per path, so writing new artwork to the same
+        .ico changes nothing on screen — Explorer keeps drawing what it
+        cached, through uninstalls and reinstalls, which reads as "the new
+        icon did not install".
+
+        Two mechanisms, because one is not enough:
+
+          SHChangeNotify(SHCNE_ASSOCCHANGED) is the documented way to tell
+          the shell its icon associations changed. Explorer re-reads icons
+          on the next paint, with no restart.
+
+          ie4uinit rebuilds the on-disk cache database, which SHChangeNotify
+          alone does not touch.
+
+        Neither covers an icon compiled into an .exe as a resource — that
+        needs the executable rebuilt, not a cache refresh.
+
+        Best effort throughout: a stale icon is cosmetic and must never
+        fail an install.
     #>
     try {
+        if (-not ('FrivoShell.Notify' -as [type])) {
+            $signature = @'
+[DllImport("shell32.dll", CharSet = CharSet.Auto, SetLastError = true)]
+public static extern void SHChangeNotify(int eventId, uint flags, IntPtr item1, IntPtr item2);
+'@
+            Add-Type -Namespace FrivoShell -Name Notify -MemberDefinition $signature -ErrorAction Stop
+        }
+        # SHCNE_ASSOCCHANGED = 0x08000000, SHCNF_IDLIST = 0x0000
+        [FrivoShell.Notify]::SHChangeNotify(0x08000000, 0x0000, [IntPtr]::Zero, [IntPtr]::Zero)
+    } catch { }
+
+    try {
         $ie4uinit = Join-Path ([Environment]::GetFolderPath('System')) 'ie4uinit.exe'
-        if (-not (Test-Path -LiteralPath $ie4uinit -PathType Leaf)) { return }
-        # -show on Windows 10/11; -ClearIconCache on older builds. Trying
-        # both costs nothing and the wrong one is simply ignored.
-        Start-Process -FilePath $ie4uinit -ArgumentList '-show' -WindowStyle Hidden -ErrorAction SilentlyContinue | Out-Null
-        Start-Process -FilePath $ie4uinit -ArgumentList '-ClearIconCache' -WindowStyle Hidden -ErrorAction SilentlyContinue | Out-Null
+        if (Test-Path -LiteralPath $ie4uinit -PathType Leaf) {
+            # -show on Windows 10/11, -ClearIconCache on older builds. The
+            # wrong one is simply ignored, so try both.
+            Start-Process -FilePath $ie4uinit -ArgumentList '-show' -WindowStyle Hidden -ErrorAction SilentlyContinue | Out-Null
+            Start-Process -FilePath $ie4uinit -ArgumentList '-ClearIconCache' -WindowStyle Hidden -ErrorAction SilentlyContinue | Out-Null
+        }
     } catch { }
 }
+
 
 function New-Shortcut {
     param(
