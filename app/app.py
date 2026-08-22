@@ -1640,6 +1640,9 @@ def settings():
         if "allow_openai_fallback" in data:
             CFG["allow_openai_fallback"] = bool(data.get("allow_openai_fallback"))
 
+        if "osc_enabled" in data:
+            CFG["osc_enabled"] = bool(data.get("osc_enabled"))
+
         save_config(CFG)
         return jsonify({"ok": True})
 
@@ -1719,6 +1722,7 @@ def local_status():
             "message": message,
             "url": ollama_base_url(),
             "used_for": uses,
+            "fallback": True,
         })
 
     if transcription == "local_whisper":
@@ -1730,6 +1734,29 @@ def local_status():
             "message": message,
             "url": whisper_base_url(),
             "used_for": ["transcription"],
+            "fallback": True,
+        })
+
+    # FrivOSC reports itself, so there is nothing to probe — it either
+    # checked in recently or it did not. Listed here rather than in its own
+    # indicator because it is the same question as Evora's: a companion
+    # this install depends on, up or down. Only shown once the feature is
+    # switched on, matching the rule the providers above follow.
+    if CFG.get("osc_enabled", False):
+        status = frivosc_status()
+        services.append({
+            "id": "frivosc",
+            "name": "FrivOSC",
+            "ok": bool(status["connected"]),
+            "message": (
+                "Connected." if status["connected"]
+                else "Not connected. Start FrivOSC on the PC you play VRChat on."
+            ),
+            "url": status.get("hostname") or "this network",
+            "used_for": ["VRChat chatbox", "VRChat microphone"],
+            # No OpenAI to fall back to: if FrivOSC is down, VRChat simply
+            # gets nothing. The client uses this to pick the right sentence.
+            "fallback": False,
         })
 
     return jsonify({
