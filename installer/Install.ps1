@@ -293,6 +293,26 @@ function Test-RequirementsChanged {
            (Get-FileHash -LiteralPath $installed -Algorithm SHA256).Hash
 }
 
+function Update-ShellIconCache {
+    <#
+        Windows caches shortcut icons by path. Replacing an .ico with new
+        artwork at the same path therefore changes nothing on screen — the
+        desktop keeps drawing the old picture, sometimes for weeks, and it
+        reads as "the new icon did not install".
+
+        ie4uinit rebuilds that cache. Best effort by design: a stale icon is
+        a cosmetic problem and must never fail an install.
+    #>
+    try {
+        $ie4uinit = Join-Path ([Environment]::GetFolderPath('System')) 'ie4uinit.exe'
+        if (-not (Test-Path -LiteralPath $ie4uinit -PathType Leaf)) { return }
+        # -show on Windows 10/11; -ClearIconCache on older builds. Trying
+        # both costs nothing and the wrong one is simply ignored.
+        Start-Process -FilePath $ie4uinit -ArgumentList '-show' -WindowStyle Hidden -ErrorAction SilentlyContinue | Out-Null
+        Start-Process -FilePath $ie4uinit -ArgumentList '-ClearIconCache' -WindowStyle Hidden -ErrorAction SilentlyContinue | Out-Null
+    } catch { }
+}
+
 function New-Shortcut {
     param(
         [string] $Path, [string] $Target, [string] $WorkingDir,
@@ -631,6 +651,12 @@ function Install-Frivo {
                          -WorkingDir $Target -Description $AppName -IconPath $iconPath
         }
     }
+    # New artwork at an existing path is invisible until the shell cache
+    # is rebuilt, which is what makes a new icon look like it did not
+    # install. Runs whether or not shortcuts were just created, because an
+    # update replaces the .ico without touching the .lnk.
+    Update-ShellIconCache
+
     if ($Action -ne 'Update' -and $StartMenuShortcut) {
         & $Log 'Creating Start Menu entry...'
         $programs = Join-Path ([Environment]::GetFolderPath('CommonStartMenu')) 'Programs'
