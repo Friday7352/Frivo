@@ -658,6 +658,11 @@ def load_config():
         # and letting VRChat's mute button drive dictation are two separate
         # things to want, and one of them takes over your microphone.
         "osc_mute_sync": False,
+        # Unmutes the VRChat microphone when you send a message, so a
+        # spoken reply is not delivered into a muted mic. Its own switch
+        # because it presses a virtual key in VRChat, which the other two
+        # never do.
+        "osc_unmute_on_send": False,
     }
     if os.path.exists(CONFIG_PATH):
         try:
@@ -1683,6 +1688,9 @@ def settings():
         if "osc_mute_sync" in data:
             CFG["osc_mute_sync"] = bool(data.get("osc_mute_sync"))
 
+        if "osc_unmute_on_send" in data:
+            CFG["osc_unmute_on_send"] = bool(data.get("osc_unmute_on_send"))
+
         save_config(CFG)
         return jsonify({"ok": True})
 
@@ -1704,6 +1712,7 @@ def settings():
             "allow_openai_fallback": bool(CFG.get("allow_openai_fallback", False)),
             "osc_enabled": bool(CFG.get("osc_enabled", False)),
             "osc_mute_sync": bool(CFG.get("osc_mute_sync", False)),
+            "osc_unmute_on_send": bool(CFG.get("osc_unmute_on_send", False)),
             "elevenlabs_key_set": bool(CFG["elevenlabs_api_key"]),
             "voice_id": CFG["voice_id"],
             "voice_name": CFG.get("voice_name", ""),
@@ -2425,16 +2434,24 @@ def frivosc_status():
         }
 
 
-def frivosc_enqueue(text, speaking=True):
-    """Queues chatbox text for FrivOSC to collect. Returns the message id."""
+def frivosc_enqueue(text, speaking=True, unmute=False):
+    """
+    Queues work for FrivOSC to collect. Returns the message id.
+
+    Text and unmute travel in the same queue because they are the same
+    kind of thing — something to do on the VRChat PC, in order — and
+    because an unmute is often wanted when the chatbox is switched off, so
+    it cannot be a field on a chatbox message.
+    """
     text = " ".join((text or "").split())
-    if not text:
+    if not text and not unmute:
         return None
     message = {
         "id": uuid.uuid4().hex,
         "text": text,
         "speaking": bool(speaking),
         "sfx": True,
+        "unmute": bool(unmute),
         "queued_at": time.time(),
     }
     with FRIVOSC_LOCK:
@@ -2502,6 +2519,33 @@ def frivosc_ack():
     return jsonify({"ok": True, "id": data.get("id"), "pages": data.get("pages")})
 
 
+@app.route("/api/frivosc/unmute", methods=["POST"])
+def frivosc_unmute():
+    """
+    Asks FrivOSC to unmute the VRChat microphone, if it is muted.
+
+    Only ever unmutes. There is no matching mute: VRChat exposes one
+    virtual button rather than a settable state, and a bug that silences
+    someone mid-conversation is far worse than one that fails to open
+    their microphone.
+    """
+    if not CFG.get("osc_enabled", False):
+        return jsonify({"error": "VRChat OSC is turned off in Settings."}), 400
+    if not CFG.get("osc_unmute_on_send", False):
+        return jsonify({"error": "Unmute on send is turned off."}), 400
+
+    status = frivosc_status()
+    if not status["connected"]:
+        return jsonify({"error": "FrivOSC isn't connected."}), 503
+
+    # Nothing to do, and saying so is more useful than queueing a no-op.
+    if status["muted"] is False:
+        return jsonify({"ok": True, "queued": False, "reason": "already unmuted"})
+
+    message_id = frivosc_enqueue("", unmute=True)
+    return jsonify({"ok": True, "queued": bool(message_id), "id": message_id})
+
+
 @app.route("/api/frivosc/settings", methods=["POST"])
 def frivosc_settings():
     """
@@ -2519,13 +2563,14 @@ def frivosc_settings():
     depends on every one of them staying optional is a trap for later.
     """
     data = request.get_json(force=True) or {}
-    for key in ("osc_enabled", "osc_mute_sync"):
+    for key in ("osc_enabled", "osc_mute_sync", "osc_unmute_on_send"):
         if key in data:
             CFG[key] = bool(data.get(key))
     save_config(CFG)
     return jsonify({
         "osc_enabled": bool(CFG.get("osc_enabled", False)),
         "osc_mute_sync": bool(CFG.get("osc_mute_sync", False)),
+        "osc_unmute_on_send": bool(CFG.get("osc_unmute_on_send", False)),
     })
 
 
@@ -2535,6 +2580,7 @@ def frivosc_status_route():
     status = frivosc_status()
     status["enabled"] = bool(CFG.get("osc_enabled", False))
     status["mute_sync"] = bool(CFG.get("osc_mute_sync", False))
+    status["unmute_on_send"] = bool(CFG.get("osc_unmute_on_send", False))
     return jsonify(status)
 
 
