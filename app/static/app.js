@@ -3586,6 +3586,25 @@ function pickRecorderMimeType() {
   return "";
 }
 
+const IS_APPLE = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || "");
+
+function appendToMessageInput(text) {
+  // One joiner for everything that adds to the box, so the spacing rule
+  // does not get two slightly different answers. A trailing space on the
+  // existing text is respected rather than collapsed, in case someone is
+  // mid-sentence and meant it.
+  const addition = (text || "").trim();
+  if (!addition) return;
+  const existing = messageInput.value;
+  if (!existing.trim()) {
+    messageInput.value = addition;
+    return;
+  }
+  messageInput.value = /\s$/.test(existing)
+    ? existing + addition
+    : `${existing} ${addition}`;
+}
+
 function setDictateUI(active) {
   dictateBtn.classList.toggle("is-recording", active);
   dictateBtn.setAttribute("aria-label", active ? "Stop dictation" : "Dictate");
@@ -3669,8 +3688,7 @@ async function sendDictation(mimeType) {
     // Appended rather than replacing, so dictating in a couple of goes
     // (or dictating on top of something already typed) doesn't clobber
     // what's already in the box.
-    const existing = messageInput.value.trim();
-    messageInput.value = existing ? `${existing} ${text}` : text;
+    appendToMessageInput(text);
     messageInput.focus();
     setStatus("Ready.");
     scheduleAutoSend();
@@ -4453,7 +4471,11 @@ function addListenEntry() {
   const entry = document.createElement("div");
   entry.className = "listen-entry is-pending";
   entry.id = `listen-${(listenEntrySeq += 1)}`;
-  entry.title = "Click to put this message in your reply box";
+  // Ctrl on Windows and Linux, Cmd on a Mac — named for whichever this is,
+  // rather than showing both and making the reader work out which is theirs.
+  entry.title =
+    "Click to put this message in your reply box\n" +
+    `${IS_APPLE ? "Cmd" : "Ctrl"}-click to add it to what's already there`;
 
   const avatar = document.createElement("div");
   avatar.className = "listen-avatar is-unknown";
@@ -4497,12 +4519,26 @@ function addListenEntry() {
 
   // Click anywhere on a message to load it into the reply box. Clicking the
   // speaker name is exempt — that renames, and the two shouldn't fight.
+  //
+  // Ctrl (or Cmd) held appends instead of replacing, so several things
+  // people said can be gathered into one reply. Replacing stays the plain
+  // click because it is the common case: usually you are answering the one
+  // message you just clicked.
   entry.addEventListener("click", (event) => {
     if (event.target.closest(".listen-speaker")) return;
     const spoken = text.textContent.trim();
     if (!spoken || spoken === "…") return;
-    messageInput.value = spoken;
+
+    if (event.ctrlKey || event.metaKey) {
+      appendToMessageInput(spoken);
+    } else {
+      messageInput.value = spoken;
+    }
     messageInput.focus();
+    // Put the caret at the end, so typing continues the sentence rather
+    // than landing wherever it happened to be.
+    const end = messageInput.value.length;
+    messageInput.setSelectionRange(end, end);
     resetLiveDictation();
     entry.classList.add("is-copied");
     setTimeout(() => entry.classList.remove("is-copied"), 400);
