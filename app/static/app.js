@@ -147,7 +147,6 @@ const testWhisperBtn = $("testWhisperBtn");
 const whisperModelSelect = $("whisperModelSelect");
 const applyWhisperModelBtn = $("applyWhisperModelBtn");
 const whisperModelNote = $("whisperModelNote");
-const whisperStartCommand = $("whisperStartCommand");
 
 const oscEnabledToggle = $("oscEnabledToggle");
 const frivoscStatusValue = $("frivoscStatusValue");
@@ -270,70 +269,160 @@ const serviceStatus = $("serviceStatus");
 const LOCAL_STATUS_POLL_MS = 30000;
 let localStatusTimer = null;
 
+// Each service's settings live in exactly one node in the document. The
+// Settings page and the status chip's panel both host that same node by
+// moving it, never by copying it — two copies would mean duplicate element
+// ids and two values that quietly drift apart. `home` is the empty marker
+// left behind in Settings, so it can always be put back.
+const SERVICE_SETTINGS = {
+  whisper: { card: "whisperSettings", home: "whisperSettingsHome" },
+  frivosc: { card: "oscSettings", home: "oscSettingsHome" },
+};
+
+function claimServiceSettings(id, container) {
+  const spec = SERVICE_SETTINGS[id];
+  if (!spec) return;
+  const card = document.getElementById(spec.card);
+  if (card && card.parentElement !== container) container.append(card);
+}
+
+function releaseServiceSettings(id) {
+  const spec = SERVICE_SETTINGS[id];
+  if (!spec) return;
+  const card = document.getElementById(spec.card);
+  const home = document.getElementById(spec.home);
+  if (card && home && card.parentElement !== home.parentElement) {
+    home.after(card);
+  }
+}
+
 function serviceChipTitle(service) {
-  const lines = [
-    `${service.name} at ${service.url}`,
-    service.message,
-    `Used for: ${service.used_for.join(", ")}.`,
-  ];
+  const lines = [`${service.name} at ${service.url}`, service.message];
   // FrivOSC has nothing to fall back to — if it is down, VRChat just gets
   // nothing. Only the providers with an OpenAI path behind them get the
   // warning about paying for it.
   if (!service.ok && service.fallback !== false) {
     lines.push("Falling back to OpenAI, which costs credits.");
   }
-  lines.push("Click to re-check.");
   return lines.join("\n");
 }
 
-function renderServiceChips(services, canStart) {
-  serviceStatus.replaceChildren();
-  services.forEach((service) => {
-    const chip = document.createElement("button");
-    chip.type = "button";
-    chip.className = "service-status " + (service.ok ? "is-ok" : "is-down");
-    chip.dataset.serviceId = service.id;
+// Survives a re-render, so a panel you opened does not shut itself the next
+// time the poll comes round.
+const expandedServices = new Set();
+let renderedServiceIds = "";
 
-    const startable = !service.ok && service.id === "whisper" && canStart;
-    chip.dataset.startable = startable ? "1" : "";
-    chip.textContent = startable ? `${service.name} — click to start` : service.name;
-    chip.title = startable
-      ? `${service.message}\nClick to run the configured start command.`
-      : serviceChipTitle(service);
+function buildServiceBlock(service) {
+  const block = document.createElement("div");
+  block.className = "service-block";
+  block.dataset.serviceId = service.id;
 
-    serviceStatus.append(chip);
+  const chip = document.createElement("button");
+  chip.type = "button";
+  chip.className = "service-status";
+  chip.setAttribute("aria-expanded", "false");
+
+  const name = document.createElement("span");
+  name.className = "service-status-name";
+  chip.append(name);
+
+  const chevron = document.createElement("span");
+  chevron.className = "service-status-chevron";
+  chevron.innerHTML = '<svg class="icon-16" aria-hidden="true"><use href="#i-chevron"/></svg>';
+  chip.append(chevron);
+
+  const panel = document.createElement("div");
+  panel.className = "service-panel is-hidden";
+
+  block.append(chip, panel);
+  return block;
+}
+
+function paintServiceBlock(block, service) {
+  const chip = block.querySelector(".service-status");
+  const open = expandedServices.has(service.id);
+  chip.className = "service-status " + (service.ok ? "is-ok" : "is-down");
+  chip.setAttribute("aria-expanded", open ? "true" : "false");
+  chip.title = serviceChipTitle(service);
+  block.querySelector(".service-status-name").textContent = service.name;
+  block.querySelector(".service-panel").classList.toggle("is-hidden", !open);
+}
+
+function renderServiceChips(services) {
+  // Rebuilt only when the set of services changes. Repainting in place
+  // matters because an open panel is holding the live settings card, and
+  // replaceChildren() would throw it away mid-edit.
+  const signature = services.map((s) => s.id).join(",");
+  if (signature !== renderedServiceIds) {
+    Array.from(serviceStatus.children).forEach((block) => {
+      releaseServiceSettings(block.dataset.serviceId);
+    });
+    serviceStatus.replaceChildren(...services.map(buildServiceBlock));
+    renderedServiceIds = signature;
+  }
+
+  services.forEach((service, index) => {
+    const block = serviceStatus.children[index];
+    if (!block) return;
+    paintServiceBlock(block, service);
+    if (expandedServices.has(service.id)) {
+      claimServiceSettings(service.id, block.querySelector(".service-panel"));
+    }
   });
 }
 
-function findChip(id) {
-  return serviceStatus.querySelector(`[data-service-id="${id}"]`);
+function toggleServicePanel(id) {
+  const block = serviceStatus.querySelector(`.service-block[data-service-id="${id}"]`);
+  if (!block) return;
+  const panel = block.querySelector(".service-panel");
+  const chip = block.querySelector(".service-status");
+
+  if (expandedServices.has(id)) {
+    expandedServices.delete(id);
+    releaseServiceSettings(id);
+    panel.classList.add("is-hidden");
+    chip.setAttribute("aria-expanded", "false");
+    return;
+  }
+
+  // One at a time. Two open panels in a narrow sidebar means scrolling to
+  // find the one you wanted.
+  Array.from(expandedServices).forEach((other) => {
+    if (other !== id) toggleServicePanel(other);
+  });
+
+  expandedServices.add(id);
+  claimServiceSettings(id, panel);
+  panel.classList.remove("is-hidden");
+  chip.setAttribute("aria-expanded", "true");
 }
 
-// Set while the Evora start flow is running. That flow reports its own
-// progress into the chip over the better part of a minute, and the poll
-// below would otherwise rebuild the row underneath it and wipe the text.
-let serviceChipsHeld = false;
+function collapseAllServicePanels() {
+  Array.from(expandedServices).forEach((id) => toggleServicePanel(id));
+}
 
 async function loadLocalStatus() {
-  if (!serviceStatus || serviceChipsHeld) return;
+  if (!serviceStatus) return;
   try {
     const res = await fetch("/api/local-status");
     const data = await res.json();
 
     if (!res.ok || data.none_selected) {
-      serviceStatus.classList.add("is-hidden");
+      Array.from(serviceStatus.children).forEach((block) => {
+        releaseServiceSettings(block.dataset.serviceId);
+      });
+      expandedServices.clear();
       serviceStatus.replaceChildren();
-      canStartWhisper = false;
+      renderedServiceIds = "";
+      serviceStatus.classList.add("is-hidden");
       return;
     }
 
     serviceStatus.classList.remove("is-hidden");
-    const whisperDown = data.services.some((s) => s.id === "whisper" && !s.ok);
-    canStartWhisper = Boolean(data.can_start_whisper) && whisperDown;
     // One chip per service rather than one chip for all of them: they go
     // down independently and for unrelated reasons, and "2 services
     // offline" made you hover to find out which.
-    renderServiceChips(data.services, canStartWhisper);
+    renderServiceChips(data.services);
   } catch (err) {
     // The app's own server is unreachable — the page has bigger problems
     // than a provider being down, and its own errors will say so.
@@ -347,59 +436,13 @@ function startLocalStatusPolling() {
   localStatusTimer = setInterval(loadLocalStatus, LOCAL_STATUS_POLL_MS);
 }
 
-let canStartWhisper = false;
-
-async function startWhisperFromChip(chip) {
-  serviceChipsHeld = true;
-  chip.className = "service-status";
-  chip.textContent = "Starting…";
-  chip.title = "";
-  try {
-    let res = await fetch("/api/start-whisper", { method: "POST" });
-    let data = await res.json();
-    if (!res.ok) {
-      chip.className = "service-status is-down";
-      chip.textContent = "Start failed";
-      chip.title = data.error || "The start command failed.";
-      return;
-    }
-
-    // Loading a model takes a while, so poll rather than reporting a
-    // result the moment the command returns — the command succeeding only
-    // means the task was triggered, not that the service is up.
-    chip.textContent = "Starting… loading model";
-    for (let i = 0; i < 40; i += 1) {
-      await new Promise((r) => setTimeout(r, 2000));
-      res = await fetch("/api/local-status");
-      data = await res.json();
-      const whisper = (data.services || []).find((s) => s.id === "whisper");
-      if (whisper && whisper.ok) break;
-    }
-  } catch (err) {
-    chip.className = "service-status is-down";
-    chip.textContent = "Start failed";
-    chip.title = err.message;
-    return;
-  } finally {
-    serviceChipsHeld = false;
-  }
-  loadLocalStatus();
-}
-
 if (serviceStatus) {
-  // Delegated, because the chips are rebuilt on every poll.
+  // Delegated, because the blocks are rebuilt when the service set changes.
   serviceStatus.addEventListener("click", (event) => {
-    const chip = event.target.closest("[data-service-id]");
+    const chip = event.target.closest(".service-status");
     if (!chip) return;
-
-    if (chip.dataset.startable === "1" && canStartWhisper) {
-      startWhisperFromChip(chip);
-      return;
-    }
-
-    chip.className = "service-status";
-    chip.textContent = "Checking…";
-    loadLocalStatus();
+    const block = chip.closest(".service-block");
+    if (block) toggleServicePanel(block.dataset.serviceId);
   });
 }
 
@@ -489,7 +532,6 @@ function buildProviderPickers(settings) {
   }
   if (whisperUrl) whisperUrl.value = settings.whisper_url || "";
   if (allowFallbackToggle) allowFallbackToggle.checked = Boolean(settings.allow_openai_fallback);
-  if (whisperStartCommand) whisperStartCommand.value = settings.whisper_start_command || "";
 
   syncProviderVisibility();
 
@@ -1652,6 +1694,10 @@ translationModelCustom.addEventListener("input", updateTranslationModelEstimate)
 // Settings is a full-page sheet now, so it needs the usual ways out of one:
 // its own Close button, and Escape.
 function setSettingsOpen(open) {
+  // Settings is where these cards live. Opening it takes them back from any
+  // status chip currently borrowing one, so they are never asked to be in
+  // two places at once.
+  if (open && typeof collapseAllServicePanels === "function") collapseAllServicePanels();
   settingsPanel.classList.toggle("is-hidden", !open);
   settingsToggle.classList.toggle("is-active", open);
   // Always reopens at the top level. Coming back to whichever sub-page you
@@ -1707,7 +1753,6 @@ saveSettingsBtn.addEventListener("click", async () => {
       ? ollamaTranslationModel.value.trim()
       : "",
     whisper_url: whisperUrl ? whisperUrl.value.trim() : "",
-    whisper_start_command: whisperStartCommand ? whisperStartCommand.value.trim() : "",
     allow_openai_fallback: allowFallbackToggle ? allowFallbackToggle.checked : false,
     osc_enabled: oscEnabledToggle ? oscEnabledToggle.checked : false,
   };
@@ -1912,6 +1957,17 @@ async function pollFrivoscStatus() {
     oscEnabled_setting = Boolean(data.enabled);
     oscConfigured = frivoscConnected && oscEnabled_setting;
     setSummary("frivoscStatusValue", describeFrivosc(data));
+    // Mic state is what the mute-sync acts on, so it is worth showing
+    // rather than leaving people to guess why dictation did something.
+    // null is not false: "unknown" and "live" are different answers.
+    setSummary(
+      "frivoscMicValue",
+      !frivoscConnected || data.muted === null || data.muted === undefined
+        ? "Unknown"
+        : data.muted
+          ? "Muted"
+          : "Live"
+    );
     syncOscSwitch();
     // FrivOSC also appears in the header chip alongside Evora, which polls
     // far more slowly. Nudging it on a change keeps the two from disagreeing

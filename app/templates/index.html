@@ -304,7 +304,7 @@
               <span class="credit-icon" aria-hidden="true">
                 <svg class="icon-18"><use href="#i-gem"/></svg>
               </span>
-              <span class="credit-name">ElevenLabs credits</span>
+              <span class="credit-name">Credits</span>
               <span id="elevenCredits" class="credit-readout is-hidden"></span>
               <span class="readout" id="sessionCredits">0 credits this session</span>
             </button>
@@ -314,6 +314,7 @@
                  Today's figure is counted by the server, so it survives a
                  reload and is the same on every device. -->
             <div class="credit-panel is-hidden" id="creditsPanel">
+              <p class="credit-source">ElevenLabs credits</p>
               <div class="credit-line">
                 <span class="credit-line-label">Used today</span>
                 <span class="credit-line-value" id="creditsToday">—</span>
@@ -881,21 +882,32 @@
                   <p class="settings-section-sub">Through FrivOSC</p>
                 </div>
               </div>
-              <div class="settings-card">
+              <!-- Hosted here or in the FrivOSC status chip's panel, never
+                   both: the card is moved between them, never copied, so
+                   there is only ever one of each control. -->
+              <div class="settings-card-home" id="oscSettingsHome"></div>
+              <div class="settings-card" id="oscSettings">
                 <label class="srow">
                   <span class="srow-main srow-main--flex">
                     <span class="srow-label">VRChat OSC</span>
-                    <span class="srow-sub">Chatbox messages and microphone status. FrivOSC handles the ports and the paging, so there is nothing to configure here.</span>
+                    <span class="srow-sub">Chatbox messages and microphone status, relayed by FrivOSC.</span>
                   </span>
                   <span class="switch">
                     <input type="checkbox" id="oscEnabledToggle">
                     <span class="switch-track" aria-hidden="true"></span>
                   </span>
                 </label>
-                <div class="srow">
+                <!-- Hidden when this card is hosted inside the FrivOSC status
+                     chip, which is already saying exactly this one line above. -->
+                <div class="srow" id="frivoscStatusRow">
                   <span class="srow-main"><span class="srow-label">FrivOSC</span></span>
                   <span class="srow-spacer"></span>
                   <span class="srow-value" id="frivoscStatusValue">Not connected</span>
+                </div>
+                <div class="srow">
+                  <span class="srow-main"><span class="srow-label">Microphone in VRChat</span></span>
+                  <span class="srow-spacer"></span>
+                  <span class="srow-value" id="frivoscMicValue">Unknown</span>
                 </div>
               </div>
               <p class="settings-note">
@@ -1087,6 +1099,7 @@
           </div>
 
           <div class="settings-page is-hidden" data-page="whisper" data-title="Evora">
+            <div class="settings-card-home" id="whisperSettingsHome"></div>
             <div class="settings-card" id="whisperSettings">
               <div class="field">
                 <label for="whisperUrl">Evora address</label>
@@ -1095,17 +1108,6 @@
                   <button id="testWhisperBtn" class="btn-ghost btn-sm" type="button">Test</button>
                 </div>
                 <p class="field-note" id="whisperTestNote">Install and open Evora on the machine that will process audio.</p>
-
-                <label for="whisperStartCommand" class="sublabel">
-                  Start command <span class="field-hint">— optional; lets the status chip start it for you</span>
-                </label>
-                <input type="text" id="whisperStartCommand" autocomplete="off"
-                       placeholder="schtasks /run /s 192.168.1.250 /tn VoiceConsoleWhisper">
-                <p class="field-note">
-                  Runs on this server when you click the offline status chip. Leave blank to
-                  disable. Needs the scheduled task installed on the other machine
-                  (install_whisper_task.ps1) and its remote-management firewall rule enabled.
-                </p>
 
                 <label for="whisperModelSelect" class="sublabel">Evora model <span class="field-hint">— switches live, no restart</span></label>
                 <div class="row">

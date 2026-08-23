@@ -619,7 +619,6 @@ def load_config():
         "ollama_translation_model": "",
         "whisper_url": DEFAULT_WHISPER_URL,
         # Optional local command configured by the administrator.
-        "whisper_start_command": "",
         # Optional OpenAI fallback when a selected local provider is unavailable.
         "allow_openai_fallback": False,
         # VRChat, through FrivOSC. Frivo no longer speaks OSC itself —
@@ -1632,7 +1631,6 @@ def settings():
             ("whisper_url", DEFAULT_WHISPER_URL),
             ("ollama_model", DEFAULT_OLLAMA_MODEL),
             ("ollama_translation_model", ""),
-            ("whisper_start_command", ""),
         ):
             if key in data:
                 CFG[key] = (data.get(key) or "").strip() or default
@@ -1661,7 +1659,6 @@ def settings():
             "ollama_model": CFG.get("ollama_model", DEFAULT_OLLAMA_MODEL),
             "ollama_translation_model": CFG.get("ollama_translation_model", ""),
             "whisper_url": CFG.get("whisper_url", DEFAULT_WHISPER_URL),
-            "whisper_start_command": CFG.get("whisper_start_command", ""),
             "allow_openai_fallback": bool(CFG.get("allow_openai_fallback", False)),
             "osc_enabled": bool(CFG.get("osc_enabled", False)),
             "elevenlabs_key_set": bool(CFG["elevenlabs_api_key"]),
@@ -1761,57 +1758,11 @@ def local_status():
 
     return jsonify({
         "services": services,
-        "can_start_whisper": bool((CFG.get("whisper_start_command") or "").strip()),
         # True when nothing local is selected at all, so the client can hide
         # the indicator entirely rather than showing a meaningless "all ok".
         "none_selected": not services,
         "all_ok": all(s["ok"] for s in services),
     })
-
-
-@app.route("/api/start-whisper", methods=["POST"])
-def start_whisper():
-    """
-    Runs the configured command to start the Whisper service remotely.
-
-    The command is read only from the locally saved configuration, never from
-    the request. It is empty by default.
-    """
-    command = (CFG.get("whisper_start_command") or "").strip()
-    if not command:
-        return jsonify({
-            "error": (
-                "No start command configured. Set one under "
-                "Settings -> Providers -> Evora start command."
-            )
-        }), 400
-
-    import subprocess
-
-    try:
-        result = subprocess.run(
-            command,
-            shell=True,
-            capture_output=True,
-            text=True,
-            # Bound execution time for external commands.
-            timeout=30,
-        )
-    except subprocess.TimeoutExpired:
-        return jsonify({"error": "Start command timed out after 30s."}), 504
-    except Exception as e:
-        return jsonify({"error": f"Couldn't run the start command: {e}"}), 500
-
-    output = (result.stdout or "").strip() or (result.stderr or "").strip()
-    log_server_event(f"Whisper start command exited {result.returncode}: {output[:400]}")
-
-    if result.returncode != 0:
-        return jsonify({
-            "error": f"Start command failed (exit {result.returncode}). {output[:300]}"
-        }), 502
-
-    # The client polls local-provider status while the service starts.
-    return jsonify({"ok": True, "message": output or "Start command sent."})
 
 
 @app.route("/api/provider-test", methods=["POST"])
