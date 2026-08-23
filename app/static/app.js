@@ -150,6 +150,7 @@ const whisperModelNote = $("whisperModelNote");
 
 const oscEnabledToggle = $("oscEnabledToggle");
 const oscMuteSyncToggle = $("oscMuteSyncToggle");
+const oscUnmuteOnSendToggle = $("oscUnmuteOnSendToggle");
 const frivoscStatusValue = $("frivoscStatusValue");
 const oscToggle = $("oscToggle");
 const oscSwitch = $("oscSwitch");
@@ -1602,6 +1603,7 @@ async function loadSettings() {
 
   if (oscEnabledToggle) oscEnabledToggle.checked = Boolean(data.osc_enabled);
   if (oscMuteSyncToggle) oscMuteSyncToggle.checked = Boolean(data.osc_mute_sync);
+  if (oscUnmuteOnSendToggle) oscUnmuteOnSendToggle.checked = Boolean(data.osc_unmute_on_send);
   oscEnabled_setting = Boolean(data.osc_enabled);
   // "Configured" now means the feature is on and a companion is actually
   // there. There is no address left to get wrong.
@@ -1758,6 +1760,7 @@ saveSettingsBtn.addEventListener("click", async () => {
     allow_openai_fallback: allowFallbackToggle ? allowFallbackToggle.checked : false,
     osc_enabled: oscEnabledToggle ? oscEnabledToggle.checked : false,
     osc_mute_sync: oscMuteSyncToggle ? oscMuteSyncToggle.checked : false,
+    osc_unmute_on_send: oscUnmuteOnSendToggle ? oscUnmuteOnSendToggle.checked : false,
   };
   if (openaiKeyInput.value.trim()) body.openai_api_key = openaiKeyInput.value.trim();
   if (elevenKeyInput.value.trim()) body.elevenlabs_api_key = elevenKeyInput.value.trim();
@@ -1951,6 +1954,7 @@ let frivoscPollRate = 0;
 // That is what lets the mic button override it: stop dictation by hand
 // while still unmuted and it stays stopped, because nothing changed.
 let muteSyncEnabled = false;
+let unmuteOnSendEnabled = false;
 let lastSyncedMute = null;
 let frivoscMuted = null;
 
@@ -2010,6 +2014,7 @@ async function pollFrivoscStatus() {
     frivoscConnected = Boolean(data.connected);
     oscEnabled_setting = Boolean(data.enabled);
     muteSyncEnabled = Boolean(data.mute_sync);
+    unmuteOnSendEnabled = Boolean(data.unmute_on_send);
     frivoscMuted =
       !frivoscConnected || data.muted === null || data.muted === undefined
         ? null
@@ -2062,8 +2067,10 @@ async function saveOscSwitches(patch, toggle) {
     const saved = await res.json();
     if (oscEnabledToggle) oscEnabledToggle.checked = Boolean(saved.osc_enabled);
     if (oscMuteSyncToggle) oscMuteSyncToggle.checked = Boolean(saved.osc_mute_sync);
+    if (oscUnmuteOnSendToggle) oscUnmuteOnSendToggle.checked = Boolean(saved.osc_unmute_on_send);
     oscEnabled_setting = Boolean(saved.osc_enabled);
     muteSyncEnabled = Boolean(saved.osc_mute_sync);
+    unmuteOnSendEnabled = Boolean(saved.osc_unmute_on_send);
     oscConfigured = oscEnabled_setting && frivoscConnected;
     syncOscSwitch();
     // Reflect it in the chip straight away rather than up to 30s later.
@@ -2087,6 +2094,16 @@ if (oscEnabledToggle) {
   });
 }
 
+if (oscUnmuteOnSendToggle) {
+  oscUnmuteOnSendToggle.addEventListener("change", () => {
+    unmuteOnSendEnabled = oscUnmuteOnSendToggle.checked;
+    saveOscSwitches(
+      { osc_unmute_on_send: oscUnmuteOnSendToggle.checked },
+      oscUnmuteOnSendToggle
+    );
+  });
+}
+
 if (oscMuteSyncToggle) {
   oscMuteSyncToggle.addEventListener("change", () => {
     muteSyncEnabled = oscMuteSyncToggle.checked;
@@ -2097,6 +2114,17 @@ if (oscMuteSyncToggle) {
     // broken.
     lastSyncedMute = null;
     saveOscSwitches({ osc_mute_sync: oscMuteSyncToggle.checked }, oscMuteSyncToggle);
+  });
+}
+
+function requestVrchatUnmute() {
+  // Everything here is also checked on the server; this just avoids a
+  // pointless request on every single send when the feature is off.
+  if (!unmuteOnSendEnabled || !oscEnabled_setting || !frivoscConnected) return;
+  if (frivoscMuted === false) return;
+  fetch("/api/frivosc/unmute", { method: "POST" }).catch(() => {
+    // Not surfaced. It is a convenience on top of sending a message, and
+    // an error toast here would interrupt the thing you actually asked for.
   });
 }
 
@@ -5087,6 +5115,11 @@ async function send() {
   cancelAutoSend();
   // Start a fresh dictation utterance after sending.
   resetLiveDictation();
+  // Open the VRChat microphone now rather than when the reply plays: the
+  // tap takes a moment to land and be confirmed, and the reply is seconds
+  // away. Deliberately not awaited — nothing about sending should wait on
+  // VRChat, and a failure here is reported in FrivOSC's own log.
+  requestVrchatUnmute();
   addTurn("You", message);
   showTypingBubble();
   setStatus("Generating…");

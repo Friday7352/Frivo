@@ -64,6 +64,7 @@ def reset():
     """
     mod.CFG["osc_enabled"] = False
     mod.CFG["osc_mute_sync"] = False
+    mod.CFG["osc_unmute_on_send"] = False
     with mod.FRIVOSC_LOCK:
         mod.FRIVOSC_STATE.update({
             "connected_at": None, "last_seen": None,
@@ -187,6 +188,68 @@ with mod.FRIVOSC_LOCK:
 status = client.get("/api/frivosc/status").get_json()
 check("a companion that stopped reporting goes back to unknown, not unmuted",
       status["muted"] is None, status)
+
+
+print("\n--- unmute on send ---")
+# VRChat exposes a button, not a settable state, so this can only ever
+# unmute. There is deliberately no matching mute: silencing someone
+# mid-conversation is a far worse failure than failing to open their mic.
+reset()
+response = client.post("/api/frivosc/unmute")
+check("refused while VRChat OSC is off", response.status_code == 400, response.status_code)
+
+reset()
+mod.CFG["osc_enabled"] = True
+response = client.post("/api/frivosc/unmute")
+check("refused while the switch itself is off", response.status_code == 400,
+      response.status_code)
+
+reset()
+mod.CFG["osc_enabled"] = True
+mod.CFG["osc_unmute_on_send"] = True
+response = client.post("/api/frivosc/unmute")
+check("refused when FrivOSC is not there to do it", response.status_code == 503,
+      response.status_code)
+
+reset()
+mod.CFG["osc_enabled"] = True
+mod.CFG["osc_unmute_on_send"] = True
+client.post("/api/frivosc/hello", json={"version": "1.0.0", "hostname": "VRPC"})
+client.post("/api/frivosc/state", json={"muted": False})
+response = client.post("/api/frivosc/unmute")
+check("nothing queued when already unmuted",
+      response.status_code == 200 and response.get_json().get("queued") is False,
+      response.get_json())
+check("and the outbox stays empty", len(mod.FRIVOSC_OUTBOX) == 0,
+      len(mod.FRIVOSC_OUTBOX))
+
+client.post("/api/frivosc/state", json={"muted": True})
+response = client.post("/api/frivosc/unmute")
+check("queued when muted", response.get_json().get("queued") is True,
+      response.get_json())
+outbox = client.get("/api/frivosc/outbox").get_json()
+queued = (outbox.get("messages") or [])
+check("FrivOSC is handed an unmute", any(m.get("unmute") for m in queued), outbox)
+check("with no text, so it is not also a chatbox message",
+      all(not m.get("text") for m in queued if m.get("unmute")), outbox)
+
+# The mute state can be unknown — no companion, or one that has not heard
+# from VRChat yet. Queue it and let FrivOSC decide, since it is the one
+# that can actually see the state.
+reset()
+mod.CFG["osc_enabled"] = True
+mod.CFG["osc_unmute_on_send"] = True
+client.post("/api/frivosc/hello", json={"version": "1.0.0", "hostname": "VRPC"})
+response = client.post("/api/frivosc/unmute")
+check("an unknown mute state still queues, for FrivOSC to judge",
+      response.get_json().get("queued") is True, response.get_json())
+
+reset()
+response = client.post("/api/frivosc/settings", json={"osc_unmute_on_send": True})
+check("the switch saves with the others",
+      mod.CFG.get("osc_unmute_on_send") is True, mod.CFG.get("osc_unmute_on_send"))
+check("and is reported back to the browser",
+      response.get_json().get("osc_unmute_on_send") is True, response.get_json())
 
 
 print("\n--- the queue ---")

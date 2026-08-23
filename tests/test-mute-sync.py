@@ -45,6 +45,7 @@ spec.loader.exec_module(mod)
 mod.CFG["transcription_provider"] = "local_whisper"
 mod.CFG["osc_enabled"] = True
 mod.CFG["osc_mute_sync"] = False
+mod.CFG["osc_unmute_on_send"] = True
 mod.CFG["whisper_url"] = "http://192.168.1.9:9000"
 mod.probe_provider = lambda name, timeout=2: (True, "Reachable.")
 
@@ -158,6 +159,38 @@ function check(name, cond, got) {
   check('with the switch off, unmuting does nothing', !(await recording()));
   await toggle(true); await wait(2500);
   check('switching it on while unmuted starts dictation', await recording());
+
+  console.log('\n--- unmute on send ---');
+  // Sending a message should open the VRChat mic if it is shut, so a
+  // spoken reply is not delivered into a closed one.
+  await toggle(false); await wait(600);   // mute sync off, so it cannot interfere
+  const sends = [];
+  await p.evaluate(() => {
+    window.__unmuteCalls = 0;
+    const real = window.fetch;
+    window.fetch = (url, opts) => {
+      if (String(url).includes('/api/frivosc/unmute')) window.__unmuteCalls += 1;
+      return real(url, opts);
+    };
+  });
+
+  await mute('on'); await wait(1600);
+  await p.fill('#messageInput', 'hello there');
+  await p.evaluate(() => document.getElementById('sendBtn').click());
+  await wait(1200);
+  let calls = await p.evaluate(() => window.__unmuteCalls);
+  check('sending while muted asks for an unmute', calls >= 1, calls);
+
+  // A full poll interval, not a token wait: with mute sync off the browser
+  // only refreshes its idea of the mute state every 5s, and the point of
+  // this case is that the *client* skips the request on its own.
+  await mute('off'); await wait(6000);
+  await p.evaluate(() => { window.__unmuteCalls = 0; });
+  await p.fill('#messageInput', 'hello again');
+  await p.evaluate(() => document.getElementById('sendBtn').click());
+  await wait(1200);
+  calls = await p.evaluate(() => window.__unmuteCalls);
+  check('sending while already unmuted does not', calls === 0, calls);
 
   console.log('\n--- companion disappears ---');
   await p.evaluate(() => fetch('/_test/mute/unknown'));
