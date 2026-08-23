@@ -63,6 +63,7 @@ def reset():
     save bug did so because state leaked from one assertion to the next.
     """
     mod.CFG["osc_enabled"] = False
+    mod.CFG["osc_mute_sync"] = False
     with mod.FRIVOSC_LOCK:
         mod.FRIVOSC_STATE.update({
             "connected_at": None, "last_seen": None,
@@ -97,6 +98,25 @@ check("a save that does not mention it leaves it alone",
       mod.CFG.get("osc_enabled") is True, mod.CFG.get("osc_enabled"))
 
 
+reset()
+settings_post({"osc_mute_sync": True})
+check("mute sync saves independently of the chatbox switch",
+      mod.CFG.get("osc_mute_sync") is True and mod.CFG.get("osc_enabled") is False,
+      (mod.CFG.get("osc_mute_sync"), mod.CFG.get("osc_enabled")))
+
+reset()
+mod.CFG["osc_mute_sync"] = True
+settings_post({"osc_enabled": True})
+check("and turning the chatbox on does not disturb it",
+      mod.CFG.get("osc_mute_sync") is True, mod.CFG.get("osc_mute_sync"))
+
+reset()
+mod.CFG["osc_mute_sync"] = True
+status = client.get("/api/frivosc/status").get_json()
+check("the browser is told whether mute sync is on",
+      status.get("mute_sync") is True, status)
+
+
 print("\n--- checking in ---")
 reset()
 status = client.get("/api/frivosc/status").get_json()
@@ -113,6 +133,32 @@ with mod.FRIVOSC_LOCK:
 status = client.get("/api/frivosc/status").get_json()
 check("it goes down again when it stops reporting",
       status["connected"] is False, status)
+
+
+print("\n--- what mute sync acts on ---")
+reset()
+mod.CFG["osc_mute_sync"] = True
+status = client.get("/api/frivosc/status").get_json()
+check("no companion means the mic state is unknown, not unmuted",
+      status["muted"] is None, status)
+
+client.post("/api/frivosc/hello", json={"version": "1.0.0", "hostname": "VRPC"})
+status = client.get("/api/frivosc/status").get_json()
+check("still unknown before VRChat has said anything", status["muted"] is None, status)
+
+client.post("/api/frivosc/state", json={"muted": False})
+status = client.get("/api/frivosc/status").get_json()
+check("unmuted is reported once VRChat says so", status["muted"] is False, status)
+
+client.post("/api/frivosc/state", json={"muted": True})
+status = client.get("/api/frivosc/status").get_json()
+check("and muted after that", status["muted"] is True, status)
+
+with mod.FRIVOSC_LOCK:
+    mod.FRIVOSC_STATE["last_seen"] = time.time() - (mod.FRIVOSC_STALE_SECONDS + 5)
+status = client.get("/api/frivosc/status").get_json()
+check("a companion that stopped reporting goes back to unknown, not unmuted",
+      status["muted"] is None, status)
 
 
 print("\n--- the queue ---")

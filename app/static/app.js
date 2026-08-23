@@ -149,6 +149,7 @@ const applyWhisperModelBtn = $("applyWhisperModelBtn");
 const whisperModelNote = $("whisperModelNote");
 
 const oscEnabledToggle = $("oscEnabledToggle");
+const oscMuteSyncToggle = $("oscMuteSyncToggle");
 const frivoscStatusValue = $("frivoscStatusValue");
 const oscToggle = $("oscToggle");
 const oscSwitch = $("oscSwitch");
@@ -1600,6 +1601,7 @@ async function loadSettings() {
   renderVoiceTrigger();
 
   if (oscEnabledToggle) oscEnabledToggle.checked = Boolean(data.osc_enabled);
+  if (oscMuteSyncToggle) oscMuteSyncToggle.checked = Boolean(data.osc_mute_sync);
   oscEnabled_setting = Boolean(data.osc_enabled);
   // "Configured" now means the feature is on and a companion is actually
   // there. There is no address left to get wrong.
@@ -1755,6 +1757,7 @@ saveSettingsBtn.addEventListener("click", async () => {
     whisper_url: whisperUrl ? whisperUrl.value.trim() : "",
     allow_openai_fallback: allowFallbackToggle ? allowFallbackToggle.checked : false,
     osc_enabled: oscEnabledToggle ? oscEnabledToggle.checked : false,
+    osc_mute_sync: oscMuteSyncToggle ? oscMuteSyncToggle.checked : false,
   };
   if (openaiKeyInput.value.trim()) body.openai_api_key = openaiKeyInput.value.trim();
   if (elevenKeyInput.value.trim()) body.elevenlabs_api_key = elevenKeyInput.value.trim();
@@ -1935,8 +1938,59 @@ function syncOscSwitch() {
 // in; all this does is show whether it is there, and keep the composer
 // switch honest about whether a message would actually arrive.
 
+// Two rates. Showing "connected" a few seconds late is nothing; letting
+// dictation start a few seconds after you unmute in VRChat is the whole
+// feature arriving late, so mute sync polls harder while it is on. The
+// endpoint is a small JSON read against a server on your own network.
 const FRIVOSC_POLL_MS = 5000;
+const FRIVOSC_SYNC_POLL_MS = 1000;
 let frivoscTimer = null;
+let frivoscPollRate = 0;
+
+// Mute sync acts on *changes* in VRChat's mute state, never on the level.
+// That is what lets the mic button override it: stop dictation by hand
+// while still unmuted and it stays stopped, because nothing changed.
+let muteSyncEnabled = false;
+let lastSyncedMute = null;
+let frivoscMuted = null;
+
+function noteManualDictationOverride() {
+  // The current mute state has now been "handled" by the person, so the
+  // next poll has nothing new to act on.
+  lastSyncedMute = frivoscMuted;
+}
+
+function applyMuteSync() {
+  if (!muteSyncEnabled || !oscEnabled_setting || !frivoscConnected) {
+    // Nothing is driving dictation, so forget where we were. Turning the
+    // switch back on should act on the next change, not on a stale one.
+    lastSyncedMute = null;
+    return;
+  }
+  // Before VRChat has said anything, muted is null — genuinely unknown, and
+  // not the same as unmuted. Acting on it would start dictation for a mic
+  // that may well be muted.
+  if (frivoscMuted === null) return;
+  if (frivoscMuted === lastSyncedMute) return;
+
+  lastSyncedMute = frivoscMuted;
+  if (frivoscMuted) {
+    if (isDictating) {
+      endDictation();
+      setStatus("Muted in VRChat — dictation stopped.");
+    }
+  } else if (!isDictating) {
+    beginDictation();
+    setStatus("Unmuted in VRChat — dictation started.");
+  }
+}
+
+function setFrivoscPollRate(interval) {
+  if (interval === frivoscPollRate) return;
+  frivoscPollRate = interval;
+  clearInterval(frivoscTimer);
+  frivoscTimer = setInterval(pollFrivoscStatus, interval);
+}
 
 function describeFrivosc(data) {
   // Deliberately just "Connected". The hostname reads as "Connected — PA…"
@@ -1955,6 +2009,11 @@ async function pollFrivoscStatus() {
     const wasEnabled = oscEnabled_setting;
     frivoscConnected = Boolean(data.connected);
     oscEnabled_setting = Boolean(data.enabled);
+    muteSyncEnabled = Boolean(data.mute_sync);
+    frivoscMuted =
+      !frivoscConnected || data.muted === null || data.muted === undefined
+        ? null
+        : Boolean(data.muted);
     oscConfigured = frivoscConnected && oscEnabled_setting;
     setSummary("frivoscStatusValue", describeFrivosc(data));
     // Mic state is what the mute-sync acts on, so it is worth showing
@@ -1962,13 +2021,13 @@ async function pollFrivoscStatus() {
     // null is not false: "unknown" and "live" are different answers.
     setSummary(
       "frivoscMicValue",
-      !frivoscConnected || data.muted === null || data.muted === undefined
-        ? "Unknown"
-        : data.muted
-          ? "Muted"
-          : "Live"
+      frivoscMuted === null ? "Unknown" : frivoscMuted ? "Muted" : "Live"
     );
     syncOscSwitch();
+    applyMuteSync();
+    setFrivoscPollRate(
+      muteSyncEnabled && oscEnabled_setting ? FRIVOSC_SYNC_POLL_MS : FRIVOSC_POLL_MS
+    );
     // FrivOSC also appears in the header chip alongside Evora, which polls
     // far more slowly. Nudging it on a change keeps the two from disagreeing
     // for half a minute after FrivOSC comes up or goes away.
@@ -1982,8 +2041,9 @@ async function pollFrivoscStatus() {
 
 function startFrivoscPolling() {
   clearInterval(frivoscTimer);
-  pollFrivoscStatus();
+  frivoscPollRate = FRIVOSC_POLL_MS;
   frivoscTimer = setInterval(pollFrivoscStatus, FRIVOSC_POLL_MS);
+  pollFrivoscStatus();
 }
 
 if (oscEnabledToggle) {
@@ -1994,6 +2054,15 @@ if (oscEnabledToggle) {
     oscEnabled_setting = oscEnabledToggle.checked;
     oscConfigured = oscEnabled_setting && frivoscConnected;
     syncOscSwitch();
+  });
+}
+
+if (oscMuteSyncToggle) {
+  oscMuteSyncToggle.addEventListener("change", () => {
+    muteSyncEnabled = oscMuteSyncToggle.checked;
+    // Turning it on should not immediately act on a mute state that was
+    // already true before you asked for any of this. Wait for a change.
+    lastSyncedMute = frivoscMuted;
   });
 }
 
@@ -3988,18 +4057,34 @@ function stopLocalLiveDictation() {
   setStatus("Ready.");
 }
 
-dictateBtn.addEventListener("click", () => {
-  if (isDictating) {
-    if (activeDictationMode === "live") stopLiveDictation();
-    else if (activeDictationMode === "live_local") stopLocalLiveDictation();
-    else stopDictation();
-    return;
-  }
-
+// Named, because the mic button is no longer the only thing that starts and
+// stops dictation — VRChat's mute button can too, when mute sync is on.
+// Whichever engine is selected, both callers go through the same door.
+function beginDictation() {
+  if (isDictating) return;
   activeDictationMode = currentDictationMode();
   if (activeDictationMode === "live") startLiveDictation();
   else if (activeDictationMode === "live_local") startLocalLiveDictation();
   else startDictation();
+}
+
+function endDictation() {
+  if (!isDictating) return;
+  if (activeDictationMode === "live") stopLiveDictation();
+  else if (activeDictationMode === "live_local") stopLocalLiveDictation();
+  else stopDictation();
+}
+
+dictateBtn.addEventListener("click", () => {
+  if (isDictating) {
+    endDictation();
+    return;
+  }
+  beginDictation();
+  // Whatever VRChat's mute button says right now, this click is the newer
+  // instruction. Recording it here is what stops the next poll immediately
+  // undoing a manual override.
+  noteManualDictationOverride();
 });
 
 

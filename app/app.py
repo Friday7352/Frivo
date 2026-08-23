@@ -626,6 +626,10 @@ def load_config():
         # and the paging. All that is left here is whether the feature is
         # on, so there is no address or port for anyone to get wrong.
         "osc_enabled": False,
+        # Independent of the chatbox on purpose: sending replies to VRChat
+        # and letting VRChat's mute button drive dictation are two separate
+        # things to want, and one of them takes over your microphone.
+        "osc_mute_sync": False,
     }
     if os.path.exists(CONFIG_PATH):
         try:
@@ -1641,6 +1645,9 @@ def settings():
         if "osc_enabled" in data:
             CFG["osc_enabled"] = bool(data.get("osc_enabled"))
 
+        if "osc_mute_sync" in data:
+            CFG["osc_mute_sync"] = bool(data.get("osc_mute_sync"))
+
         save_config(CFG)
         return jsonify({"ok": True})
 
@@ -1661,6 +1668,7 @@ def settings():
             "whisper_url": CFG.get("whisper_url", DEFAULT_WHISPER_URL),
             "allow_openai_fallback": bool(CFG.get("allow_openai_fallback", False)),
             "osc_enabled": bool(CFG.get("osc_enabled", False)),
+            "osc_mute_sync": bool(CFG.get("osc_mute_sync", False)),
             "elevenlabs_key_set": bool(CFG["elevenlabs_api_key"]),
             "voice_id": CFG["voice_id"],
             "voice_name": CFG.get("voice_name", ""),
@@ -2464,6 +2472,7 @@ def frivosc_status_route():
     """Polled by the browser: is FrivOSC there, and what is the mic doing."""
     status = frivosc_status()
     status["enabled"] = bool(CFG.get("osc_enabled", False))
+    status["mute_sync"] = bool(CFG.get("osc_mute_sync", False))
     return jsonify(status)
 
 
