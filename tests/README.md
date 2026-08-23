@@ -136,6 +136,26 @@ it fixed, and also checks that the `?v=` stamp on the static URLs moves when
 Setting `TEMPLATES_AUTO_RELOAD` back to `False` makes the middle assertion
 fail — that was checked by doing it.
 
+## test-listen-click.py
+
+    python3 tests/test-listen-click.py
+
+Clicking a message in the listening panel loads it into the reply box;
+Ctrl (Cmd on a Mac) adds it to whatever is already there, so several things
+people said can be gathered into one reply.
+
+Every interesting case is about not destroying text: appending into an
+empty box must not leave a leading space, a trailing space someone typed is
+theirs rather than something to double, text already typed has to survive,
+and the caret must land at the end or the next thing typed appears in the
+middle of the sentence you just built. Two more are about not copying at
+all — a message still being transcribed shows an ellipsis placeholder, and
+the speaker name renames rather than copies.
+
+None of that is visible by reading the code, so this drives the real page
+in a real browser. Removing the append branch fails four assertions;
+checked by doing it.
+
 ## Not covered here
 
 `app.js`, `index.html`, and `style.css` have no full suite — `test-mute-sync.py`
