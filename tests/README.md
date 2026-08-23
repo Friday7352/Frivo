@@ -80,9 +80,34 @@ the value directly in `CFG` and left it there. Every case now starts from
 fallback: it is not a provider, and a chatbox that cannot reach VRChat
 does not quietly start costing credits.
 
+## test-mute-sync.py
+
+    python3 tests/test-mute-sync.py
+
+Drives the real page in a real browser, with a fake microphone, against the
+real server, and watches the record button. Everything worth getting right
+about mute sync is a rule about *not* acting, and none of it is checkable by
+reading the code:
+
+**Unknown is not unmuted.** Before VRChat has sent a `MuteSelf`, the mute
+state is `null`. Treating that as unmuted would start recording for someone
+who is muted and does not know it.
+
+**It acts on changes, never on the level.** That is the whole mechanism
+behind "the mic button still overrides it" — stop dictation by hand while
+still unmuted and it stays stopped, because nothing changed. Delete the
+one-line guard that implements this and the override assertion fails; that
+was checked by doing it.
+
+**A companion that disappears does not stop you.** Losing the mute state
+takes it back to unknown, and unknown must not yank a running dictation out
+from under anyone.
+
 ## Not covered here
 
-`app.js`, `index.html`, and `style.css` have no automated suite.
+`app.js`, `index.html`, and `style.css` have no full suite — `test-mute-sync.py`
+covers one feature end to end, and the expanding status chips are checked
+the same way ad hoc.
 They are checked per change with `python -m py_compile`, `node --check`, an
 HTML tag-balance parse, a cross-check that every `$("id")` in the JS exists
 in the template, and Playwright renders for anything visual.
