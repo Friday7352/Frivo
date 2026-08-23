@@ -44,7 +44,7 @@ spec.loader.exec_module(mod)
 
 mod.CFG["transcription_provider"] = "local_whisper"
 mod.CFG["osc_enabled"] = True
-mod.CFG["osc_mute_sync"] = True
+mod.CFG["osc_mute_sync"] = False
 mod.CFG["whisper_url"] = "http://192.168.1.9:9000"
 mod.probe_provider = lambda name, timeout=2: (True, "Reachable.")
 
@@ -97,7 +97,28 @@ function check(name, cond, got) {
   // which is the thing the user actually sees.
   const recording = async () => (await dictating()).recording;
 
-  console.log('--- before VRChat says anything ---');
+  const toggle = async on => {
+    await p.evaluate(async want => {
+      const box = document.getElementById('oscMuteSyncToggle');
+      if (box.checked === want) return;
+      box.checked = want;
+      box.dispatchEvent(new Event('change', { bubbles: true }));
+    }, on);
+  };
+
+  console.log('--- the switch saves itself, with no Save button in reach ---');
+  // It lives in the sidebar status panel. Save belongs to the Settings
+  // sheet, so without an endpoint of its own it flipped, was never written
+  // down, and the next poll read the old value back and flipped it off.
+  await toggle(true); await wait(800);
+  const persisted = await p.evaluate(async () =>
+    (await (await fetch('/api/frivosc/status')).json()).mute_sync);
+  check('turning it on reaches the server', persisted === true, persisted);
+  await wait(2500);   // two polls, which is what used to undo it
+  const stillOn = await p.evaluate(() => document.getElementById('oscMuteSyncToggle').checked);
+  check('and it is still on two polls later', stillOn === true, stillOn);
+
+  console.log('\n--- before VRChat says anything ---');
   await mute('unknown'); await wait(1600);
   check('unknown mute state does not start dictation', !(await recording()));
 
@@ -124,6 +145,19 @@ function check(name, cond, got) {
   await mute('on'); await wait(1600);
   await mute('off'); await wait(2000);
   check('unmuting again restarts it', await recording());
+
+  console.log('\n--- switching it on while already unmuted ---');
+  // The case that was reported: mic showing Live, switch on, nothing
+  // happening. Turning it on used to record the current state as "already
+  // handled", so it waited for a mute/unmute cycle that never came.
+  await toggle(false); await wait(600);
+  await mute('on'); await wait(1600);          // muting also stops anything running
+  if (await recording()) await p.click('#dictateBtn');
+  await wait(600);
+  await mute('off'); await wait(2000);
+  check('with the switch off, unmuting does nothing', !(await recording()));
+  await toggle(true); await wait(2500);
+  check('switching it on while unmuted starts dictation', await recording());
 
   console.log('\n--- companion disappears ---');
   await p.evaluate(() => fetch('/_test/mute/unknown'));

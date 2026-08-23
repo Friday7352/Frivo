@@ -135,6 +135,34 @@ check("it goes down again when it stops reporting",
       status["connected"] is False, status)
 
 
+print("\n--- saving the switches on their own ---")
+# They live in the sidebar status panel, which has no Save button. Without
+# an endpoint of their own they flipped, were never persisted, and the next
+# poll read the unchanged value back and silently flipped them off again.
+reset()
+mod.CFG["voice_name"] = "Rachel"
+mod.CFG["max_words"] = 80
+response = client.post("/api/frivosc/settings", json={"osc_mute_sync": True})
+check("the switches can be saved without the Settings sheet",
+      response.status_code == 200, response.status_code)
+check("and the save sticks", mod.CFG.get("osc_mute_sync") is True,
+      mod.CFG.get("osc_mute_sync"))
+check("the response says what the server now holds",
+      response.get_json().get("osc_mute_sync") is True, response.get_json())
+check("saving one switch leaves the other alone",
+      mod.CFG.get("osc_enabled") is False, mod.CFG.get("osc_enabled"))
+check("and does not disturb unrelated settings",
+      mod.CFG.get("voice_name") == "Rachel" and mod.CFG.get("max_words") == 80,
+      (mod.CFG.get("voice_name"), mod.CFG.get("max_words")))
+saved = json.load(open(mod.CONFIG_PATH))
+check("it reaches config.json", saved.get("osc_mute_sync") is True,
+      saved.get("osc_mute_sync"))
+
+client.post("/api/frivosc/settings", json={"osc_mute_sync": False})
+check("and turning it back off saves too", mod.CFG.get("osc_mute_sync") is False,
+      mod.CFG.get("osc_mute_sync"))
+
+
 print("\n--- what mute sync acts on ---")
 reset()
 mod.CFG["osc_mute_sync"] = True

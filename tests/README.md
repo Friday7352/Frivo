@@ -103,6 +103,19 @@ was checked by doing it.
 takes it back to unknown, and unknown must not yank a running dictation out
 from under anyone.
 
+**Switching it on while already unmuted starts dictation.** This was
+reported as "microphone is detected as live in VRC but it's not turning on
+the dictation". Turning the switch on used to record the current state as
+already handled — defensible in the abstract, and in practice it meant the
+feature did nothing until a mute/unmute cycle that nobody thought to
+perform.
+
+**The switch saves itself.** It lives in the sidebar status panel, and Save
+belongs to the Settings sheet, so there is no Save button within reach of
+it. Without `POST /api/frivosc/settings` it flipped, was never written down,
+and the next status poll read the unchanged value off the server and
+silently flipped it back. The test waits two polls to catch exactly that.
+
 ## test-hot-reload.py
 
     python3 tests/test-hot-reload.py

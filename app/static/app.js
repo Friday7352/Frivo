@@ -2046,23 +2046,57 @@ function startFrivoscPolling() {
   pollFrivoscStatus();
 }
 
+// These two switches live in the FrivOSC status panel in the sidebar, which
+// has no Save button — Save belongs to the Settings sheet. So they save
+// themselves. Without this they flipped, were never written down, and were
+// then silently flipped back by the next status poll reading the unchanged
+// value off the server.
+async function saveOscSwitches(patch, toggle) {
+  try {
+    const res = await fetch("/api/frivosc/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
+    });
+    if (!res.ok) throw new Error("save failed");
+    const saved = await res.json();
+    if (oscEnabledToggle) oscEnabledToggle.checked = Boolean(saved.osc_enabled);
+    if (oscMuteSyncToggle) oscMuteSyncToggle.checked = Boolean(saved.osc_mute_sync);
+    oscEnabled_setting = Boolean(saved.osc_enabled);
+    muteSyncEnabled = Boolean(saved.osc_mute_sync);
+    oscConfigured = oscEnabled_setting && frivoscConnected;
+    syncOscSwitch();
+    // Reflect it in the chip straight away rather than up to 30s later.
+    loadLocalStatus();
+    return true;
+  } catch (err) {
+    // Put the switch back rather than leaving it showing a state the
+    // server does not have.
+    if (toggle) toggle.checked = !toggle.checked;
+    setStatus("Couldn't save that setting.", true);
+    return false;
+  }
+}
+
 if (oscEnabledToggle) {
   oscEnabledToggle.addEventListener("change", () => {
-    // Reflected immediately so the composer switch does not look stale
-    // between here and the next poll; the server is the authority and the
-    // poll will correct this if saving failed.
     oscEnabled_setting = oscEnabledToggle.checked;
     oscConfigured = oscEnabled_setting && frivoscConnected;
     syncOscSwitch();
+    saveOscSwitches({ osc_enabled: oscEnabledToggle.checked }, oscEnabledToggle);
   });
 }
 
 if (oscMuteSyncToggle) {
   oscMuteSyncToggle.addEventListener("change", () => {
     muteSyncEnabled = oscMuteSyncToggle.checked;
-    // Turning it on should not immediately act on a mute state that was
-    // already true before you asked for any of this. Wait for a change.
-    lastSyncedMute = frivoscMuted;
+    // Forgotten rather than remembered. Switching this on while already
+    // unmuted in VRChat should start dictation — that is exactly what the
+    // switch says it does. Holding on to the old value made turning it on
+    // do nothing at all until the next mute/unmute cycle, which reads as
+    // broken.
+    lastSyncedMute = null;
+    saveOscSwitches({ osc_mute_sync: oscMuteSyncToggle.checked }, oscMuteSyncToggle);
   });
 }
 

@@ -2502,6 +2502,33 @@ def frivosc_ack():
     return jsonify({"ok": True, "id": data.get("id"), "pages": data.get("pages")})
 
 
+@app.route("/api/frivosc/settings", methods=["POST"])
+def frivosc_settings():
+    """
+    Saves just the OSC switches, on their own.
+
+    These two live in the FrivOSC status panel in the sidebar, which has no
+    Save button — Save belongs to the Settings sheet. Without this they
+    flipped, were never persisted, and were then silently flipped back by
+    the next status poll reading the unchanged value off the server. A
+    switch that undoes itself a second later is worse than one that was
+    never added.
+
+    Deliberately not a partial POST to /api/settings. That would work
+    today, but it handles thirty other fields, and a save that quietly
+    depends on every one of them staying optional is a trap for later.
+    """
+    data = request.get_json(force=True) or {}
+    for key in ("osc_enabled", "osc_mute_sync"):
+        if key in data:
+            CFG[key] = bool(data.get(key))
+    save_config(CFG)
+    return jsonify({
+        "osc_enabled": bool(CFG.get("osc_enabled", False)),
+        "osc_mute_sync": bool(CFG.get("osc_mute_sync", False)),
+    })
+
+
 @app.route("/api/frivosc/status")
 def frivosc_status_route():
     """Polled by the browser: is FrivOSC there, and what is the mic doing."""
