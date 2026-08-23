@@ -103,6 +103,26 @@ was checked by doing it.
 takes it back to unknown, and unknown must not yank a running dictation out
 from under anyone.
 
+## test-hot-reload.py
+
+    python3 tests/test-hot-reload.py
+
+Editing a file must actually reach the browser. This exists because of a
+real report: a switch was added to `index.html`, the file on disk plainly
+had it, and it was not on the page. Nothing was wrong with the code — Jinja
+compiles a template once per process and, with debug off (which is how Frivo
+always runs), never looks at the file again. The running server was serving
+HTML it had compiled before the edit.
+
+That failure mode is silent. No error, no warning, just a feature that looks
+like it was never built — and the obvious next move is to go re-check code
+that was already correct. `TEMPLATES_AUTO_RELOAD` fixes it; this test holds
+it fixed, and also checks that the `?v=` stamp on the static URLs moves when
+`app.js` or `style.css` changes so the browser cannot serve an old copy.
+
+Setting `TEMPLATES_AUTO_RELOAD` back to `False` makes the middle assertion
+fail — that was checked by doing it.
+
 ## Not covered here
 
 `app.js`, `index.html`, and `style.css` have no full suite — `test-mute-sync.py`

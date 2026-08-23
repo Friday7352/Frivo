@@ -564,9 +564,37 @@ app = Flask(__name__)
 # Disabling the cache here plus stamping the URLs below removes the problem.
 app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
 
-# Changes every time the server restarts, which forces browsers to re-fetch
-# static files rather than reusing a stale copy.
-ASSET_VERSION = str(int(time.time()))
+# Jinja compiles a template once per process and then never looks at the file
+# again unless told to. With debug off — which is how Frivo always runs — that
+# means editing index.html changes nothing until the server is restarted, and
+# the symptom is a setting you added that simply is not on the page. The stat
+# per render this costs is nothing next to the time lost to that.
+app.config["TEMPLATES_AUTO_RELOAD"] = True
+
+# Stamped onto the static URLs so a browser cannot reuse an old app.js. Taken
+# from the newest file rather than from startup time, so it also moves when a
+# file changes under a server that is already running.
+_STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
+
+
+def asset_version():
+    newest = 0.0
+    try:
+        for name in os.listdir(_STATIC_DIR):
+            if name.endswith((".js", ".css")):
+                newest = max(newest, os.path.getmtime(os.path.join(_STATIC_DIR, name)))
+    except OSError:
+        pass
+    # Falls back to process start time if static/ cannot be read, which is
+    # the old behaviour and still correct, just coarser.
+    return str(int(newest or time.time()))
+
+
+ASSET_VERSION = asset_version()
+
+# Shown on the diagnostics page. A server started before the file you just
+# edited is the single most common reason a new setting is not on the page.
+SERVER_STARTED = time.strftime("%Y-%m-%d %H:%M:%S")
 
 
 @app.after_request
@@ -1473,7 +1501,7 @@ def index():
         "index.html",
         min_words=MIN_WORDS,
         max_words_limit=MAX_WORDS,
-        asset_version=ASSET_VERSION,
+        asset_version=asset_version(),
     )
 
 
@@ -1506,10 +1534,16 @@ def diagnose():
     if os.path.exists(index_path):
         with open(index_path, "r", encoding="utf-8") as f:
             content = f.read()
+        # The newest additions go at the end. "Why don't I see that option?"
+        # is almost always the running process serving a template it compiled
+        # before the file changed, and this table is how you tell the two
+        # apart: the file on disk has the marker, the page does not.
         for marker in ["languageSelect", "masterVolumeSlider", "newProfileBtn",
                        "profileModalOverlay", "messageInput", "asset_version",
                        "responseStyleRadios", "personalityPresetSelect",
-                       "dictateBtn", "micSelect", "dictationModeRadios"]:
+                       "dictateBtn", "micSelect", "dictationModeRadios",
+                       "oscEnabledToggle", "oscMuteSyncToggle",
+                       "frivoscMicValue", "serviceStatus"]:
             markers[marker] = marker in content
 
     js_path = os.path.join(BASE_DIR, "static", "app.js")
@@ -1548,7 +1582,8 @@ def diagnose():
 dark, the server is reachable from this device.</p>
 
 <h2 style="font-size:15px">Server</h2>
-<p>Asset version: <b>{ASSET_VERSION}</b><br>
+<p>Asset version: <b>{asset_version()}</b><br>
+Server started: <b>{SERVER_STARTED}</b><br>
 You requested this from: <b>{request.host}</b><br>
 Files load from: <b>{BASE_DIR or '(current directory)'}</b><br>
 Profiles on disk: <b>{profile_count}</b> {'' if profiles_ok else '(profiles.json is unreadable/corrupt)'}</p>
@@ -1566,8 +1601,8 @@ Profiles on disk: <b>{profile_count}</b> {'' if profiles_ok else '(profiles.json
 <h2 style="font-size:15px">Direct static file test</h2>
 <p>Click each. Both should open readable code, not an error:</p>
 <ul>
-<li><a style="color:#e9a13b" href="/static/app.js?v={ASSET_VERSION}">/static/app.js</a></li>
-<li><a style="color:#e9a13b" href="/static/style.css?v={ASSET_VERSION}">/static/style.css</a></li>
+<li><a style="color:#e9a13b" href="/static/app.js?v={asset_version()}">/static/app.js</a></li>
+<li><a style="color:#e9a13b" href="/static/style.css?v={asset_version()}">/static/style.css</a></li>
 <li><a style="color:#e9a13b" href="/api/settings">/api/settings</a> (should be JSON including a long "languages" list)</li>
 <li><a style="color:#e9a13b" href="/api/profiles">/api/profiles</a> (should be JSON listing your profiles)</li>
 </ul>
