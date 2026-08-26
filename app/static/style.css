@@ -787,6 +787,11 @@ input[type="range"]::-moz-range-thumb {
 .credit-card {
   display: flex;
   align-items: center;
+  /* Wraps rather than truncates. In a narrow sidebar the balance drops to
+     its own line, which reads fine; an ellipsis through either the label
+     or the number does not. */
+  flex-wrap: wrap;
+  row-gap: 2px;
   gap: 10px;
   width: 100%;
   padding: 12px 14px;
@@ -856,16 +861,13 @@ input[type="range"]::-moz-range-thumb {
 .credit-panel .link-btn { margin-top: 8px; }
 .credit-icon { flex: none; color: var(--accent); }
 .credit-name {
-  /* Not flex: none. A no-shrink child with no width sizes to unwrapped
-     max-content, so a longer label would push the balance out of the card
-     instead of ellipsing. The label is back to "Credits" because at this
-     sidebar width "ElevenLabs credits" ellipsed to "ElevenLabs cred…" —
-     which names the vendor and then hides what the number counts. The full
-     name lives in the panel below instead, where there is room for it. */
-  flex: 0 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  /* The label never shrinks — it is what names the card, and "Credi…" is
+     worse than any amount of pressure elsewhere. (This is also why the
+     label is "Credits" and not "ElevenLabs credits", which ellipsed to
+     "ElevenLabs cred…" at this width; the full name is in the panel.)
+     The balance below is the part allowed to give way, and the card wraps
+     before either of them is cut. */
+  flex: 0 0 auto;
   white-space: nowrap;
   font-size: var(--text-subhead);
   font-weight: 500;
@@ -886,6 +888,11 @@ input[type="range"]::-moz-range-thumb {
   white-space: nowrap;
   transition: color var(--dur) var(--ease);
 }
+/* Once wrapped it is on its own line, so the auto margin that pushed it to
+   the right has nothing left to push against — line it up under the label
+   instead of leaving it floating. */
+.credit-card > .credit-readout,
+.credit-card > #sessionCredits { flex: 0 1 auto; }
 .credit-readout.is-low { color: var(--warn); }
 .credit-readout.is-empty { color: var(--alert); }
 .credit-readout.is-stale { opacity: 0.45; }
