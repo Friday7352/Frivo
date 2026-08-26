@@ -113,27 +113,59 @@ On the same computer, the dashboard is normally available at:
 
     https://frivo.local:5000
 
-## VRChat OSC chatbox
+## VRChat with FrivOSC
 
-Frivo can send replies to the VRChat chatbox through OSC. It does not control
-your avatar or send messages until you enable it.
+[FrivOSC](https://github.com/Friday7352/FrivOSC) is Frivo's optional VRChat
+companion. It connects Frivo to VRChat over OSC, so replies can appear in your
+chatbox and VRChat's own mute button can drive Frivo's dictation.
 
-1. In VRChat, enable and configure OSC in the Options menu.
-2. In Frivo, open **Settings** > **VRChat chatbox**.
-3. Enter the LAN address of the PC running VRChat. Use `127.0.0.1` when
-   VRChat and Frivo run on the same PC.
-4. Leave the default port as `9000` unless your VRChat OSC configuration uses
-   another port, then use **Test**.
-5. Turn on the **OSC** switch beside the message box when you want replies
-   sent to the chatbox.
+VRChat only speaks OSC to `127.0.0.1`. It will not send to another computer and
+will not listen to one, so Frivo cannot reach it across a network no matter how
+it is configured. FrivOSC solves this by running on the PC you play VRChat on,
+where that traffic already is, and talking to Frivo over the network instead.
+FrivOSC only makes outgoing connections, so there is nothing to forward, no
+port to open on either computer, and no VRChat launch options.
 
-VRChat chatbox messages are limited to 144 characters. Frivo automatically
-pages longer messages and spaces them out to avoid VRChat's spam protection.
-Anyone who can see your VRChat chatbox may see these messages. OSC uses UDP,
-so delivery cannot be confirmed by Frivo.
+FrivOSC is a separate application and is not included in Frivo:
 
-If VRChat runs on another PC, that PC must allow inbound UDP traffic on the
-chosen OSC port (normally UDP 9000).
+1. Download `FrivOSCSetup.exe` from the
+   [latest FrivOSC release](https://github.com/Friday7352/FrivOSC/releases/latest)
+   and install it **on the computer you play VRChat on**. If that is also the
+   computer running Frivo, install it there.
+2. During setup, enter the address you use to open Frivo, and use **Test**.
+   Leave the default when Frivo runs on the same computer; otherwise use that
+   computer's address, such as `https://192.168.1.50:5000`. This is the one
+   thing FrivOSC cannot work out for itself — it can be changed later in the
+   FrivOSC window.
+3. In VRChat, enable OSC in the Options menu.
+4. In Frivo, open **Settings** > **VRChat** and turn on **VRChat OSC**.
+
+**FrivOSC** appears in Frivo's sidebar beside Evora once the feature is on.
+Click it to see whether it is connected and to reach these settings:
+
+* **VRChat OSC** — the master switch for everything below.
+* **Follow VRChat mute** — unmuting in VRChat starts dictation and muting stops
+  it. The microphone button still overrides this at any time.
+* **Unmute when I send** — opens the VRChat microphone if you are muted, so a
+  spoken reply is not delivered into a closed mic. It never mutes you.
+
+Turn on the **Chatbox** switch beside the message box when you want replies sent
+to the chatbox.
+
+### Worth knowing
+
+VRChat chatbox messages are limited to 144 characters. Frivo pages longer
+messages automatically and spaces them out to avoid VRChat's spam protection.
+Anyone who can see your VRChat chatbox can see these messages.
+
+OSC is UDP, so VRChat never confirms delivery. FrivOSC reports what it sent, not
+what arrived.
+
+The microphone options press VRChat's mute key rather than setting a state,
+because VRChat exposes no way to set one. That means they depend on **Options >
+Voice > Toggle Voice** being on, which is VRChat's default. With it off, VRChat
+treats the mute key as push-to-talk and FrivOSC will say so in its log rather
+than silently doing nothing.
 
 ## Other devices on your network
 
@@ -190,6 +222,19 @@ If installation fails, the setup log is saved here:
 
 The Frivo launcher also includes buttons to open its server log and settings
 folder.
+
+## Version number
+
+The version lives in one file, `VERSION`, at the root of this repository:
+
+    1.1.2
+
+Edit that line before a release and everything picks it up on the next
+build — the Apps & features entry, the setup wizard's welcome page, the
+`FrivoSetup.exe` container, `FrivoHost.exe`'s file properties, and what
+`/diagnose` reports. Nothing else stores a copy.
+
+`tests/test-version.py` checks that they all still agree.
 
 ## Building from source
 

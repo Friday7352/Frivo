@@ -221,6 +221,35 @@ function Stop-Server {
     $script:state = 'stopped'
 }
 
+function Get-FrivoImage {
+    <#
+        Loads an image WITHOUT holding the file open.
+
+        Image.FromFile keeps a lock for the lifetime of the image. The
+        launcher shows a logo out of the install folder and stays open, so
+        that lock is what stopped the uninstaller removing static\.
+
+        FromStream alone would not fix it — GDI+ reads from the stream
+        lazily, so the stream must outlive the image. Copying into a new
+        Bitmap produces an image that owns its pixels, freeing both.
+    #>
+    param([string] $Path)
+    if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $null }
+    $stream = $null
+    $loaded = $null
+    try {
+        # The comma passes the byte array as one argument, not many.
+        $stream = New-Object System.IO.MemoryStream(, [System.IO.File]::ReadAllBytes($Path))
+        $loaded = [System.Drawing.Image]::FromStream($stream)
+        return (New-Object System.Drawing.Bitmap($loaded))
+    } catch {
+        return $null
+    } finally {
+        if ($loaded) { $loaded.Dispose() }
+        if ($stream) { $stream.Dispose() }
+    }
+}
+
 function Test-FrivoFirewallRule {
     try {
         $r = Invoke-Tool -FilePath 'netsh.exe' -Arguments @(
@@ -234,12 +263,15 @@ function Test-FrivoFirewallRule {
 
 function Enable-FrivoFirewallRule {
     try {
-        $args = ConvertTo-ArgumentString @(
+        # $netshArgs, not $args: $args is an automatic variable holding the
+        # function's own unbound arguments. Assigning to it works but is the
+        # same shadowing class that has bitten this codebase twice.
+        $netshArgs = ConvertTo-ArgumentString @(
             'advfirewall', 'firewall', 'add', 'rule', 'name=Frivo',
             'dir=in', 'action=allow', ('program=' + $PythonW),
             'profile=private', 'remoteip=localsubnet', 'protocol=TCP', 'localport=5000'
         )
-        Start-Process -FilePath 'netsh.exe' -ArgumentList $args -Verb RunAs -Wait -WindowStyle Hidden | Out-Null
+        Start-Process -FilePath 'netsh.exe' -ArgumentList $netshArgs -Verb RunAs -Wait -WindowStyle Hidden | Out-Null
         return (Test-FrivoFirewallRule)
     } catch {
         return $false
@@ -438,10 +470,12 @@ $logo.BackColor = [System.Drawing.Color]::Transparent
 # The PNG, not Icon.ToBitmap(): converting an icon whose frames are
 # PNG-compressed produces garbage pixels on .NET Framework, which is what
 # powershell.exe runs on.
+#
+# And read through a stream rather than Image.FromFile, which holds the
+# file open for as long as the image exists. The launcher outlives the
+# uninstaller, so that lock is what made removing static\ fail.
 $logoPng = [System.IO.Path]::Combine($InstallDir, 'static', 'icon.png')
-if (Test-Path -LiteralPath $logoPng) {
-    try { $logo.Image = [System.Drawing.Image]::FromFile($logoPng) } catch { }
-}
+$logo.Image = Get-FrivoImage $logoPng
 $form.Controls.Add($logo)
 
 $titleLbl = New-DarkLabel $form $AppName 78 15 250 38 $FontBig $ColInk

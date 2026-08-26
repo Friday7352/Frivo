@@ -314,6 +314,7 @@
                  Today's figure is counted by the server, so it survives a
                  reload and is the same on every device. -->
             <div class="credit-panel is-hidden" id="creditsPanel">
+              <p class="credit-source">ElevenLabs credits</p>
               <div class="credit-line">
                 <span class="credit-line-label">Used today</span>
                 <span class="credit-line-value" id="creditsToday">—</span>
@@ -330,9 +331,9 @@
               <button id="creditsRefresh" class="link-btn" type="button">Refresh balance</button>
             </div>
           </div>
-          <!-- Only appears when a local service is selected; see loadLocalStatus() -->
-          <button id="serviceStatus" class="service-status is-hidden" type="button"
-                  title="Click to re-check"></button>
+          <!-- One chip per service, built by loadLocalStatus(). Empty and
+               hidden until something local is actually selected. -->
+          <div id="serviceStatus" class="service-status-list is-hidden"></div>
         </section>
 
       </div><!-- /side-scroll -->
@@ -390,7 +391,7 @@
         <div class="composer">
           <button id="composerMoreBtn" class="composer-round" type="button"
                   aria-expanded="true" aria-controls="composerToggles"
-                  title="Show or hide the Speak and OSC switches">
+                  title="Show or hide the Speak and Chatbox switches">
             <svg class="icon-18"><use href="#i-plus"/></svg>
           </button>
 
@@ -424,8 +425,8 @@
             <span class="switch-track" aria-hidden="true"></span>
           </label>
           <label class="toggle-chip switch" id="oscSwitch"
-                 title="Show the spoken reply in your VRChat chatbox as it plays (OSC)">
-            <span class="switch-label">OSC</span>
+                 title="Show the spoken reply in your VRChat chatbox as it plays">
+            <span class="switch-label">Chatbox</span>
             <input type="checkbox" id="oscToggle">
             <span class="switch-track" aria-hidden="true"></span>
           </label>
@@ -871,37 +872,68 @@
             </div>
           </section>
 
-          <!-- VRChat chatbox -->
+          <!-- VRChat, through FrivOSC -->
           <section class="settings-section">
             <div class="settings-section-icon"><svg width="22" height="22"><use href="#i-osc"/></svg></div>
             <div class="settings-section-body">
               <div class="settings-section-head">
                 <div>
-                  <h3 class="settings-section-title">VRChat chatbox</h3>
-                  <p class="settings-section-sub">OSC</p>
+                  <h3 class="settings-section-title">VRChat</h3>
+                  <p class="settings-section-sub">Through FrivOSC</p>
                 </div>
               </div>
-              <div class="settings-card">
-                <button class="srow" type="button" data-settings-page="osc">
-                  <span class="srow-main"><span class="srow-label">PC address</span></span>
-                  <span class="srow-spacer"></span>
-                  <span class="srow-value" id="settingsOscValue">Off</span>
-                  <span class="srow-chevron"><svg class="icon-16"><use href="#i-chevron"/></svg></span>
-                </button>
-                <button class="srow" type="button" data-settings-page="osc-timing">
-                  <span class="srow-main"><span class="srow-label">Page duration</span></span>
-                  <span class="srow-spacer"></span>
-                  <span class="srow-value srow-value--mono" id="settingsOscTimingValue">—</span>
-                  <span class="srow-chevron"><svg class="icon-16"><use href="#i-chevron"/></svg></span>
-                </button>
+              <!-- Hosted here or in the FrivOSC status chip's panel, never
+                   both: the card is moved between them, never copied, so
+                   there is only ever one of each control. -->
+              <div class="settings-card-home" id="oscSettingsHome"></div>
+              <div class="settings-card" id="oscSettings">
                 <label class="srow">
-                  <span class="srow-main"><span class="srow-label">Play VRChat's chatbox notification sound</span></span>
+                  <span class="srow-main srow-main--flex">
+                    <span class="srow-label">VRChat OSC</span>
+                    <span class="srow-sub">Chatbox messages and microphone status.</span>
+                  </span>
                   <span class="switch">
-                    <input type="checkbox" id="oscSfxToggle">
+                    <input type="checkbox" id="oscEnabledToggle">
                     <span class="switch-track" aria-hidden="true"></span>
                   </span>
                 </label>
+                <label class="srow">
+                  <span class="srow-main srow-main--flex">
+                    <span class="srow-label">Follow VRChat mute</span>
+                    <span class="srow-sub">Unmuting in VRChat starts dictation, muting stops it. The mic button still overrides.</span>
+                  </span>
+                  <span class="switch">
+                    <input type="checkbox" id="oscMuteSyncToggle">
+                    <span class="switch-track" aria-hidden="true"></span>
+                  </span>
+                </label>
+                <label class="srow">
+                  <span class="srow-main srow-main--flex">
+                    <span class="srow-label">Unmute when I send</span>
+                    <span class="srow-sub">Opens your VRChat mic if it's muted. Never mutes you.</span>
+                  </span>
+                  <span class="switch">
+                    <input type="checkbox" id="oscUnmuteOnSendToggle">
+                    <span class="switch-track" aria-hidden="true"></span>
+                  </span>
+                </label>
+                <!-- Hidden when this card is hosted inside the FrivOSC status
+                     chip, which is already saying exactly this one line above. -->
+                <div class="srow" id="frivoscStatusRow">
+                  <span class="srow-main"><span class="srow-label">FrivOSC</span></span>
+                  <span class="srow-spacer"></span>
+                  <span class="srow-value" id="frivoscStatusValue">Not connected</span>
+                </div>
+                <div class="srow">
+                  <span class="srow-main"><span class="srow-label">Microphone in VRChat</span></span>
+                  <span class="srow-spacer"></span>
+                  <span class="srow-value" id="frivoscMicValue">Unknown</span>
+                </div>
               </div>
+              <p class="settings-note">
+                FrivOSC runs on the computer you play VRChat on. Its setup asks for this
+                Frivo's address once; nothing else to configure.
+              </p>
             </div>
           </section>
 
@@ -981,7 +1013,7 @@
               </label>
               <label class="srow">
                 <span class="srow-main">
-                  <span class="srow-label">Show Speak and OSC switches</span>
+                  <span class="srow-label">Show Speak and Chatbox switches</span>
                   <span class="srow-sub">Under the message box, beside Auto</span>
                 </span>
                 <span class="switch">
@@ -1113,58 +1145,6 @@
                   <button id="applyWhisperModelBtn" class="btn-ghost btn-sm" type="button">Apply</button>
                 </div>
                 <p class="field-note" id="whisperModelNote">Test the connection first to load the model list.</p>
-              </div>
-            </div>
-          </div>
-
-          <div class="settings-page is-hidden" data-page="osc" data-title="VRChat PC address">
-            <div class="settings-card">
-              <div class="field">
-                <label for="oscHost">VRChat PC address</label>
-                <div class="row">
-                  <input type="text" id="oscHost" placeholder="192.168.1.x" autocomplete="off">
-                  <input type="number" id="oscPort" class="port-input" min="1" max="65535" placeholder="9000">
-                  <button id="testOscBtn" class="btn-ghost btn-sm" type="button">Test</button>
-                </div>
-                <p class="field-note" id="oscTestNote">
-                  The LAN address of whichever machine runs VRChat — 127.0.0.1 if that's this
-                  server. Leave blank to disable. VRChat listens on UDP 9000 by default, so
-                  that PC needs an inbound rule for it:
-                  <code>netsh advfirewall firewall add rule name="VRChat OSC" dir=in action=allow protocol=UDP localport=9000</code>
-                </p>
-              </div>
-            </div>
-            <p class="settings-note">
-              The reply appears in your chatbox word for word — the moment playback starts
-              if Speak is on, immediately if it isn't. Anything over 144 characters is sent
-              as pages; keep the reply-length fader near 25 words to land in one. Delivery
-              can't be confirmed: OSC is UDP, so nothing comes back either way.
-            </p>
-          </div>
-
-          <div class="settings-page is-hidden" data-page="osc-timing" data-title="Page duration">
-            <div class="settings-card">
-              <div class="field">
-                <label>
-                  How long each page stays up <span class="field-hint">— before the next replaces it</span>
-                </label>
-                <div class="row page-seconds-row">
-                  <label class="page-seconds">
-                    <span>Speak on</span>
-                    <input type="number" id="oscPageSpeaking" min="1.5" max="60" step="0.1">
-                    <span class="unit">s</span>
-                  </label>
-                  <label class="page-seconds">
-                    <span>Speak off</span>
-                    <input type="number" id="oscPageSilent" min="1.5" max="60" step="0.1">
-                    <span class="unit">s</span>
-                  </label>
-                </div>
-                <p class="field-note" id="oscPageNote">
-                  With the voice playing, the text is a caption and should keep pace with it.
-                  With it off the text is the whole message and has to be read, which takes
-                  longer. Only affects replies long enough to need more than one page.
-                </p>
               </div>
             </div>
           </div>

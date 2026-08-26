@@ -787,6 +787,11 @@ input[type="range"]::-moz-range-thumb {
 .credit-card {
   display: flex;
   align-items: center;
+  /* Wraps rather than truncates. In a narrow sidebar the balance drops to
+     its own line, which reads fine; an ellipsis through either the label
+     or the number does not. */
+  flex-wrap: wrap;
+  row-gap: 2px;
   gap: 10px;
   width: 100%;
   padding: 12px 14px;
@@ -821,6 +826,16 @@ input[type="range"]::-moz-range-thumb {
   from { opacity: 0; transform: translateY(-4px); }
   to { opacity: 1; transform: none; }
 }
+/* Names what the panel is about, since the card above only says
+   "Credits". Sits above the lines rather than beside them. */
+.credit-source {
+  margin: 0 0 8px;
+  color: var(--ink-faint, var(--ink-dim));
+  font-family: var(--font-panel);
+  font-size: var(--text-caption);
+  letter-spacing: 0.02em;
+}
+
 .credit-line {
   display: flex;
   align-items: baseline;
@@ -846,7 +861,14 @@ input[type="range"]::-moz-range-thumb {
 .credit-panel .link-btn { margin-top: 8px; }
 .credit-icon { flex: none; color: var(--accent); }
 .credit-name {
-  flex: none;
+  /* The label never shrinks — it is what names the card, and "Credi…" is
+     worse than any amount of pressure elsewhere. (This is also why the
+     label is "Credits" and not "ElevenLabs credits", which ellipsed to
+     "ElevenLabs cred…" at this width; the full name is in the panel.)
+     The balance below is the part allowed to give way, and the card wraps
+     before either of them is cut. */
+  flex: 0 0 auto;
+  white-space: nowrap;
   font-size: var(--text-subhead);
   font-weight: 500;
   color: var(--ink);
@@ -866,6 +888,11 @@ input[type="range"]::-moz-range-thumb {
   white-space: nowrap;
   transition: color var(--dur) var(--ease);
 }
+/* Once wrapped it is on its own line, so the auto margin that pushed it to
+   the right has nothing left to push against — line it up under the label
+   instead of leaving it floating. */
+.credit-card > .credit-readout,
+.credit-card > #sessionCredits { flex: 0 1 auto; }
 .credit-readout.is-low { color: var(--warn); }
 .credit-readout.is-empty { color: var(--alert); }
 .credit-readout.is-stale { opacity: 0.45; }
@@ -874,6 +901,15 @@ input[type="range"]::-moz-range-thumb {
 
 /* The local-service chip. app.js assigns className directly, so this must
    style on the base class alone plus its two state classes. */
+/* One block per service, stacked. They go down independently and for
+   unrelated reasons, so they are reported independently — and each one
+   opens to show that service's own settings. */
+.service-status-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
 .service-status {
   display: flex;
   align-items: center;
@@ -899,9 +935,71 @@ input[type="range"]::-moz-range-thumb {
   background: currentColor;
   opacity: 0.7;
 }
+.service-status-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The affordance. Points right when closed, down when open, so it reads as
+   "there is more here" rather than as decoration. */
+.service-status-chevron {
+  flex: none;
+  display: inline-flex;
+  margin-left: auto;
+  opacity: 0.65;
+  transform: rotate(0deg);
+  transition: transform var(--dur) var(--ease);
+}
+.service-status[aria-expanded="true"] .service-status-chevron { transform: rotate(90deg); }
+
 .service-status:hover { background: var(--surface-3); color: var(--ink); }
 .service-status.is-ok { color: var(--signal); background: var(--signal-soft); border-color: transparent; }
 .service-status.is-down { color: var(--alert); background: var(--alert-soft); border-color: transparent; }
+
+/* Square off the join while the panel is open, so chip and panel read as
+   one object rather than two stacked ones — same treatment as the credits
+   card above. */
+.service-status[aria-expanded="true"] {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.service-panel {
+  padding: 10px 12px 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--rule-soft);
+  border-top: 0;
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+  animation: credit-open 180ms var(--ease);
+}
+/* The settings card is the same component the Settings sheet uses, just
+   hosted here. Strip the outer chrome so it does not draw a card inside a
+   card. */
+.service-panel .settings-card {
+  margin: 0;
+  padding: 0;
+  background: none;
+  border: 0;
+  box-shadow: none;
+}
+.service-panel .srow { padding-left: 0; padding-right: 0; }
+/* The sidebar is narrow. The Settings sheet's body size reads as shouting
+   in a 300px column. */
+.service-panel .srow-label { font-size: var(--text-footnote); }
+.service-panel .srow-sub,
+.service-panel .srow-value,
+.service-panel .field-note { font-size: var(--text-caption); }
+.service-panel .field > label { font-size: var(--text-footnote); }
+.service-panel .field { padding: 10px 0; }
+.service-panel input[type="text"],
+.service-panel select { font-size: var(--text-footnote); }
+/* The chip directly above already says whether FrivOSC is connected. */
+.service-panel #frivoscStatusRow { display: none; }
+
+/* Marks where a settings card belongs when a status panel is not borrowing
+   it. Occupies no space. */
+.settings-card-home { display: contents; }
 
 /* --- sidebar foot --- */
 .side-foot {
@@ -1812,6 +1910,12 @@ button.srow:active { background: var(--fill-strong); }
 .srow-icon { flex: none; display: grid; place-items: center; color: var(--accent); }
 .srow-main { min-width: 0; flex: none; }
 .srow-label { display: block; color: var(--ink); }
+/* Opt-in for a row whose sub-label is long enough to need wrapping, used
+   only beside an inline .switch. Without it, flex:none sizes the text to
+   one unwrapped line, which pushes the row — and the switch with it — past
+   the edge of the panel instead of wrapping. */
+.srow-main--flex { flex: 1 1 auto; }
+
 .srow-sub {
   display: block;
   margin-top: 1px;

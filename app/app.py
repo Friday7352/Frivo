@@ -564,9 +564,60 @@ app = Flask(__name__)
 # Disabling the cache here plus stamping the URLs below removes the problem.
 app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
 
-# Changes every time the server restarts, which forces browsers to re-fetch
-# static files rather than reusing a stale copy.
-ASSET_VERSION = str(int(time.time()))
+# Jinja compiles a template once per process and then never looks at the file
+# again unless told to. With debug off — which is how Frivo always runs — that
+# means editing index.html changes nothing until the server is restarted, and
+# the symptom is a setting you added that simply is not on the page. The stat
+# per render this costs is nothing next to the time lost to that.
+app.config["TEMPLATES_AUTO_RELOAD"] = True
+
+# Stamped onto the static URLs so a browser cannot reuse an old app.js. Taken
+# from the newest file rather than from startup time, so it also moves when a
+# file changes under a server that is already running.
+_STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
+
+
+def asset_version():
+    newest = 0.0
+    try:
+        for name in os.listdir(_STATIC_DIR):
+            if name.endswith((".js", ".css")):
+                newest = max(newest, os.path.getmtime(os.path.join(_STATIC_DIR, name)))
+    except OSError:
+        pass
+    # Falls back to process start time if static/ cannot be read, which is
+    # the old behaviour and still correct, just coarser.
+    return str(int(newest or time.time()))
+
+
+def app_version():
+    """The number in the VERSION file at the repo root.
+
+    The same file the installer, the Inno container and the compiled host
+    read, so "which version is this?" has one answer everywhere. Read once
+    at startup: it does not change while the server is running, and an
+    install that is missing the file should still start.
+    """
+    here = os.path.dirname(os.path.abspath(__file__))
+    for candidate in (os.path.join(here, "VERSION"),
+                      os.path.join(os.path.dirname(here), "VERSION")):
+        try:
+            with open(candidate, "r", encoding="utf-8") as handle:
+                text = handle.read().strip()
+            if text:
+                return text
+        except OSError:
+            continue
+    return "unknown"
+
+
+APP_VERSION = app_version()
+
+ASSET_VERSION = asset_version()
+
+# Shown on the diagnostics page. A server started before the file you just
+# edited is the single most common reason a new setting is not on the page.
+SERVER_STARTED = time.strftime("%Y-%m-%d %H:%M:%S")
 
 
 @app.after_request
@@ -619,20 +670,22 @@ def load_config():
         "ollama_translation_model": "",
         "whisper_url": DEFAULT_WHISPER_URL,
         # Optional local command configured by the administrator.
-        "whisper_start_command": "",
         # Optional OpenAI fallback when a selected local provider is unavailable.
         "allow_openai_fallback": False,
-        # VRChat chatbox over OSC. Blank host = the feature is off, since
-        # there's no sensible guess: the packets have to reach whichever
-        # machine is running VRChat, which usually isn't this one.
-        "osc_host": "",
-        "osc_port": DEFAULT_OSC_PORT,
-        "osc_page_seconds_speaking": OSC_PAGE_SECONDS_SPEAKING,
-        "osc_page_seconds_silent": OSC_PAGE_SECONDS_SILENT,
-        # VRChat plays a notification sound for each chatbox message. Left
-        # on to match typing into the chatbox by hand; turn it off if paged
-        # messages get annoying.
-        "osc_sfx": True,
+        # VRChat, through FrivOSC. Frivo no longer speaks OSC itself —
+        # FrivOSC runs on the VRChat PC and owns the protocol, the ports
+        # and the paging. All that is left here is whether the feature is
+        # on, so there is no address or port for anyone to get wrong.
+        "osc_enabled": False,
+        # Independent of the chatbox on purpose: sending replies to VRChat
+        # and letting VRChat's mute button drive dictation are two separate
+        # things to want, and one of them takes over your microphone.
+        "osc_mute_sync": False,
+        # Unmutes the VRChat microphone when you send a message, so a
+        # spoken reply is not delivered into a muted mic. Its own switch
+        # because it presses a virtual key in VRChat, which the other two
+        # never do.
+        "osc_unmute_on_send": False,
     }
     if os.path.exists(CONFIG_PATH):
         try:
@@ -652,193 +705,6 @@ def load_config():
 def save_config(cfg):
     with open(CONFIG_PATH, "w", encoding="utf-8") as f:
         json.dump(cfg, f, indent=2)
-
-
-# =============================================================================
-# OSC -> VRChat chatbox
-# =============================================================================
-# Puts whatever you send into your VRChat chatbox, so people who can't hear
-# the spoken reply can read what you said.
-#
-# OSC messages are sent directly over UDP. VRChat limits chatbox messages to
-# 144 characters and rate-limits sends, so text is paged through one worker.
-
-OSC_CHATBOX_LIMIT = 144
-DEFAULT_OSC_PORT = 9000
-
-# Text pages advance faster when speech is playing than when text is read.
-OSC_PAGE_SECONDS_SPEAKING = 1.6
-OSC_PAGE_SECONDS_SILENT = 4.0
-
-# Minimum pacing interval required to avoid VRChat chatbox rate limits.
-OSC_MIN_GAP_SECONDS = 1.5
-OSC_MAX_GAP_SECONDS = 60.0
-
-
-def clamp_page_seconds(value, default):
-    try:
-        seconds = float(value)
-    except (TypeError, ValueError):
-        return default
-    return max(OSC_MIN_GAP_SECONDS, min(OSC_MAX_GAP_SECONDS, seconds))
-
-
-def osc_string(text):
-    """OSC strings are null-terminated and padded to a multiple of 4 bytes."""
-    data = text.encode("utf-8") + b"\0"
-    padding = (4 - len(data) % 4) % 4
-    return data + b"\0" * padding
-
-
-def osc_message(address, *args):
-    tags = ","
-    payload = b""
-    for arg in args:
-        # bool first: in Python it's a subclass of int, so checking int
-        # first would pack True as the integer 1 and VRChat would reject
-        # the type tag.
-        if isinstance(arg, bool):
-            tags += "T" if arg else "F"
-        elif isinstance(arg, int):
-            tags += "i"
-            payload += struct.pack(">i", arg)
-        elif isinstance(arg, float):
-            tags += "f"
-            payload += struct.pack(">f", arg)
-        else:
-            tags += "s"
-            payload += osc_string(str(arg))
-    return osc_string(address) + osc_string(tags) + payload
-
-
-def chatbox_pages(text, limit=OSC_CHATBOX_LIMIT):
-    """
-    Splits text into chatbox-sized pages, breaking at sentence ends where it
-    can and word boundaries otherwise, so a page never ends mid-word.
-
-    When there's more than one page each gets a " (1/3)" counter — without
-    it a reader has no way to know the message they're looking at was the
-    middle of something, since VRChat only ever shows the most recent one.
-    """
-    text = " ".join((text or "").split())
-    if not text:
-        return []
-    if len(text) <= limit:
-        return [text]
-
-    def pack(budget):
-        pages, current = [], ""
-        # Two alternatives, not one: the first keeps end punctuation with
-        # the sentence it closes, and the second catches a run of .!? that
-        # isn't preceded by anything — a leading "!!!", or an ellipsis of
-        # its own between two sentences. Without it the regex simply skips
-        # over those characters and they vanish from the message.
-        for sentence in re.findall(r"[^.!?]+[.!?]*|[.!?]+", text) or [text]:
-            sentence = sentence.strip()
-            while len(sentence) > budget:
-                # One sentence longer than a whole page: break at the last
-                # space that fits, or hard-cut if there isn't one.
-                cut = sentence.rfind(" ", 0, budget + 1)
-                if cut <= 0:
-                    cut = budget
-                if current:
-                    pages.append(current)
-                    current = ""
-                pages.append(sentence[:cut].strip())
-                sentence = sentence[cut:].strip()
-            if not sentence:
-                continue
-            if not current:
-                current = sentence
-            elif len(current) + 1 + len(sentence) <= budget:
-                current = f"{current} {sentence}"
-            else:
-                pages.append(current)
-                current = sentence
-        if current:
-            pages.append(current)
-        return pages
-
-    pages = pack(limit)
-    if len(pages) <= 1:
-        return pages
-
-    # Re-pack with room for the counter. Its width depends on the number of
-    # pages, which depends on the packing — so pack, measure, pack again.
-    # One pass is enough in practice; the loop guards the case where making
-    # room for the suffix pushes the text into another page.
-    #
-    # The repacked list is adopted *before* the settled check, not after —
-    # keeping the wider packing once the count happened to match is what
-    # let a page come out at 150 characters with the counter attached.
-    for _ in range(3):
-        suffix = len(f" ({len(pages)}/{len(pages)})")
-        repacked = pack(limit - suffix)
-        settled = len(repacked) == len(pages)
-        pages = repacked
-        if settled:
-            break
-    total = len(pages)
-    return [f"{p} ({i}/{total})" for i, p in enumerate(pages, 1)]
-
-
-# One queue and worker enforce a global OSC pacing limit.
-OSC_QUEUE = queue.Queue(maxsize=40)
-OSC_WORKER = None
-OSC_WORKER_LOCK = threading.Lock()
-
-
-def osc_send(host, port, message):
-    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
-        sock.sendto(message, (host, int(port)))
-
-
-def osc_worker_loop():
-    last_send = 0.0
-    while True:
-        host, port, pages, sfx, page_seconds = OSC_QUEUE.get()
-        try:
-            for index, page in enumerate(pages):
-                # Floored regardless of the setting: the queue is shared, so
-                # this also spaces the last page of one message from the
-                # first page of the next.
-                wait = max(OSC_MIN_GAP_SECONDS, page_seconds)
-                gap = wait - (time.monotonic() - last_send)
-                if gap > 0:
-                    time.sleep(gap)
-                # The typing indicator stays lit while there are more pages
-                # coming, which is the only cue a reader gets that the
-                # message they're reading isn't the end of it.
-                more = index < len(pages) - 1
-                osc_send(host, port, osc_message("/chatbox/input", page, True, sfx))
-                osc_send(host, port, osc_message("/chatbox/typing", more))
-                last_send = time.monotonic()
-        except Exception as e:
-            # UDP gives no delivery signal, so the only failures visible
-            # here are local ones — an unresolvable host, mostly.
-            print(f"[osc] send failed: {e}", flush=True)
-        finally:
-            OSC_QUEUE.task_done()
-
-
-def ensure_osc_worker():
-    global OSC_WORKER
-    with OSC_WORKER_LOCK:
-        if OSC_WORKER is None or not OSC_WORKER.is_alive():
-            OSC_WORKER = threading.Thread(target=osc_worker_loop, daemon=True)
-            OSC_WORKER.start()
-
-
-def queue_chatbox(text, host, port, sfx=True, page_seconds=OSC_PAGE_SECONDS_SPEAKING):
-    pages = chatbox_pages(text)
-    if not pages:
-        return 0
-    ensure_osc_worker()
-    try:
-        OSC_QUEUE.put_nowait((host, int(port), pages, bool(sfx), float(page_seconds)))
-    except queue.Full:
-        raise RuntimeError("Too many messages queued for VRChat — slow down.")
-    return len(pages)
 
 
 def load_profiles():
@@ -1663,7 +1529,7 @@ def index():
         "index.html",
         min_words=MIN_WORDS,
         max_words_limit=MAX_WORDS,
-        asset_version=ASSET_VERSION,
+        asset_version=asset_version(),
     )
 
 
@@ -1696,10 +1562,16 @@ def diagnose():
     if os.path.exists(index_path):
         with open(index_path, "r", encoding="utf-8") as f:
             content = f.read()
+        # The newest additions go at the end. "Why don't I see that option?"
+        # is almost always the running process serving a template it compiled
+        # before the file changed, and this table is how you tell the two
+        # apart: the file on disk has the marker, the page does not.
         for marker in ["languageSelect", "masterVolumeSlider", "newProfileBtn",
                        "profileModalOverlay", "messageInput", "asset_version",
                        "responseStyleRadios", "personalityPresetSelect",
-                       "dictateBtn", "micSelect", "dictationModeRadios"]:
+                       "dictateBtn", "micSelect", "dictationModeRadios",
+                       "oscEnabledToggle", "oscMuteSyncToggle",
+                       "frivoscMicValue", "serviceStatus"]:
             markers[marker] = marker in content
 
     js_path = os.path.join(BASE_DIR, "static", "app.js")
@@ -1738,7 +1610,9 @@ def diagnose():
 dark, the server is reachable from this device.</p>
 
 <h2 style="font-size:15px">Server</h2>
-<p>Asset version: <b>{ASSET_VERSION}</b><br>
+<p>Frivo version: <b>{APP_VERSION}</b><br>
+Asset version: <b>{asset_version()}</b><br>
+Server started: <b>{SERVER_STARTED}</b><br>
 You requested this from: <b>{request.host}</b><br>
 Files load from: <b>{BASE_DIR or '(current directory)'}</b><br>
 Profiles on disk: <b>{profile_count}</b> {'' if profiles_ok else '(profiles.json is unreadable/corrupt)'}</p>
@@ -1756,8 +1630,8 @@ Profiles on disk: <b>{profile_count}</b> {'' if profiles_ok else '(profiles.json
 <h2 style="font-size:15px">Direct static file test</h2>
 <p>Click each. Both should open readable code, not an error:</p>
 <ul>
-<li><a style="color:#e9a13b" href="/static/app.js?v={ASSET_VERSION}">/static/app.js</a></li>
-<li><a style="color:#e9a13b" href="/static/style.css?v={ASSET_VERSION}">/static/style.css</a></li>
+<li><a style="color:#e9a13b" href="/static/app.js?v={asset_version()}">/static/app.js</a></li>
+<li><a style="color:#e9a13b" href="/static/style.css?v={asset_version()}">/static/style.css</a></li>
 <li><a style="color:#e9a13b" href="/api/settings">/api/settings</a> (should be JSON including a long "languages" list)</li>
 <li><a style="color:#e9a13b" href="/api/profiles">/api/profiles</a> (should be JSON listing your profiles)</li>
 </ul>
@@ -1825,7 +1699,6 @@ def settings():
             ("whisper_url", DEFAULT_WHISPER_URL),
             ("ollama_model", DEFAULT_OLLAMA_MODEL),
             ("ollama_translation_model", ""),
-            ("whisper_start_command", ""),
         ):
             if key in data:
                 CFG[key] = (data.get(key) or "").strip() or default
@@ -1833,24 +1706,14 @@ def settings():
         if "allow_openai_fallback" in data:
             CFG["allow_openai_fallback"] = bool(data.get("allow_openai_fallback"))
 
-        if "osc_host" in data:
-            CFG["osc_host"] = (data.get("osc_host") or "").strip()
-        if "osc_port" in data:
-            try:
-                port = int(data.get("osc_port") or DEFAULT_OSC_PORT)
-                CFG["osc_port"] = port if 1 <= port <= 65535 else DEFAULT_OSC_PORT
-            except (TypeError, ValueError):
-                CFG["osc_port"] = DEFAULT_OSC_PORT
-        if "osc_sfx" in data:
-            CFG["osc_sfx"] = bool(data.get("osc_sfx"))
-        if "osc_page_seconds_speaking" in data:
-            CFG["osc_page_seconds_speaking"] = clamp_page_seconds(
-                data.get("osc_page_seconds_speaking"), OSC_PAGE_SECONDS_SPEAKING
-            )
-        if "osc_page_seconds_silent" in data:
-            CFG["osc_page_seconds_silent"] = clamp_page_seconds(
-                data.get("osc_page_seconds_silent"), OSC_PAGE_SECONDS_SILENT
-            )
+        if "osc_enabled" in data:
+            CFG["osc_enabled"] = bool(data.get("osc_enabled"))
+
+        if "osc_mute_sync" in data:
+            CFG["osc_mute_sync"] = bool(data.get("osc_mute_sync"))
+
+        if "osc_unmute_on_send" in data:
+            CFG["osc_unmute_on_send"] = bool(data.get("osc_unmute_on_send"))
 
         save_config(CFG)
         return jsonify({"ok": True})
@@ -1870,19 +1733,10 @@ def settings():
             "ollama_model": CFG.get("ollama_model", DEFAULT_OLLAMA_MODEL),
             "ollama_translation_model": CFG.get("ollama_translation_model", ""),
             "whisper_url": CFG.get("whisper_url", DEFAULT_WHISPER_URL),
-            "whisper_start_command": CFG.get("whisper_start_command", ""),
             "allow_openai_fallback": bool(CFG.get("allow_openai_fallback", False)),
-            "osc_host": CFG.get("osc_host", ""),
-            "osc_port": CFG.get("osc_port", DEFAULT_OSC_PORT),
-            "osc_sfx": bool(CFG.get("osc_sfx", True)),
-            "osc_chatbox_limit": OSC_CHATBOX_LIMIT,
-            "osc_page_seconds_speaking": CFG.get(
-                "osc_page_seconds_speaking", OSC_PAGE_SECONDS_SPEAKING
-            ),
-            "osc_page_seconds_silent": CFG.get(
-                "osc_page_seconds_silent", OSC_PAGE_SECONDS_SILENT
-            ),
-            "osc_min_page_seconds": OSC_MIN_GAP_SECONDS,
+            "osc_enabled": bool(CFG.get("osc_enabled", False)),
+            "osc_mute_sync": bool(CFG.get("osc_mute_sync", False)),
+            "osc_unmute_on_send": bool(CFG.get("osc_unmute_on_send", False)),
             "elevenlabs_key_set": bool(CFG["elevenlabs_api_key"]),
             "voice_id": CFG["voice_id"],
             "voice_name": CFG.get("voice_name", ""),
@@ -1941,6 +1795,7 @@ def local_status():
             "message": message,
             "url": ollama_base_url(),
             "used_for": uses,
+            "fallback": True,
         })
 
     if transcription == "local_whisper":
@@ -1952,11 +1807,33 @@ def local_status():
             "message": message,
             "url": whisper_base_url(),
             "used_for": ["transcription"],
+            "fallback": True,
+        })
+
+    # FrivOSC reports itself, so there is nothing to probe — it either
+    # checked in recently or it did not. Listed here rather than in its own
+    # indicator because it is the same question as Evora's: a companion
+    # this install depends on, up or down. Only shown once the feature is
+    # switched on, matching the rule the providers above follow.
+    if CFG.get("osc_enabled", False):
+        status = frivosc_status()
+        services.append({
+            "id": "frivosc",
+            "name": "FrivOSC",
+            "ok": bool(status["connected"]),
+            "message": (
+                "Connected." if status["connected"]
+                else "Not connected. Start FrivOSC on the PC you play VRChat on."
+            ),
+            "url": status.get("hostname") or "this network",
+            "used_for": ["VRChat chatbox", "VRChat microphone"],
+            # No OpenAI to fall back to: if FrivOSC is down, VRChat simply
+            # gets nothing. The client uses this to pick the right sentence.
+            "fallback": False,
         })
 
     return jsonify({
         "services": services,
-        "can_start_whisper": bool((CFG.get("whisper_start_command") or "").strip()),
         # True when nothing local is selected at all, so the client can hide
         # the indicator entirely rather than showing a meaningless "all ok".
         "none_selected": not services,
@@ -2561,94 +2438,243 @@ def set_active_voice():
     return jsonify({"ok": True, "scope": "profile", "profile": match})
 
 
+# =============================================================================
+# FrivOSC — the VRChat bridge
+# =============================================================================
+# Frivo does not speak OSC. VRChat only ever sends and receives it on
+# 127.0.0.1, so a server on another machine cannot take part; FrivOSC runs
+# on the VRChat PC, where that loopback traffic already is, and talks to
+# Frivo over HTTP instead.
+#
+# That leaves Frivo with the easy half. Outbound: queue text, and FrivOSC
+# collects it. Inbound: FrivOSC reports the microphone. No ports, no
+# addresses, no paging, no rate limits — all of that now lives on the side
+# of the wire that can actually see VRChat.
+#
+# Everything here is in memory on purpose. A chatbox message that was not
+# collected before a restart is stale by definition, and the mute state is
+# only meaningful while a companion is connected to report it.
+
+# Held briefly and only by FrivOSC, so a small queue is the right size. If
+# it ever fills, the oldest go first: in a chatbox, a backlog nobody read
+# is worth less than the line being said now.
+FRIVOSC_OUTBOX_MAX = 20
+
+# How long a report stays trustworthy. FrivOSC heartbeats every 5s, so
+# three missed heartbeats means it is gone rather than quiet — and a
+# crashed companion must not leave the UI believing the mic is live.
+FRIVOSC_STALE_SECONDS = 15.0
+
+FRIVOSC_STATE = {
+    "connected_at": None,
+    "last_seen": None,
+    "version": "",
+    "hostname": "",
+    "muted": None,
+}
+FRIVOSC_OUTBOX = []
+FRIVOSC_LOCK = threading.Lock()
+
+
+def frivosc_touch(**fields):
+    with FRIVOSC_LOCK:
+        FRIVOSC_STATE["last_seen"] = time.time()
+        FRIVOSC_STATE.update(fields)
+
+
+def frivosc_status():
+    """
+    Connection state as the browser needs to reason about it.
+
+    `muted` is None whenever there is nothing trustworthy to report — no
+    companion, or one that has stopped heartbeating. That is deliberately
+    not the same as False: reporting "unmuted" for a companion that died
+    would have the UI enable dictation for a microphone it cannot see.
+    """
+    with FRIVOSC_LOCK:
+        last_seen = FRIVOSC_STATE["last_seen"]
+        fresh = last_seen is not None and (time.time() - last_seen) < FRIVOSC_STALE_SECONDS
+        return {
+            "connected": fresh,
+            "version": FRIVOSC_STATE["version"] if fresh else "",
+            "hostname": FRIVOSC_STATE["hostname"] if fresh else "",
+            "last_seen": last_seen,
+            "muted": FRIVOSC_STATE["muted"] if fresh else None,
+        }
+
+
+def frivosc_enqueue(text, speaking=True, unmute=False):
+    """
+    Queues work for FrivOSC to collect. Returns the message id.
+
+    Text and unmute travel in the same queue because they are the same
+    kind of thing — something to do on the VRChat PC, in order — and
+    because an unmute is often wanted when the chatbox is switched off, so
+    it cannot be a field on a chatbox message.
+    """
+    text = " ".join((text or "").split())
+    if not text and not unmute:
+        return None
+    message = {
+        "id": uuid.uuid4().hex,
+        "text": text,
+        "speaking": bool(speaking),
+        "sfx": True,
+        "unmute": bool(unmute),
+        "queued_at": time.time(),
+    }
+    with FRIVOSC_LOCK:
+        FRIVOSC_OUTBOX.append(message)
+        while len(FRIVOSC_OUTBOX) > FRIVOSC_OUTBOX_MAX:
+            FRIVOSC_OUTBOX.pop(0)
+    return message["id"]
+
+
+@app.route("/api/frivosc/hello", methods=["POST"])
+def frivosc_hello():
+    """First contact. Also what Setup's Test button calls to prove a route."""
+    data = request.get_json(silent=True) or {}
+    with FRIVOSC_LOCK:
+        if FRIVOSC_STATE["connected_at"] is None:
+            FRIVOSC_STATE["connected_at"] = time.time()
+    frivosc_touch(
+        version=str(data.get("version") or ""),
+        hostname=str(data.get("hostname") or ""),
+    )
+    return jsonify({"ok": True, "server": APP_NAME, "poll_ms": 500})
+
+
+@app.route("/api/frivosc/state", methods=["POST"])
+def frivosc_state():
+    """Mute state, sent on change and as a heartbeat."""
+    data = request.get_json(silent=True) or {}
+    muted = data.get("muted")
+    frivosc_touch(muted=None if muted is None else bool(muted))
+    return jsonify({"ok": True})
+
+
+@app.route("/api/frivosc/outbox")
+def frivosc_outbox():
+    """
+    Pending chatbox messages, handed over and cleared in one step.
+
+    Polling this is also a heartbeat, so a companion that is connected but
+    has heard nothing from VRChat yet still counts as present.
+    """
+    frivosc_touch()
+    if not CFG.get("osc_enabled", False):
+        # Switched off mid-session: drop anything already queued rather
+        # than delivering it the moment it is switched back on.
+        with FRIVOSC_LOCK:
+            FRIVOSC_OUTBOX.clear()
+        return jsonify({"messages": [], "enabled": False})
+    with FRIVOSC_LOCK:
+        messages = list(FRIVOSC_OUTBOX)
+        FRIVOSC_OUTBOX.clear()
+    return jsonify({"messages": messages, "enabled": True})
+
+
+@app.route("/api/frivosc/ack", methods=["POST"])
+def frivosc_ack():
+    """
+    Acknowledgement that a message reached VRChat's chatbox.
+
+    Nothing is retried on the strength of this — OSC is UDP and delivery
+    was never observable. It exists so the page count can be reported back
+    and so a companion that is working says so.
+    """
+    data = request.get_json(silent=True) or {}
+    frivosc_touch()
+    return jsonify({"ok": True, "id": data.get("id"), "pages": data.get("pages")})
+
+
+@app.route("/api/frivosc/unmute", methods=["POST"])
+def frivosc_unmute():
+    """
+    Asks FrivOSC to unmute the VRChat microphone, if it is muted.
+
+    Only ever unmutes. There is no matching mute: VRChat exposes one
+    virtual button rather than a settable state, and a bug that silences
+    someone mid-conversation is far worse than one that fails to open
+    their microphone.
+    """
+    if not CFG.get("osc_enabled", False):
+        return jsonify({"error": "VRChat OSC is turned off in Settings."}), 400
+    if not CFG.get("osc_unmute_on_send", False):
+        return jsonify({"error": "Unmute on send is turned off."}), 400
+
+    status = frivosc_status()
+    if not status["connected"]:
+        return jsonify({"error": "FrivOSC isn't connected."}), 503
+
+    # Nothing to do, and saying so is more useful than queueing a no-op.
+    if status["muted"] is False:
+        return jsonify({"ok": True, "queued": False, "reason": "already unmuted"})
+
+    message_id = frivosc_enqueue("", unmute=True)
+    return jsonify({"ok": True, "queued": bool(message_id), "id": message_id})
+
+
+@app.route("/api/frivosc/settings", methods=["POST"])
+def frivosc_settings():
+    """
+    Saves just the OSC switches, on their own.
+
+    These two live in the FrivOSC status panel in the sidebar, which has no
+    Save button — Save belongs to the Settings sheet. Without this they
+    flipped, were never persisted, and were then silently flipped back by
+    the next status poll reading the unchanged value off the server. A
+    switch that undoes itself a second later is worse than one that was
+    never added.
+
+    Deliberately not a partial POST to /api/settings. That would work
+    today, but it handles thirty other fields, and a save that quietly
+    depends on every one of them staying optional is a trap for later.
+    """
+    data = request.get_json(force=True) or {}
+    for key in ("osc_enabled", "osc_mute_sync", "osc_unmute_on_send"):
+        if key in data:
+            CFG[key] = bool(data.get(key))
+    save_config(CFG)
+    return jsonify({
+        "osc_enabled": bool(CFG.get("osc_enabled", False)),
+        "osc_mute_sync": bool(CFG.get("osc_mute_sync", False)),
+        "osc_unmute_on_send": bool(CFG.get("osc_unmute_on_send", False)),
+    })
+
+
+@app.route("/api/frivosc/status")
+def frivosc_status_route():
+    """Polled by the browser: is FrivOSC there, and what is the mic doing."""
+    status = frivosc_status()
+    status["enabled"] = bool(CFG.get("osc_enabled", False))
+    status["mute_sync"] = bool(CFG.get("osc_mute_sync", False))
+    status["unmute_on_send"] = bool(CFG.get("osc_unmute_on_send", False))
+    return jsonify(status)
+
+
 @app.route("/api/osc/chatbox", methods=["POST"])
 def osc_chatbox():
     """
-    Puts text into the VRChat chatbox.
-
-    Returns as soon as the message is queued, not when it lands: OSC is UDP,
-    so there is no acknowledgement to wait for and nothing here can tell the
-    difference between VRChat receiving it and the packet being dropped. The
-    page count comes back so the UI can say how long it'll take to scroll
-    through rather than implying it appeared instantly.
+    Kept at its original address so the front end did not have to change
+    shape, but it now queues for FrivOSC instead of sending UDP itself.
     """
-    host = (CFG.get("osc_host") or "").strip()
-    if not host:
-        return jsonify({"error": "Set the VRChat PC's address in Settings first."}), 400
+    if not CFG.get("osc_enabled", False):
+        return jsonify({"error": "VRChat OSC is turned off in Settings."}), 400
+
+    status = frivosc_status()
+    if not status["connected"]:
+        return jsonify({"error": "FrivOSC isn't connected. Start it on your VRChat PC."}), 503
 
     data = request.get_json(force=True)
     text = (data.get("text") or "").strip()
     if not text:
         return jsonify({"error": "Nothing to send."}), 400
 
-    # Which pacing applies depends on whether this message is also being
-    # spoken: read-only text needs longer on screen than a caption running
-    # alongside a voice that's already saying it.
-    speaking = bool(data.get("speaking"))
-    page_seconds = clamp_page_seconds(
-        CFG.get(
-            "osc_page_seconds_speaking" if speaking else "osc_page_seconds_silent",
-            OSC_PAGE_SECONDS_SPEAKING if speaking else OSC_PAGE_SECONDS_SILENT,
-        ),
-        OSC_PAGE_SECONDS_SPEAKING if speaking else OSC_PAGE_SECONDS_SILENT,
-    )
-
-    try:
-        pages = queue_chatbox(
-            text,
-            host,
-            CFG.get("osc_port", DEFAULT_OSC_PORT),
-            CFG.get("osc_sfx", True),
-            page_seconds,
-        )
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-    return jsonify(
-        {
-            "ok": True,
-            "pages": pages,
-            "page_seconds": page_seconds,
-            "delivery": "unconfirmed",
-        }
-    )
-
-
-@app.route("/api/osc/test", methods=["POST"])
-def osc_test():
-    """
-    Sends a known string, so the one thing you can't otherwise check —
-    whether packets from this machine reach VRChat at all — can be checked
-    by looking at your own chatbox.
-
-    Takes the address from the request rather than the saved config, so the
-    field can be tried before it's saved.
-    """
-    data = request.get_json(force=True)
-    host = (data.get("osc_host") or CFG.get("osc_host") or "").strip()
-    port = data.get("osc_port") or CFG.get("osc_port", DEFAULT_OSC_PORT)
-    if not host:
-        return jsonify({"error": "Enter the VRChat PC's address first."}), 400
-
-    try:
-        osc_send(
-            host,
-            int(port),
-            osc_message("/chatbox/input", "Frivo is connected.", True, True),
-        )
-    except Exception as e:
-        # Reaching here means the packet couldn't even leave — a bad
-        # hostname, usually. A silent success proves much less.
-        return jsonify({"error": f"Couldn't send: {e}"}), 502
-
-    return jsonify(
-        {
-            "ok": True,
-            "host": host,
-            "port": int(port),
-            "note": "Sent. UDP has no receipt, so check your own chatbox in VRChat.",
-        }
-    )
+    message_id = frivosc_enqueue(text, speaking=bool(data.get("speaking")))
+    if not message_id:
+        return jsonify({"error": "Nothing to send."}), 400
+    return jsonify({"ok": True, "id": message_id, "delivery": "queued"})
 
 
 @app.route("/api/profiles", methods=["GET", "POST"])

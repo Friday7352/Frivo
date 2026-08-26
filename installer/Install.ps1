@@ -263,6 +263,14 @@ function Copy-AppFiles {
     }
     Copy-Item (Join-Path $SourceApp 'app.py')           -Destination $Target -Force
     Copy-Item (Join-Path $SourceApp 'requirements.txt') -Destination $Target -Force
+    # Installed alongside the app so a running Frivo can say which version
+    # it is — /diagnose reads it. Written rather than copied, because the
+    # payload keeps VERSION one level up from the app folder and this is
+    # the value setup already resolved.
+    try {
+        [IO.File]::WriteAllText((Join-Path $Target 'VERSION'), $AppVersion,
+                                [Text.UTF8Encoding]::new($false))
+    } catch { }
     Copy-Item (Join-Path $SourceApp 'templates\*')      -Destination (Join-Path $Target 'templates') -Recurse -Force
     Copy-Item (Join-Path $SourceApp 'static\*')         -Destination (Join-Path $Target 'static')    -Recurse -Force
     Copy-Item (Join-Path $ScriptDir 'Uninstall.ps1')           -Destination (Join-Path $Target 'installer') -Force
@@ -484,12 +492,23 @@ function Set-FirewallRule {
 
     & $Log 'Configuring Windows Firewall...'
     $pythonw = Join-Path $Target '.venv\Scripts\pythonw.exe'
+    # Deleting by name+program clears every rule this installer has ever
+    # added under that name, including the UDP one below, so a reinstall
+    # never stacks duplicates.
     Invoke-Tool -FilePath 'netsh.exe' -Arguments @(
         'advfirewall', 'firewall', 'delete', 'rule', 'name=Frivo', ('program=' + $pythonw)
     ) | Out-Null
+
+    # ('program=' + $pythonw) — the parentheses are load-bearing. Inside an
+    # array literal the comma binds tighter than +, so 'program=' + $pythonw
+    # parses as ('action=allow', 'program=') + $pythonw: the path lands as
+    # its own element and netsh receives an empty program= plus a stray
+    # argument. It rejects that, and the failure is only logged, so the rule
+    # silently never existed. The delete call above always had the
+    # parentheses; this one did not.
     $r = Invoke-Tool -FilePath 'netsh.exe' -Arguments @(
         'advfirewall', 'firewall', 'add', 'rule', 'name=Frivo',
-        'dir=in', 'action=allow', 'program=' + $pythonw,
+        'dir=in', 'action=allow', ('program=' + $pythonw),
         'profile=private', 'remoteip=localsubnet', 'protocol=TCP', 'localport=5000'
     )
     if ($r.ExitCode -ne 0) {

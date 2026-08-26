@@ -147,17 +147,14 @@ const testWhisperBtn = $("testWhisperBtn");
 const whisperModelSelect = $("whisperModelSelect");
 const applyWhisperModelBtn = $("applyWhisperModelBtn");
 const whisperModelNote = $("whisperModelNote");
-const whisperStartCommand = $("whisperStartCommand");
 
-const oscHost = $("oscHost");
-const oscPort = $("oscPort");
-const oscSfxToggle = $("oscSfxToggle");
-const oscPageSpeaking = $("oscPageSpeaking");
-const oscPageSilent = $("oscPageSilent");
-const testOscBtn = $("testOscBtn");
-const oscTestNote = $("oscTestNote");
+const oscEnabledToggle = $("oscEnabledToggle");
+const oscMuteSyncToggle = $("oscMuteSyncToggle");
+const oscUnmuteOnSendToggle = $("oscUnmuteOnSendToggle");
+const frivoscStatusValue = $("frivoscStatusValue");
 const oscToggle = $("oscToggle");
 const oscSwitch = $("oscSwitch");
+
 const speakToggle = $("speakToggle");
 
 const responseStyleRadios = $("responseStyleRadios");
@@ -274,6 +271,138 @@ const serviceStatus = $("serviceStatus");
 const LOCAL_STATUS_POLL_MS = 30000;
 let localStatusTimer = null;
 
+// Each service's settings live in exactly one node in the document. The
+// Settings page and the status chip's panel both host that same node by
+// moving it, never by copying it — two copies would mean duplicate element
+// ids and two values that quietly drift apart. `home` is the empty marker
+// left behind in Settings, so it can always be put back.
+const SERVICE_SETTINGS = {
+  whisper: { card: "whisperSettings", home: "whisperSettingsHome" },
+  frivosc: { card: "oscSettings", home: "oscSettingsHome" },
+};
+
+function claimServiceSettings(id, container) {
+  const spec = SERVICE_SETTINGS[id];
+  if (!spec) return;
+  const card = document.getElementById(spec.card);
+  if (card && card.parentElement !== container) container.append(card);
+}
+
+function releaseServiceSettings(id) {
+  const spec = SERVICE_SETTINGS[id];
+  if (!spec) return;
+  const card = document.getElementById(spec.card);
+  const home = document.getElementById(spec.home);
+  if (card && home && card.parentElement !== home.parentElement) {
+    home.after(card);
+  }
+}
+
+function serviceChipTitle(service) {
+  const lines = [`${service.name} at ${service.url}`, service.message];
+  // FrivOSC has nothing to fall back to — if it is down, VRChat just gets
+  // nothing. Only the providers with an OpenAI path behind them get the
+  // warning about paying for it.
+  if (!service.ok && service.fallback !== false) {
+    lines.push("Falling back to OpenAI, which costs credits.");
+  }
+  return lines.join("\n");
+}
+
+// Survives a re-render, so a panel you opened does not shut itself the next
+// time the poll comes round.
+const expandedServices = new Set();
+let renderedServiceIds = "";
+
+function buildServiceBlock(service) {
+  const block = document.createElement("div");
+  block.className = "service-block";
+  block.dataset.serviceId = service.id;
+
+  const chip = document.createElement("button");
+  chip.type = "button";
+  chip.className = "service-status";
+  chip.setAttribute("aria-expanded", "false");
+
+  const name = document.createElement("span");
+  name.className = "service-status-name";
+  chip.append(name);
+
+  const chevron = document.createElement("span");
+  chevron.className = "service-status-chevron";
+  chevron.innerHTML = '<svg class="icon-16" aria-hidden="true"><use href="#i-chevron"/></svg>';
+  chip.append(chevron);
+
+  const panel = document.createElement("div");
+  panel.className = "service-panel is-hidden";
+
+  block.append(chip, panel);
+  return block;
+}
+
+function paintServiceBlock(block, service) {
+  const chip = block.querySelector(".service-status");
+  const open = expandedServices.has(service.id);
+  chip.className = "service-status " + (service.ok ? "is-ok" : "is-down");
+  chip.setAttribute("aria-expanded", open ? "true" : "false");
+  chip.title = serviceChipTitle(service);
+  block.querySelector(".service-status-name").textContent = service.name;
+  block.querySelector(".service-panel").classList.toggle("is-hidden", !open);
+}
+
+function renderServiceChips(services) {
+  // Rebuilt only when the set of services changes. Repainting in place
+  // matters because an open panel is holding the live settings card, and
+  // replaceChildren() would throw it away mid-edit.
+  const signature = services.map((s) => s.id).join(",");
+  if (signature !== renderedServiceIds) {
+    Array.from(serviceStatus.children).forEach((block) => {
+      releaseServiceSettings(block.dataset.serviceId);
+    });
+    serviceStatus.replaceChildren(...services.map(buildServiceBlock));
+    renderedServiceIds = signature;
+  }
+
+  services.forEach((service, index) => {
+    const block = serviceStatus.children[index];
+    if (!block) return;
+    paintServiceBlock(block, service);
+    if (expandedServices.has(service.id)) {
+      claimServiceSettings(service.id, block.querySelector(".service-panel"));
+    }
+  });
+}
+
+function toggleServicePanel(id) {
+  const block = serviceStatus.querySelector(`.service-block[data-service-id="${id}"]`);
+  if (!block) return;
+  const panel = block.querySelector(".service-panel");
+  const chip = block.querySelector(".service-status");
+
+  if (expandedServices.has(id)) {
+    expandedServices.delete(id);
+    releaseServiceSettings(id);
+    panel.classList.add("is-hidden");
+    chip.setAttribute("aria-expanded", "false");
+    return;
+  }
+
+  // One at a time. Two open panels in a narrow sidebar means scrolling to
+  // find the one you wanted.
+  Array.from(expandedServices).forEach((other) => {
+    if (other !== id) toggleServicePanel(other);
+  });
+
+  expandedServices.add(id);
+  claimServiceSettings(id, panel);
+  panel.classList.remove("is-hidden");
+  chip.setAttribute("aria-expanded", "true");
+}
+
+function collapseAllServicePanels() {
+  Array.from(expandedServices).forEach((id) => toggleServicePanel(id));
+}
+
 async function loadLocalStatus() {
   if (!serviceStatus) return;
   try {
@@ -281,40 +410,21 @@ async function loadLocalStatus() {
     const data = await res.json();
 
     if (!res.ok || data.none_selected) {
+      Array.from(serviceStatus.children).forEach((block) => {
+        releaseServiceSettings(block.dataset.serviceId);
+      });
+      expandedServices.clear();
+      serviceStatus.replaceChildren();
+      renderedServiceIds = "";
       serviceStatus.classList.add("is-hidden");
       return;
     }
 
     serviceStatus.classList.remove("is-hidden");
-    const down = data.services.filter((s) => !s.ok);
-
-    if (!down.length) {
-      canStartWhisper = false;
-      const names = data.services.map((s) => s.name).join(" + ");
-      serviceStatus.className = "service-status is-ok";
-      serviceStatus.textContent = names;
-      serviceStatus.title =
-        data.services
-          .map((s) => `${s.name} (${s.url}) — ${s.message}`)
-          .join("\n") + "\n\nClick to re-check.";
-      return;
-    }
-
-    serviceStatus.className = "service-status is-down";
-    const whisperDown = down.some((s) => s.id === "whisper");
-    canStartWhisper = Boolean(data.can_start_whisper) && whisperDown;
-    serviceStatus.textContent =
-      down.length === 1 ? `${down[0].name} offline` : `${down.length} services offline`;
-    if (canStartWhisper) serviceStatus.textContent += " — click to start";
-    serviceStatus.title =
-      down
-        .map(
-          (s) =>
-            `${s.name} at ${s.url} is not reachable.\n` +
-            `${s.message}\n` +
-            `Used for: ${s.used_for.join(", ")}. Falling back to OpenAI, which costs credits.`
-        )
-        .join("\n\n") + "\n\nClick to re-check.";
+    // One chip per service rather than one chip for all of them: they go
+    // down independently and for unrelated reasons, and "2 services
+    // offline" made you hover to find out which.
+    renderServiceChips(data.services);
   } catch (err) {
     // The app's own server is unreachable — the page has bigger problems
     // than a provider being down, and its own errors will say so.
@@ -328,47 +438,13 @@ function startLocalStatusPolling() {
   localStatusTimer = setInterval(loadLocalStatus, LOCAL_STATUS_POLL_MS);
 }
 
-let canStartWhisper = false;
-
 if (serviceStatus) {
-  serviceStatus.addEventListener("click", async () => {
-    if (!canStartWhisper) {
-      serviceStatus.textContent = "Checking…";
-      serviceStatus.className = "service-status";
-      loadLocalStatus();
-      return;
-    }
-
-    serviceStatus.textContent = "Starting…";
-    serviceStatus.className = "service-status";
-    try {
-      const res = await fetch("/api/start-whisper", { method: "POST" });
-      const data = await res.json();
-      if (!res.ok) {
-        serviceStatus.className = "service-status is-down";
-        serviceStatus.textContent = "Start failed";
-        serviceStatus.title = data.error || "The start command failed.";
-        return;
-      }
-    } catch (err) {
-      serviceStatus.className = "service-status is-down";
-      serviceStatus.textContent = "Start failed";
-      serviceStatus.title = err.message;
-      return;
-    }
-
-    // Loading a model takes a while, so poll rather than reporting a
-    // result the moment the command returns — the command succeeding only
-    // means the task was triggered, not that the service is up.
-    serviceStatus.textContent = "Starting… loading model";
-    for (let i = 0; i < 40; i += 1) {
-      await new Promise((r) => setTimeout(r, 2000));
-      const res = await fetch("/api/local-status");
-      const data = await res.json();
-      const whisper = (data.services || []).find((s) => s.id === "whisper");
-      if (whisper && whisper.ok) break;
-    }
-    loadLocalStatus();
+  // Delegated, because the blocks are rebuilt when the service set changes.
+  serviceStatus.addEventListener("click", (event) => {
+    const chip = event.target.closest(".service-status");
+    if (!chip) return;
+    const block = chip.closest(".service-block");
+    if (block) toggleServicePanel(block.dataset.serviceId);
   });
 }
 
@@ -458,7 +534,6 @@ function buildProviderPickers(settings) {
   }
   if (whisperUrl) whisperUrl.value = settings.whisper_url || "";
   if (allowFallbackToggle) allowFallbackToggle.checked = Boolean(settings.allow_openai_fallback);
-  if (whisperStartCommand) whisperStartCommand.value = settings.whisper_start_command || "";
 
   syncProviderVisibility();
 
@@ -1526,23 +1601,18 @@ async function loadSettings() {
   defaultVoiceName = data.voice_name || "";
   renderVoiceTrigger();
 
-  if (oscHost) oscHost.value = data.osc_host || "";
-  if (oscPort) oscPort.value = data.osc_port || 9000;
-  if (oscSfxToggle) oscSfxToggle.checked = data.osc_sfx !== false;
-  if (oscPageSpeaking) oscPageSpeaking.value = data.osc_page_seconds_speaking ?? 1.6;
-  if (oscPageSilent) oscPageSilent.value = data.osc_page_seconds_silent ?? 4;
-  // The floor comes from the server so there's one definition of it, rather
-  // than the field allowing something the backend will silently raise.
-  if (data.osc_min_page_seconds != null) {
-    [oscPageSpeaking, oscPageSilent].forEach((el) => {
-      if (el) el.min = data.osc_min_page_seconds;
-    });
-  }
-  oscConfigured = Boolean((data.osc_host || "").trim());
+  if (oscEnabledToggle) oscEnabledToggle.checked = Boolean(data.osc_enabled);
+  if (oscMuteSyncToggle) oscMuteSyncToggle.checked = Boolean(data.osc_mute_sync);
+  if (oscUnmuteOnSendToggle) oscUnmuteOnSendToggle.checked = Boolean(data.osc_unmute_on_send);
+  oscEnabled_setting = Boolean(data.osc_enabled);
+  // "Configured" now means the feature is on and a companion is actually
+  // there. There is no address left to get wrong.
+  oscConfigured = oscEnabled_setting && frivoscConnected;
   // The toggle is remembered per browser, but can't be honoured before the
   // server has said whether there's anywhere to send to.
   oscToggle.checked = localStorage.getItem(OSC_ENABLED_KEY) === "1";
   syncOscSwitch();
+
   if (data.languages && data.languages.length) {
     // A language saved in this browser wins over the server default, so
     // switching devices doesn't silently change what you get.
@@ -1628,6 +1698,10 @@ translationModelCustom.addEventListener("input", updateTranslationModelEstimate)
 // Settings is a full-page sheet now, so it needs the usual ways out of one:
 // its own Close button, and Escape.
 function setSettingsOpen(open) {
+  // Settings is where these cards live. Opening it takes them back from any
+  // status chip currently borrowing one, so they are never asked to be in
+  // two places at once.
+  if (open && typeof collapseAllServicePanels === "function") collapseAllServicePanels();
   settingsPanel.classList.toggle("is-hidden", !open);
   settingsToggle.classList.toggle("is-active", open);
   // Always reopens at the top level. Coming back to whichever sub-page you
@@ -1683,13 +1757,10 @@ saveSettingsBtn.addEventListener("click", async () => {
       ? ollamaTranslationModel.value.trim()
       : "",
     whisper_url: whisperUrl ? whisperUrl.value.trim() : "",
-    whisper_start_command: whisperStartCommand ? whisperStartCommand.value.trim() : "",
     allow_openai_fallback: allowFallbackToggle ? allowFallbackToggle.checked : false,
-    osc_host: oscHost ? oscHost.value.trim() : "",
-    osc_port: oscPort ? parseInt(oscPort.value, 10) || 9000 : 9000,
-    osc_sfx: oscSfxToggle ? oscSfxToggle.checked : true,
-    osc_page_seconds_speaking: oscPageSpeaking ? parseFloat(oscPageSpeaking.value) : 1.6,
-    osc_page_seconds_silent: oscPageSilent ? parseFloat(oscPageSilent.value) : 4,
+    osc_enabled: oscEnabledToggle ? oscEnabledToggle.checked : false,
+    osc_mute_sync: oscMuteSyncToggle ? oscMuteSyncToggle.checked : false,
+    osc_unmute_on_send: oscUnmuteOnSendToggle ? oscUnmuteOnSendToggle.checked : false,
   };
   if (openaiKeyInput.value.trim()) body.openai_api_key = openaiKeyInput.value.trim();
   if (elevenKeyInput.value.trim()) body.elevenlabs_api_key = elevenKeyInput.value.trim();
@@ -1721,7 +1792,11 @@ saveSettingsBtn.addEventListener("click", async () => {
 
 
 const OSC_ENABLED_KEY = "voice_console_osc_enabled";
+// Whether the chatbox can actually go anywhere: the feature switched on in
+// Settings, AND a companion currently connected to carry it.
 let oscConfigured = false;
+let oscEnabled_setting = false;
+let frivoscConnected = false;
 
 
 const CREDITS_POLL_MS = 60000;
@@ -1851,18 +1926,217 @@ function oscEnabled() {
 }
 
 function syncOscSwitch() {
-  // Left usable but explained when there's no address yet — hiding it would
-  // just raise the question of where the VRChat option went.
+  // Left usable but explained when it cannot deliver — hiding it would just
+  // raise the question of where the VRChat option went.
   oscSwitch.title = oscConfigured
     ? "Show the spoken reply in your VRChat chatbox as it plays"
-    : "Set the VRChat PC's address in Settings to use this";
+    : oscEnabled_setting
+      ? "Waiting for FrivOSC on your VRChat PC"
+      : "Turn on VRChat OSC in Settings to use this";
   oscSwitch.classList.toggle("is-unset", !oscConfigured);
+}
+
+// ---------- FrivOSC status ----------
+// Frivo speaks no OSC of its own. FrivOSC runs on the VRChat PC and reports
+// in; all this does is show whether it is there, and keep the composer
+// switch honest about whether a message would actually arrive.
+
+// Two rates. Showing "connected" a few seconds late is nothing; letting
+// dictation start a few seconds after you unmute in VRChat is the whole
+// feature arriving late, so mute sync polls harder while it is on. The
+// endpoint is a small JSON read against a server on your own network.
+const FRIVOSC_POLL_MS = 5000;
+const FRIVOSC_SYNC_POLL_MS = 1000;
+let frivoscTimer = null;
+let frivoscPollRate = 0;
+
+// Mute sync acts on *changes* in VRChat's mute state, never on the level.
+// That is what lets the mic button override it: stop dictation by hand
+// while still unmuted and it stays stopped, because nothing changed.
+let muteSyncEnabled = false;
+let unmuteOnSendEnabled = false;
+let lastSyncedMute = null;
+let frivoscMuted = null;
+
+function noteManualDictationOverride() {
+  // The current mute state has now been "handled" by the person, so the
+  // next poll has nothing new to act on.
+  lastSyncedMute = frivoscMuted;
+}
+
+function applyMuteSync() {
+  if (!muteSyncEnabled || !oscEnabled_setting || !frivoscConnected) {
+    // Nothing is driving dictation, so forget where we were. Turning the
+    // switch back on should act on the next change, not on a stale one.
+    lastSyncedMute = null;
+    return;
+  }
+  // Before VRChat has said anything, muted is null — genuinely unknown, and
+  // not the same as unmuted. Acting on it would start dictation for a mic
+  // that may well be muted.
+  if (frivoscMuted === null) return;
+  if (frivoscMuted === lastSyncedMute) return;
+
+  lastSyncedMute = frivoscMuted;
+  if (frivoscMuted) {
+    if (isDictating) {
+      endDictation();
+      setStatus("Muted in VRChat — dictation stopped.");
+    }
+  } else if (!isDictating) {
+    beginDictation();
+    setStatus("Unmuted in VRChat — dictation started.");
+  }
+}
+
+function setFrivoscPollRate(interval) {
+  if (interval === frivoscPollRate) return;
+  frivoscPollRate = interval;
+  clearInterval(frivoscTimer);
+  frivoscTimer = setInterval(pollFrivoscStatus, interval);
+}
+
+function describeFrivosc(data) {
+  // Deliberately just "Connected". The hostname reads as "Connected — PA…"
+  // at this row's width, which tells nobody anything; the machine's name is
+  // visible in FrivOSC's own window, on the machine in question.
+  if (!data || !data.enabled) return "Off";
+  return data.connected ? "Connected" : "Not connected";
+}
+
+async function pollFrivoscStatus() {
+  try {
+    const res = await fetch("/api/frivosc/status");
+    const data = await res.json();
+    if (!res.ok) return;
+    const wasConnected = frivoscConnected;
+    const wasEnabled = oscEnabled_setting;
+    frivoscConnected = Boolean(data.connected);
+    oscEnabled_setting = Boolean(data.enabled);
+    muteSyncEnabled = Boolean(data.mute_sync);
+    unmuteOnSendEnabled = Boolean(data.unmute_on_send);
+    frivoscMuted =
+      !frivoscConnected || data.muted === null || data.muted === undefined
+        ? null
+        : Boolean(data.muted);
+    oscConfigured = frivoscConnected && oscEnabled_setting;
+    setSummary("frivoscStatusValue", describeFrivosc(data));
+    // Mic state is what the mute-sync acts on, so it is worth showing
+    // rather than leaving people to guess why dictation did something.
+    // null is not false: "unknown" and "live" are different answers.
+    setSummary(
+      "frivoscMicValue",
+      frivoscMuted === null ? "Unknown" : frivoscMuted ? "Muted" : "Live"
+    );
+    syncOscSwitch();
+    applyMuteSync();
+    setFrivoscPollRate(
+      muteSyncEnabled && oscEnabled_setting ? FRIVOSC_SYNC_POLL_MS : FRIVOSC_POLL_MS
+    );
+    // FrivOSC also appears in the header chip alongside Evora, which polls
+    // far more slowly. Nudging it on a change keeps the two from disagreeing
+    // for half a minute after FrivOSC comes up or goes away.
+    if (frivoscConnected !== wasConnected || oscEnabled_setting !== wasEnabled) {
+      loadLocalStatus();
+    }
+  } catch (err) {
+    // Frivo's own server is unreachable; the page has louder problems.
+  }
+}
+
+function startFrivoscPolling() {
+  clearInterval(frivoscTimer);
+  frivoscPollRate = FRIVOSC_POLL_MS;
+  frivoscTimer = setInterval(pollFrivoscStatus, FRIVOSC_POLL_MS);
+  pollFrivoscStatus();
+}
+
+// These two switches live in the FrivOSC status panel in the sidebar, which
+// has no Save button — Save belongs to the Settings sheet. So they save
+// themselves. Without this they flipped, were never written down, and were
+// then silently flipped back by the next status poll reading the unchanged
+// value off the server.
+async function saveOscSwitches(patch, toggle) {
+  try {
+    const res = await fetch("/api/frivosc/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
+    });
+    if (!res.ok) throw new Error("save failed");
+    const saved = await res.json();
+    if (oscEnabledToggle) oscEnabledToggle.checked = Boolean(saved.osc_enabled);
+    if (oscMuteSyncToggle) oscMuteSyncToggle.checked = Boolean(saved.osc_mute_sync);
+    if (oscUnmuteOnSendToggle) oscUnmuteOnSendToggle.checked = Boolean(saved.osc_unmute_on_send);
+    oscEnabled_setting = Boolean(saved.osc_enabled);
+    muteSyncEnabled = Boolean(saved.osc_mute_sync);
+    unmuteOnSendEnabled = Boolean(saved.osc_unmute_on_send);
+    oscConfigured = oscEnabled_setting && frivoscConnected;
+    syncOscSwitch();
+    // Reflect it in the chip straight away rather than up to 30s later.
+    loadLocalStatus();
+    return true;
+  } catch (err) {
+    // Put the switch back rather than leaving it showing a state the
+    // server does not have.
+    if (toggle) toggle.checked = !toggle.checked;
+    setStatus("Couldn't save that setting.", true);
+    return false;
+  }
+}
+
+if (oscEnabledToggle) {
+  oscEnabledToggle.addEventListener("change", () => {
+    oscEnabled_setting = oscEnabledToggle.checked;
+    oscConfigured = oscEnabled_setting && frivoscConnected;
+    syncOscSwitch();
+    saveOscSwitches({ osc_enabled: oscEnabledToggle.checked }, oscEnabledToggle);
+  });
+}
+
+if (oscUnmuteOnSendToggle) {
+  oscUnmuteOnSendToggle.addEventListener("change", () => {
+    unmuteOnSendEnabled = oscUnmuteOnSendToggle.checked;
+    saveOscSwitches(
+      { osc_unmute_on_send: oscUnmuteOnSendToggle.checked },
+      oscUnmuteOnSendToggle
+    );
+  });
+}
+
+if (oscMuteSyncToggle) {
+  oscMuteSyncToggle.addEventListener("change", () => {
+    muteSyncEnabled = oscMuteSyncToggle.checked;
+    // Forgotten rather than remembered. Switching this on while already
+    // unmuted in VRChat should start dictation — that is exactly what the
+    // switch says it does. Holding on to the old value made turning it on
+    // do nothing at all until the next mute/unmute cycle, which reads as
+    // broken.
+    lastSyncedMute = null;
+    saveOscSwitches({ osc_mute_sync: oscMuteSyncToggle.checked }, oscMuteSyncToggle);
+  });
+}
+
+function requestVrchatUnmute() {
+  // Everything here is also checked on the server; this just avoids a
+  // pointless request on every single send when the feature is off.
+  if (!unmuteOnSendEnabled || !oscEnabled_setting || !frivoscConnected) return;
+  if (frivoscMuted === false) return;
+  fetch("/api/frivosc/unmute", { method: "POST" }).catch(() => {
+    // Not surfaced. It is a convenience on top of sending a message, and
+    // an error toast here would interrupt the thing you actually asked for.
+  });
 }
 
 function sendToChatbox(text, { speaking = false } = {}) {
   if (!text) return;
   if (!oscConfigured) {
-    setStatus("VRChat chatbox is on, but no address is set in Settings.", true);
+    setStatus(
+      oscEnabled_setting
+        ? "VRChat chatbox is on, but FrivOSC isn't connected."
+        : "VRChat chatbox is on, but VRChat OSC is off in Settings.",
+      true
+    );
     return;
   }
   // OSC delivery is independent of the chat request. Speaking controls the
@@ -1886,31 +2160,14 @@ function sendToChatbox(text, { speaking = false } = {}) {
 oscToggle.addEventListener("change", () => {
   localStorage.setItem(OSC_ENABLED_KEY, oscToggle.checked ? "1" : "0");
   if (oscToggle.checked && !oscConfigured) {
-    setStatus("Set the VRChat PC's address in Settings for this to do anything.", true);
+    setStatus(
+      oscEnabled_setting
+        ? "Waiting for FrivOSC to connect from your VRChat PC."
+        : "Turn on VRChat OSC in Settings for this to do anything.",
+      true
+    );
   } else {
     setStatus(oscToggle.checked ? "Sending to the VRChat chatbox." : "VRChat chatbox off.");
-  }
-});
-
-testOscBtn.addEventListener("click", async () => {
-  oscTestNote.textContent = "Sending…";
-  try {
-    const res = await fetch("/api/osc/test", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        osc_host: oscHost.value.trim(),
-        osc_port: parseInt(oscPort.value, 10) || 9000,
-      }),
-    });
-    const data = await res.json();
-    oscTestNote.textContent = res.ok
-      ? `Sent to ${data.host}:${data.port}. ${data.note}`
-      : data.error;
-    oscTestNote.classList.toggle("is-error", !res.ok);
-  } catch (err) {
-    oscTestNote.textContent = err.message;
-    oscTestNote.classList.add("is-error");
   }
 });
 
@@ -3329,6 +3586,25 @@ function pickRecorderMimeType() {
   return "";
 }
 
+const IS_APPLE = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || "");
+
+function appendToMessageInput(text) {
+  // One joiner for everything that adds to the box, so the spacing rule
+  // does not get two slightly different answers. A trailing space on the
+  // existing text is respected rather than collapsed, in case someone is
+  // mid-sentence and meant it.
+  const addition = (text || "").trim();
+  if (!addition) return;
+  const existing = messageInput.value;
+  if (!existing.trim()) {
+    messageInput.value = addition;
+    return;
+  }
+  messageInput.value = /\s$/.test(existing)
+    ? existing + addition
+    : `${existing} ${addition}`;
+}
+
 function setDictateUI(active) {
   dictateBtn.classList.toggle("is-recording", active);
   dictateBtn.setAttribute("aria-label", active ? "Stop dictation" : "Dictate");
@@ -3412,8 +3688,7 @@ async function sendDictation(mimeType) {
     // Appended rather than replacing, so dictating in a couple of goes
     // (or dictating on top of something already typed) doesn't clobber
     // what's already in the box.
-    const existing = messageInput.value.trim();
-    messageInput.value = existing ? `${existing} ${text}` : text;
+    appendToMessageInput(text);
     messageInput.focus();
     setStatus("Ready.");
     scheduleAutoSend();
@@ -3862,18 +4137,34 @@ function stopLocalLiveDictation() {
   setStatus("Ready.");
 }
 
-dictateBtn.addEventListener("click", () => {
-  if (isDictating) {
-    if (activeDictationMode === "live") stopLiveDictation();
-    else if (activeDictationMode === "live_local") stopLocalLiveDictation();
-    else stopDictation();
-    return;
-  }
-
+// Named, because the mic button is no longer the only thing that starts and
+// stops dictation — VRChat's mute button can too, when mute sync is on.
+// Whichever engine is selected, both callers go through the same door.
+function beginDictation() {
+  if (isDictating) return;
   activeDictationMode = currentDictationMode();
   if (activeDictationMode === "live") startLiveDictation();
   else if (activeDictationMode === "live_local") startLocalLiveDictation();
   else startDictation();
+}
+
+function endDictation() {
+  if (!isDictating) return;
+  if (activeDictationMode === "live") stopLiveDictation();
+  else if (activeDictationMode === "live_local") stopLocalLiveDictation();
+  else stopDictation();
+}
+
+dictateBtn.addEventListener("click", () => {
+  if (isDictating) {
+    endDictation();
+    return;
+  }
+  beginDictation();
+  // Whatever VRChat's mute button says right now, this click is the newer
+  // instruction. Recording it here is what stops the next poll immediately
+  // undoing a manual override.
+  noteManualDictationOverride();
 });
 
 
@@ -4180,7 +4471,11 @@ function addListenEntry() {
   const entry = document.createElement("div");
   entry.className = "listen-entry is-pending";
   entry.id = `listen-${(listenEntrySeq += 1)}`;
-  entry.title = "Click to put this message in your reply box";
+  // Ctrl on Windows and Linux, Cmd on a Mac — named for whichever this is,
+  // rather than showing both and making the reader work out which is theirs.
+  entry.title =
+    "Click to put this message in your reply box\n" +
+    `${IS_APPLE ? "Cmd" : "Ctrl"}-click to add it to what's already there`;
 
   const avatar = document.createElement("div");
   avatar.className = "listen-avatar is-unknown";
@@ -4224,12 +4519,26 @@ function addListenEntry() {
 
   // Click anywhere on a message to load it into the reply box. Clicking the
   // speaker name is exempt — that renames, and the two shouldn't fight.
+  //
+  // Ctrl (or Cmd) held appends instead of replacing, so several things
+  // people said can be gathered into one reply. Replacing stays the plain
+  // click because it is the common case: usually you are answering the one
+  // message you just clicked.
   entry.addEventListener("click", (event) => {
     if (event.target.closest(".listen-speaker")) return;
     const spoken = text.textContent.trim();
     if (!spoken || spoken === "…") return;
-    messageInput.value = spoken;
+
+    if (event.ctrlKey || event.metaKey) {
+      appendToMessageInput(spoken);
+    } else {
+      messageInput.value = spoken;
+    }
     messageInput.focus();
+    // Put the caret at the end, so typing continues the sentence rather
+    // than landing wherever it happened to be.
+    const end = messageInput.value.length;
+    messageInput.setSelectionRange(end, end);
     resetLiveDictation();
     entry.classList.add("is-copied");
     setTimeout(() => entry.classList.remove("is-copied"), 400);
@@ -4842,6 +5151,11 @@ async function send() {
   cancelAutoSend();
   // Start a fresh dictation utterance after sending.
   resetLiveDictation();
+  // Open the VRChat microphone now rather than when the reply plays: the
+  // tap takes a moment to land and be confirmed, and the reply is seconds
+  // away. Deliberately not awaited — nothing about sending should wait on
+  // VRChat, and a failure here is reported in FrivOSC's own log.
+  requestVrchatUnmute();
   addTurn("You", message);
   showTypingBubble();
   setStatus("Generating…");
@@ -4977,6 +5291,12 @@ messageInput.addEventListener("keydown", (e) => {
     console.error("startLocalStatusPolling failed:", err);
   }
 
+  try {
+    startFrivoscPolling();
+  } catch (err) {
+    console.error("startFrivoscPolling failed:", err);
+  }
+
   setLamp("ready");
   if (!statusEl.textContent || statusEl.textContent === "") setStatus("Ready.");
 })();
@@ -5052,8 +5372,8 @@ function applyComposerOptions(open) {
   if (composerMoreBtn) {
     composerMoreBtn.setAttribute("aria-expanded", open ? "true" : "false");
     composerMoreBtn.title = open
-      ? "Hide the Speak and OSC switches"
-      : "Show the Speak and OSC switches";
+      ? "Hide the Speak and Chatbox switches"
+      : "Show the Speak and Chatbox switches";
   }
   try { localStorage.setItem(COMPOSER_OPTS_KEY, open ? "1" : "0"); } catch (e) { /* private mode */ }
 }
@@ -5579,17 +5899,6 @@ function refreshSettingsSummaries() {
 
   setSummary("settingsOllamaValue", ollamaUrl && ollamaUrl.value.trim() ? ollamaUrl.value.trim() : "Not set");
   setSummary("settingsWhisperValue", whisperUrl && whisperUrl.value.trim() ? whisperUrl.value.trim() : "Not set");
-  setSummary("settingsOscValue", oscHost && oscHost.value.trim() ? oscHost.value.trim() : "Off");
-  // Both page timings on one line, so the row says what's behind it without
-  // having to be opened.
-  if (oscPageSpeaking && oscPageSilent) {
-    const on = parseFloat(oscPageSpeaking.value);
-    const off = parseFloat(oscPageSilent.value);
-    setSummary(
-      "settingsOscTimingValue",
-      isFinite(on) && isFinite(off) ? `${on.toFixed(1)}s / ${off.toFixed(1)}s` : "—"
-    );
-  }
 }
 
 // The summaries are derived from controls that several different code paths
