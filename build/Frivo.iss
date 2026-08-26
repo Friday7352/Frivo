@@ -9,8 +9,19 @@
 ; ------------------------------------------------------------------
 
 #define AppName    "Frivo"
-#define AppVersion "1.1.2"
 #define AppPublisher "Friday"
+
+; The version comes from one file at the repo root, so bumping it before a
+; release is a one-line edit rather than a hunt through three files that
+; had already drifted apart. A missing or empty VERSION stops the build
+; here, loudly, rather than shipping an installer labelled "0.0.0".
+#define VersionFile AddBackslash(SourcePath) + "..\VERSION"
+#define VersionHandle FileOpen(VersionFile)
+#define AppVersion Trim(FileRead(VersionHandle))
+#expr FileClose(VersionHandle)
+#if AppVersion == ""
+  #error VERSION at the repo root is empty. Put a version number in it.
+#endif
 
 [Setup]
 AppName={#AppName}
@@ -45,6 +56,8 @@ Source: "..\app\*";       DestDir: "{tmp}\FrivoSetupPayload\app";       Flags: i
 Source: "..\installer\*"; DestDir: "{tmp}\FrivoSetupPayload\installer"; Flags: ignoreversion recursesubdirs createallsubdirs deleteafterinstall
 Source: "FrivoHost.exe";   DestDir: "{tmp}\FrivoSetupPayload\installer"; Flags: ignoreversion deleteafterinstall
 Source: "..\README.md";   DestDir: "{tmp}\FrivoSetupPayload";           Flags: ignoreversion deleteafterinstall
+; Install.ps1 reads this for the Apps & features entry and the welcome page.
+Source: "..\VERSION";     DestDir: "{tmp}\FrivoSetupPayload";           Flags: ignoreversion deleteafterinstall
 
 [Run]
 ; hidewizard keeps Inno's internal extraction window out of sight while the
