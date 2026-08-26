@@ -11,10 +11,8 @@ using System.Windows.Forms;
 [assembly: AssemblyDescription("Frivo desktop host")]
 [assembly: AssemblyCompany("Friday")]
 [assembly: AssemblyProduct("Frivo")]
-// The version attributes are generated from the VERSION file at the repo
-// root by Build-Installer.ps1 and compiled in alongside this file. They
-// used to be written here, which is how this exe ended up reporting 1.1.1
-// while the installer said 1.1.2.
+[assembly: AssemblyVersion("1.1.1.0")]
+[assembly: AssemblyFileVersion("1.1.1.0")]
 
 internal static class Program
 {

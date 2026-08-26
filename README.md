@@ -1,8 +1,8 @@
 # Frivo
 
 Frivo is a local Windows dashboard for conversational AI, voice output,
-profiles, private speech transcription through Evora, and VRChat integration
-through FrivOSC. It runs on your computer and opens in your web browser.
+profiles, private speech transcription through Evora, and VRChat chatbox
+messages over OSC. It runs on your computer and opens in your web browser.
 
 ## Screenshots
 
