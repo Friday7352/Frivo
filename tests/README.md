@@ -156,6 +156,30 @@ None of that is visible by reading the code, so this drives the real page
 in a real browser. Removing the append branch fails four assertions;
 checked by doing it.
 
+## test-version.py
+
+    python3 tests/test-version.py
+
+One version number, read by everything. Before this it was written down in
+three places and they had already drifted: the installer said 1.1.2, the
+Inno container said 1.1.2, and `FrivoHost.cs` still said 1.1.1 — so the Apps
+& features entry and the exe's own file properties disagreed about what was
+installed. Nothing catches that. It is three literals that have to be edited
+together and silently do not have to match.
+
+`VERSION` at the repo root is now the only copy. This checks that all four
+consumers — `Install.ps1`, `Frivo.iss`, `Build-Installer.ps1` and `app.py` —
+resolve to the same string, that each finds it in both the repo layout and
+the installed one, that a missing file degrades to "unknown" rather than
+failing an install, and that a malformed one is rejected at build time
+rather than by csc with an error that mentions nothing useful.
+
+It also scans for a literal creeping back in. That scan is per-language on
+purpose: `#` starts a comment in PowerShell but starts the *preprocessor*
+in an `.iss` file, which is exactly where a version literal lives. Treating
+them the same made the scan walk straight past a reintroduced literal —
+found by putting one back and watching it pass.
+
 ## Not covered here
 
 `app.js`, `index.html`, and `style.css` have no full suite — `test-mute-sync.py`

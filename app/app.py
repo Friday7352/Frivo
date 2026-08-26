@@ -590,6 +590,29 @@ def asset_version():
     return str(int(newest or time.time()))
 
 
+def app_version():
+    """The number in the VERSION file at the repo root.
+
+    The same file the installer, the Inno container and the compiled host
+    read, so "which version is this?" has one answer everywhere. Read once
+    at startup: it does not change while the server is running, and an
+    install that is missing the file should still start.
+    """
+    here = os.path.dirname(os.path.abspath(__file__))
+    for candidate in (os.path.join(here, "VERSION"),
+                      os.path.join(os.path.dirname(here), "VERSION")):
+        try:
+            with open(candidate, "r", encoding="utf-8") as handle:
+                text = handle.read().strip()
+            if text:
+                return text
+        except OSError:
+            continue
+    return "unknown"
+
+
+APP_VERSION = app_version()
+
 ASSET_VERSION = asset_version()
 
 # Shown on the diagnostics page. A server started before the file you just
@@ -1587,7 +1610,8 @@ def diagnose():
 dark, the server is reachable from this device.</p>
 
 <h2 style="font-size:15px">Server</h2>
-<p>Asset version: <b>{asset_version()}</b><br>
+<p>Frivo version: <b>{APP_VERSION}</b><br>
+Asset version: <b>{asset_version()}</b><br>
 Server started: <b>{SERVER_STARTED}</b><br>
 You requested this from: <b>{request.host}</b><br>
 Files load from: <b>{BASE_DIR or '(current directory)'}</b><br>

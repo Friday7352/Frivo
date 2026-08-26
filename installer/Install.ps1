@@ -34,7 +34,38 @@ $SourceApp  = Join-Path $PackageDir 'app'
 Import-Module (Join-Path $ScriptDir 'Frivo.Setup.psm1') -Force
 
 $AppName    = 'Frivo'
-$AppVersion = '1.1.2'
+# One file decides the version for the whole app: the Apps & features
+# entry, the setup wizard's welcome page, the compiled host's file
+# properties, and the Inno container. It lives at the repo root as VERSION
+# and is shipped in the setup payload so this script can read it there too.
+#
+# The literal is a fallback, not a second source of truth. If VERSION is
+# ever missing from a payload, setup should still install rather than die
+# over a cosmetic string — it just says "unknown" where a number would be.
+function Get-FrivoVersion {
+    $names = @()
+    $scriptDir = Split-Path -Parent $PSCommandPath
+    if ($scriptDir) {
+        $names += (Join-Path $scriptDir 'VERSION')
+        $parent = Split-Path -Parent $scriptDir
+        if ($parent) {
+            $names += (Join-Path $parent 'VERSION')
+            $grandparent = Split-Path -Parent $parent
+            if ($grandparent) { $names += (Join-Path $grandparent 'VERSION') }
+        }
+    }
+    foreach ($candidate in $names) {
+        try {
+            if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+                $text = (Get-Content -LiteralPath $candidate -Raw -ErrorAction Stop).Trim()
+                if ($text) { return $text }
+            }
+        } catch { }
+    }
+    return 'unknown'
+}
+
+$AppVersion = Get-FrivoVersion
 $LogPath    = Get-SetupLogPath
 $script:SetupDataDir = if ($DataPath) { $DataPath } else { Get-DataPath }
 
@@ -263,6 +294,14 @@ function Copy-AppFiles {
     }
     Copy-Item (Join-Path $SourceApp 'app.py')           -Destination $Target -Force
     Copy-Item (Join-Path $SourceApp 'requirements.txt') -Destination $Target -Force
+    # Installed alongside the app so a running Frivo can say which version
+    # it is — /diagnose reads it. Written rather than copied, because the
+    # payload keeps VERSION one level up from the app folder and this is
+    # the value setup already resolved.
+    try {
+        [IO.File]::WriteAllText((Join-Path $Target 'VERSION'), $AppVersion,
+                                [Text.UTF8Encoding]::new($false))
+    } catch { }
     Copy-Item (Join-Path $SourceApp 'templates\*')      -Destination (Join-Path $Target 'templates') -Recurse -Force
     Copy-Item (Join-Path $SourceApp 'static\*')         -Destination (Join-Path $Target 'static')    -Recurse -Force
     Copy-Item (Join-Path $ScriptDir 'Uninstall.ps1')           -Destination (Join-Path $Target 'installer') -Force

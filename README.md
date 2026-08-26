@@ -223,6 +223,19 @@ If installation fails, the setup log is saved here:
 The Frivo launcher also includes buttons to open its server log and settings
 folder.
 
+## Version number
+
+The version lives in one file, `VERSION`, at the root of this repository:
+
+    1.1.2
+
+Edit that line before a release and everything picks it up on the next
+build — the Apps & features entry, the setup wizard's welcome page, the
+`FrivoSetup.exe` container, `FrivoHost.exe`'s file properties, and what
+`/diagnose` reports. Nothing else stores a copy.
+
+`tests/test-version.py` checks that they all still agree.
+
 ## Building from source
 
 For development, clone this repository and run `Install.bat` to use the
