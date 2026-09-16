@@ -9,22 +9,31 @@ from types import SimpleNamespace
 
 import pytest
 import requests
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, redirect
+from urllib.parse import urlsplit
 
 
 @pytest.fixture
 def backend():
     source = Path(__file__).parents[1] / "app" / "app.py"
     tree = ast.parse(source.read_text(encoding="utf-8"))
-    names = {"group_listen_segments", "local_whisper_transcribe_verbose", "listen", "listen_session"}
+    names = {"group_listen_segments", "local_whisper_transcribe_verbose", "listen", "listen_session", "evora_speaker_settings"}
     functions = ast.Module(body=[n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name in names], type_ignores=[])
-    env = dict(app=Flask(__name__), requests=requests, request=request, jsonify=jsonify, time=time, re=re,
+    env = dict(app=Flask(__name__), requests=requests, request=request, jsonify=jsonify, time=time, re=re, redirect=redirect, urlsplit=urlsplit,
                EVORA_TRANSCRIPTION_LOCK=threading.Lock(), LOCAL_CONNECT_TIMEOUT=2, LOCAL_READ_TIMEOUT=5,
                whisper_base_url=lambda: "http://evora.test:9000", normalize_language=lambda x: x,
                language_iso=lambda x: x, resolve_provider=lambda *_: "local_whisper", TRANSCRIPTION_PROVIDERS=[],
                fallback_allowed=lambda: False, log_server_event=lambda *_: None)
     exec(compile(functions, str(source), "exec"), env)
     return env
+
+
+def test_speaker_setup_uses_configured_remote_evora(backend):
+    response = backend["app"].test_client().get("/api/evora-speaker-settings")
+    assert response.status_code == 302
+    assert response.headers["Location"] == "http://evora.test:9000/speaker-settings"
+    backend["whisper_base_url"] = lambda: "javascript:alert(1)"
+    assert backend["app"].test_client().get("/api/evora-speaker-settings").status_code == 400
 
 
 def test_simultaneous_tracks_translate_separately(backend, monkeypatch):

@@ -11,8 +11,7 @@ using System.Windows.Forms;
 [assembly: AssemblyDescription("Frivo desktop host")]
 [assembly: AssemblyCompany("Friday")]
 [assembly: AssemblyProduct("Frivo")]
-[assembly: AssemblyVersion("1.1.1.0")]
-[assembly: AssemblyFileVersion("1.1.1.0")]
+// Assembly versions are generated from VERSION by Build-Installer.ps1.
 
 internal static class Program
 {

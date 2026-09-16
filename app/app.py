@@ -60,7 +60,8 @@ import time
 import uuid
 import threading
 
-from flask import Flask, request, jsonify, render_template, send_from_directory
+from flask import Flask, request, jsonify, render_template, send_from_directory, redirect
+from urllib.parse import urlsplit
 import requests
 from openai import OpenAI
 
@@ -1996,6 +1997,15 @@ def group_listen_segments(segments):
     for row in rows:
         row["original"] = row["original"].strip()
     return rows
+
+
+@app.get("/api/evora-speaker-settings")
+def evora_speaker_settings():
+    base = whisper_base_url()
+    parsed = urlsplit(base)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password:
+        return "Set a valid Evora HTTP or HTTPS address in Frivo settings first.", 400
+    return redirect(base + "/speaker-settings")
 
 
 @app.route("/api/listen-session", methods=["POST", "DELETE"])

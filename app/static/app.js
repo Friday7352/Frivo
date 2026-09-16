@@ -4751,7 +4751,7 @@ async function deliverListenSegment(chunks, mimeType, ref, interim = false) {
     if (interim && (ref.done || (ref.node && ref.node.done))) return;
     if (!interim) ref.done = true;
     if (data.speaker_status?.state && data.speaker_status.state !== "ready") {
-      setListenStatus(`Speaker recognition: ${data.speaker_status.state.replaceAll("_", " ")}. Open speaker setup on the Evora PC.`);
+      setListenStatus(`Speaker recognition: ${data.speaker_status.state.replaceAll("_", " ")}. Select Speaker setup.`);
     }
 
     if (!res.ok) {
@@ -4989,7 +4989,7 @@ async function startListening() {
   if (!savedDevice || deviceId === savedDevice) {
     const state = session.speaker_status?.state;
     setListenStatus(state && state !== "ready"
-      ? `Listening; speaker recognition ${state.replaceAll("_", " ")}. Open Evora speaker setup.`
+      ? `Listening; speaker recognition ${state.replaceAll("_", " ")}. Select Speaker setup.`
       : `Listening → ${listenTargetLanguage()} · session voices active`);
   }
 }

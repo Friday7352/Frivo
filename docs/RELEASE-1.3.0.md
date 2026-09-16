@@ -1,5 +1,11 @@
 # Frivo 1.3.0
 
+## 1.3.1 patch
+
+The Listening panel now has a Speaker setup link. It opens settings at the
+Evora address configured in Frivo, including a different PC on your network.
+Remote settings require Evora 1.2.1 and its private-network access setting.
+
 Listening now displays Evora's individual speaker turns and translates each turn separately. Recovered overlapping voices appear in separate rows with an unverified overlap label; uncertain mixed speech is visibly unidentified.
 
 Each listening session has separate temporary voice memory. Saved Evora names appear automatically, while random speakers keep a session-specific label. Stopping or resetting listening clears temporary memory without deleting enrolled voices. Final audio uploads are processed in order before the session is closed.
