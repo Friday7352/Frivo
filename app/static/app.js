@@ -4254,6 +4254,7 @@ if (listenLiveToggle) {
 }
 
 let listening = null;
+let activeListenSession = null;
 let listenEntrySeq = 0;
 
 // The slider is 1-120; RMS in practice sits well under 0.25 even for loud
@@ -4283,7 +4284,7 @@ function updateSpeakerCount() {
   if (!listenPeopleCount || !listenLog) return;
   const ids = new Set();
   listenLog.querySelectorAll(".listen-entry[data-speaker-id]").forEach((el) => {
-    ids.add(el.dataset.speakerId);
+    if (el.dataset.speakerSession === SPEAKER_NAMES_KEY) ids.add(el.dataset.speakerId);
   });
   const n = ids.size;
   listenPeopleCount.textContent = `${n} ${n === 1 ? "person" : "people"}`;
@@ -4369,11 +4370,11 @@ async function loadListenDevices() {
   }
 }
 
-const SPEAKER_NAMES_KEY = "voice_console_speaker_names";
+let SPEAKER_NAMES_KEY = "voice_console_speaker_names";
 
 function speakerNames() {
   try {
-    return JSON.parse(localStorage.getItem(SPEAKER_NAMES_KEY) || "{}");
+    return JSON.parse(sessionStorage.getItem(SPEAKER_NAMES_KEY) || "{}");
   } catch (err) {
     return {};
   }
@@ -4391,15 +4392,17 @@ function renameSpeaker(id) {
   const names = speakerNames();
   if (next.trim()) names[id] = next.trim();
   else delete names[id];
-  localStorage.setItem(SPEAKER_NAMES_KEY, JSON.stringify(names));
+  sessionStorage.setItem(SPEAKER_NAMES_KEY, JSON.stringify(names));
 
   // Applies backwards through the transcript, so naming someone halfway
   // through a conversation relabels what they already said.
   const label = speakerLabel(id);
   listenLog.querySelectorAll(`.listen-speaker[data-speaker="${id}"]`).forEach((el) => {
+    if (el.closest(".listen-entry")?.dataset.speakerSession !== SPEAKER_NAMES_KEY) return;
     el.textContent = label;
   });
   listenLog.querySelectorAll(`.listen-avatar[data-speaker="${id}"]`).forEach((el) => {
+    if (el.closest(".listen-entry")?.dataset.speakerSession !== SPEAKER_NAMES_KEY) return;
     el.textContent = label.startsWith("Speaker ")
       ? String(id)
       : label.trim().charAt(0).toUpperCase();
@@ -4561,7 +4564,8 @@ function applySpeakerGrouping(entry, id) {
   while (previous && !previous.dataset.speakerId) {
     previous = previous.previousElementSibling;
   }
-  const sameAsPrevious = previous && previous.dataset.speakerId === String(id);
+  const sameAsPrevious = previous && previous.dataset.speakerId === String(id) &&
+    previous.dataset.speakerSession === entry.dataset.speakerSession;
   entry.classList.toggle("is-continuation", Boolean(sameAsPrevious));
   updateSpeakerCount();
 }
@@ -4589,7 +4593,7 @@ function applySpeakerMerges(merged) {
     }
   });
 
-  if (namesChanged) localStorage.setItem(SPEAKER_NAMES_KEY, JSON.stringify(names));
+  if (namesChanged) sessionStorage.setItem(SPEAKER_NAMES_KEY, JSON.stringify(names));
 
   // Re-render the labels and re-evaluate grouping, since neighbouring rows
   // may now belong to the same person.
@@ -4631,6 +4635,11 @@ function fillListenEntry(node, data, interim = false) {
       "Raise Voice matching if this happens often.";
   } else if (data.speaker && data.speaker.id) {
     const id = data.speaker.id;
+    if (data.speaker.name) {
+      const names = speakerNames(); names[id] = data.speaker.name;
+      sessionStorage.setItem(SPEAKER_NAMES_KEY, JSON.stringify(names));
+    }
+    node.entry.dataset.speakerSession = SPEAKER_NAMES_KEY;
     node.speaker.classList.remove("is-hidden");
     node.speaker.dataset.speaker = id;
     node.speaker.textContent = speakerLabel(id);
@@ -4649,7 +4658,9 @@ function fillListenEntry(node, data, interim = false) {
     }
     if (!node.speaker.dataset.bound) {
       node.speaker.dataset.bound = "1";
-      node.speaker.addEventListener("click", () => renameSpeaker(id));
+      node.speaker.addEventListener("click", () => {
+        if (node.entry.dataset.speakerSession === SPEAKER_NAMES_KEY) renameSpeaker(id);
+      });
     }
     const uncertain = Boolean(data.speaker.uncertain);
     node.entry.classList.toggle("is-uncertain", uncertain);
@@ -4664,6 +4675,20 @@ function fillListenEntry(node, data, interim = false) {
       node.speaker.title = `Voice match ${data.speaker.similarity}. Click to rename.`;
     }
     applySpeakerGrouping(node.entry, id);
+  }
+
+  if (data.source === "separated") {
+    node.entry.classList.add("is-uncertain");
+    node.speaker.classList.remove("is-hidden");
+    if (!data.speaker) node.speaker.textContent = "Unidentified voice";
+    node.speaker.textContent += " · overlap (unverified)";
+    node.speaker.title = "Voice recovered from overlapping speech. Words and identity may be inaccurate.";
+  } else if (data.overlapping && !data.speaker) {
+    node.speaker.classList.remove("is-hidden");
+    node.speaker.textContent = "Overlapping voices · unidentified";
+  } else if (data.speaker && !data.speaker.confirmed) {
+    node.speaker.textContent += " · learning";
+    node.speaker.title = "Learning this voice from clear speech during this session.";
   }
 
   // Only show the original when it differs — for same-language speech the
@@ -4698,7 +4723,14 @@ function ensureListenNode(ref) {
   return ref.node;
 }
 
-async function sendListenSegment(chunks, mimeType, ref, interim = false) {
+function sendListenSegment(chunks, mimeType, ref, interim = false) {
+  const owner = ref.owner;
+  if (!owner) return deliverListenSegment(chunks, mimeType, ref, interim);
+  owner.pending = owner.pending.then(() => deliverListenSegment(chunks, mimeType, ref, interim));
+  return owner.pending;
+}
+
+async function deliverListenSegment(chunks, mimeType, ref, interim = false) {
   const blob = new Blob(chunks, { type: mimeType });
   const ext = mimeType.includes("mp4") ? "mp4" : mimeType.includes("ogg") ? "ogg" : "webm";
 
@@ -4706,6 +4738,7 @@ async function sendListenSegment(chunks, mimeType, ref, interim = false) {
   form.append("audio", blob, `listen.${ext}`);
   form.append("target_language", listenTargetLanguage());
   if (interim) form.append("interim", "1");
+  if (ref.owner?.sessionId) form.append("listening_session", ref.owner.sessionId);
 
   try {
     const res = await fetch("/api/listen", { method: "POST", body: form });
@@ -4714,7 +4747,12 @@ async function sendListenSegment(chunks, mimeType, ref, interim = false) {
     // The node may have been finalised by the real result while this
     // interim pass was still in flight. Late partial text must never
     // overwrite a finished sentence.
-    if (interim && ref.node && ref.node.done) return;
+    if (ref.owner && ref.owner !== activeListenSession) return;
+    if (interim && (ref.done || (ref.node && ref.node.done))) return;
+    if (!interim) ref.done = true;
+    if (data.speaker_status?.state && data.speaker_status.state !== "ready") {
+      setListenStatus(`Speaker recognition: ${data.speaker_status.state.replaceAll("_", " ")}. Open speaker setup on the Evora PC.`);
+    }
 
     if (!res.ok) {
       if (interim) return; // a failed partial isn't worth reporting
@@ -4732,7 +4770,18 @@ async function sendListenSegment(chunks, mimeType, ref, interim = false) {
       return;
     }
 
-    fillListenEntry(ensureListenNode(ref), data, interim);
+    if (!interim && data.segments?.length) {
+      const first = ensureListenNode(ref);
+      let anchor = first.entry;
+      data.segments.forEach((segment, index) => {
+        const node = index === 0 ? first : addListenEntry();
+        if (index) anchor.after(node.entry);
+        fillListenEntry(node, segment, false);
+        anchor = node.entry;
+      });
+    } else {
+      fillListenEntry(ensureListenNode(ref), data, interim);
+    }
   } catch (err) {
     if (interim) return;
     const node = ensureListenNode(ref);
@@ -4758,7 +4807,7 @@ function listenBeginUtterance() {
 
   // A shared handle rather than a row. The row itself is built lazily, the
   // first time there's real text to show — see ensureListenNode().
-  const ref = { node: null };
+  const ref = { node: null, owner: s, done: false };
   recorder.ref = ref;
   recorder.chunks = chunks;
 
@@ -4896,6 +4945,17 @@ async function startListening() {
     return;
   }
 
+  let session;
+  try {
+    const response = await fetch("/api/listen-session", { method: "POST" });
+    session = await response.json();
+    if (!response.ok) throw new Error(session.error || "Could not start speaker memory.");
+  } catch (err) {
+    stream.getTracks().forEach(track => track.stop());
+    setListenStatus(err.message);
+    return;
+  }
+  SPEAKER_NAMES_KEY = "voice_console_speaker_names_" + (session.speaker_session || crypto.randomUUID());
   const ctx = new (window.AudioContext || window.webkitAudioContext)();
   const source = ctx.createMediaStreamSource(stream);
   const analyser = ctx.createAnalyser();
@@ -4903,6 +4963,8 @@ async function startListening() {
   source.connect(analyser);
 
   listening = {
+    sessionId: session.listening_session,
+    pending: Promise.resolve(),
     stream,
     ctx,
     analyser,
@@ -4916,6 +4978,8 @@ async function startListening() {
     speechMs: 0,
     timer: null,
   };
+  activeListenSession = listening;
+  updateSpeakerCount();
   listening.timer = setInterval(listenPoll, LISTEN.POLL_MS);
 
   listenStartBtn.textContent = "Stop listening";
@@ -4923,7 +4987,23 @@ async function startListening() {
   listenStartBtn.classList.add("is-live");
   // Only overwrite the warning above when there was nothing to warn about.
   if (!savedDevice || deviceId === savedDevice) {
-    setListenStatus(`Listening → ${listenTargetLanguage()}`);
+    const state = session.speaker_status?.state;
+    setListenStatus(state && state !== "ready"
+      ? `Listening; speaker recognition ${state.replaceAll("_", " ")}. Open Evora speaker setup.`
+      : `Listening → ${listenTargetLanguage()} · session voices active`);
+  }
+}
+
+async function closeListenSession(s) {
+  await s.pending;
+  if (!s.sessionId) return;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const res = await fetch("/api/listen-session", {method: "DELETE", headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({listening_session: s.sessionId})});
+      if (res.ok) return;
+    } catch (_) { /* retry after in-flight inference */ }
+    await new Promise(resolve => setTimeout(resolve, 600));
   }
 }
 
@@ -4941,7 +5021,10 @@ function stopListening() {
   if (listenMeterFillMini) listenMeterFillMini.style.width = "0%";
   setGateState("Idle", false);
 
-  if (!s) return;
+  if (!s) return Promise.resolve();
+  const finished = s.recorder && s.recorder.state !== "inactive"
+    ? new Promise(resolve => s.recorder.addEventListener("stop", () => resolve(closeListenSession(s)), {once: true}))
+    : closeListenSession(s);
   clearInterval(s.timer);
   // Same as the dictation path: stamp the duration so a sentence in
   // progress when you hit Stop still gets transcribed instead of being
@@ -4958,6 +5041,7 @@ function stopListening() {
       /* already gone */
     }
   }, 1200);
+  return finished;
 }
 
 if (listenToggle) {
@@ -4975,9 +5059,10 @@ if (listenToggle) {
 }
 
 if (listenStartBtn) {
-  listenStartBtn.addEventListener("click", () => {
-    if (listening) stopListening();
-    else startListening();
+  listenStartBtn.addEventListener("click", async () => {
+    listenStartBtn.disabled = true;
+    try { if (listening) await stopListening(); else await startListening(); }
+    finally { listenStartBtn.disabled = false; }
   });
 }
 
@@ -5071,19 +5156,17 @@ const listenResetSpeakersBtn = $("listenResetSpeakersBtn");
 
 if (listenResetSpeakersBtn) {
   listenResetSpeakersBtn.addEventListener("click", async () => {
+    listenResetSpeakersBtn.disabled = true;
+    listenStartBtn.disabled = true;
     try {
-      const res = await fetch("/api/listen-speakers", { method: "DELETE" });
-      const data = await res.json();
-      if (res.ok) {
-        // The saved names refer to voice IDs that no longer exist, so
-        // keeping them would attach old names to new people.
-        localStorage.removeItem(SPEAKER_NAMES_KEY);
-        setListenStatus(`Forgot ${data.cleared} voice profile(s).`);
-      } else {
-        setListenStatus(data.error || "Couldn't reset voices.");
-      }
-    } catch (err) {
-      setListenStatus(`Reset failed: ${err.message}`);
+      const wasListening = Boolean(listening);
+      await stopListening();
+      sessionStorage.removeItem(SPEAKER_NAMES_KEY);
+      if (wasListening) await startListening();
+      else setListenStatus("Temporary voices cleared. Saved voices are kept.");
+    } finally {
+      listenResetSpeakersBtn.disabled = false;
+      listenStartBtn.disabled = false;
     }
   });
 }
