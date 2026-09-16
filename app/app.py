@@ -1194,7 +1194,7 @@ def local_whisper_transcribe(file_tuple, language=None):
     return (response.json().get("text") or "").strip()
 
 
-def local_whisper_transcribe_verbose(file_tuple, want_speaker=True):
+def local_whisper_transcribe_verbose(file_tuple, want_speaker=True, listening_session=None):
     """
     As local_whisper_transcribe, but also returns the language Whisper
     detected. The listening panel wants that — knowing a segment came back
@@ -1206,7 +1206,7 @@ def local_whisper_transcribe_verbose(file_tuple, want_speaker=True):
         response = requests.post(
             f"{whisper_base_url()}/v1/audio/transcriptions",
             files={"file": (filename, audio_bytes, content_type)},
-            data={"speaker": "1" if want_speaker else "0"},
+            data={"speaker": "1" if want_speaker else "0", "listening_session": listening_session or ""},
             timeout=(LOCAL_CONNECT_TIMEOUT, LOCAL_READ_TIMEOUT),
         )
     response.raise_for_status()
@@ -1215,6 +1215,8 @@ def local_whisper_transcribe_verbose(file_tuple, want_speaker=True):
         (payload.get("text") or "").strip(),
         payload.get("language") or "",
         payload.get("speaker"),
+        payload.get("segments") or [],
+        payload.get("speaker_status") or {},
     )
 
 
@@ -1924,6 +1926,54 @@ def translate_text(text, target_language):
         return text
 
 
+def group_listen_segments(segments):
+    """Build utterances per speaker, keeping recovered simultaneous tracks separate."""
+    rows = []
+    tracks = {}
+    for segment in sorted(segments, key=lambda item: (item.get("start", 0), item.get("end", 0))):
+        text = segment.get("text") or ""
+        if not text.strip():
+            continue
+        speaker = segment.get("speaker")
+        source = segment.get("source", "unknown")
+        key = (speaker.get("id") if speaker else segment.get("track"), source)
+        previous = tracks.get(key)
+        start, end = segment.get("start", 0), segment.get("end", 0)
+        if previous and start - previous["end"] <= 1.2 and (source == "separated" or previous is rows[-1]):
+            previous["original"] += text
+            previous["end"] = max(previous["end"], end)
+        else:
+            previous = {"original": text, "start": start, "end": end, "speaker": speaker,
+                        "source": source, "overlapping": bool(segment.get("overlapping")),
+                        "accepted": bool(segment.get("accepted"))}
+            rows.append(previous)
+            tracks[key] = previous
+    for row in rows:
+        row["original"] = row["original"].strip()
+    return rows
+
+
+@app.route("/api/listen-session", methods=["POST", "DELETE"])
+def listen_session():
+    if resolve_provider("transcription_provider", TRANSCRIPTION_PROVIDERS) != "local_whisper":
+        return jsonify(listening_session=None, speaker_status={"state": "unavailable"})
+    try:
+        with EVORA_TRANSCRIPTION_LOCK:
+            if request.method == "POST":
+                response = requests.post(f"{whisper_base_url()}/v1/listening-sessions", timeout=LOCAL_CONNECT_TIMEOUT)
+            else:
+                data = request.get_json(silent=True) or {}
+                ident = data.get("listening_session", "")
+                if not isinstance(ident, str) or not re.fullmatch(r"[A-Za-z0-9_-]{20,64}", ident):
+                    return jsonify(error="Invalid listening session"), 400
+                response = requests.delete(f"{whisper_base_url()}/v1/listening-sessions/{ident}", timeout=LOCAL_CONNECT_TIMEOUT)
+        if response.status_code == 404:
+            return jsonify(error="Update Evora to 1.2.0 to use session speaker recognition."), 409
+        return jsonify(response.json()), response.status_code
+    except requests.RequestException:
+        return jsonify(error="Evora isn't reachable. Check its address and service status."), 502
+
+
 @app.route("/api/listen", methods=["POST"])
 def listen():
     """
@@ -1955,15 +2005,19 @@ def listen():
     original = ""
     detected = ""
     speaker = None
+    segments = []
+    speaker_status = {}
 
     try:
         if provider == "local_whisper":
             try:
-                original, detected, speaker = local_whisper_transcribe_verbose(
-                    file_tuple, want_speaker=not interim
+                original, detected, speaker, segments, speaker_status = local_whisper_transcribe_verbose(
+                    file_tuple, want_speaker=not interim, listening_session=request.form.get("listening_session")
                 )
             except Exception as e:
                 log_server_event(f"Listen: local Whisper unavailable ({e!r}).")
+                if isinstance(e, requests.HTTPError) and e.response is not None and e.response.status_code == 409:
+                    return jsonify(error="Speaker session expired. Stop and restart listening."), 409
                 if not fallback_allowed():
                     return jsonify({
                         "error": (
@@ -2000,18 +2054,22 @@ def listen():
     target_iso = language_iso(target_language)
     same_language = bool(detected) and bool(target_iso) and detected.lower() == target_iso
 
-    translate_seconds = 0.0
-    if same_language:
-        translated = original
-    else:
-        started = time.perf_counter()
-        translated = translate_text(original, target_language)
-        translate_seconds = time.perf_counter() - started
+    started = time.perf_counter()
+    rows = group_listen_segments(segments) if not interim else []
+    for row in rows:
+        row["text"] = row["original"] if same_language else translate_text(row["original"], target_language)
+        row["translated"] = row["text"] != row["original"]
+        row["detected_language"] = detected
+    translated = (" ".join(row["text"] for row in rows) if rows else
+                  original if same_language else translate_text(original, target_language))
+    translate_seconds = time.perf_counter() - started
 
     return jsonify({
         "original": original,
         "text": translated,
         "speaker": speaker,
+        "segments": rows,
+        "speaker_status": speaker_status,
         "detected_language": detected,
         "target_language": target_language,
         # Drives whether the client shows the original underneath. False
