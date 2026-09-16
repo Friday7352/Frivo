@@ -34,38 +34,7 @@ $SourceApp  = Join-Path $PackageDir 'app'
 Import-Module (Join-Path $ScriptDir 'Frivo.Setup.psm1') -Force
 
 $AppName    = 'Frivo'
-# One file decides the version for the whole app: the Apps & features
-# entry, the setup wizard's welcome page, the compiled host's file
-# properties, and the Inno container. It lives at the repo root as VERSION
-# and is shipped in the setup payload so this script can read it there too.
-#
-# The literal is a fallback, not a second source of truth. If VERSION is
-# ever missing from a payload, setup should still install rather than die
-# over a cosmetic string — it just says "unknown" where a number would be.
-function Get-FrivoVersion {
-    $names = @()
-    $scriptDir = Split-Path -Parent $PSCommandPath
-    if ($scriptDir) {
-        $names += (Join-Path $scriptDir 'VERSION')
-        $parent = Split-Path -Parent $scriptDir
-        if ($parent) {
-            $names += (Join-Path $parent 'VERSION')
-            $grandparent = Split-Path -Parent $parent
-            if ($grandparent) { $names += (Join-Path $grandparent 'VERSION') }
-        }
-    }
-    foreach ($candidate in $names) {
-        try {
-            if (Test-Path -LiteralPath $candidate -PathType Leaf) {
-                $text = (Get-Content -LiteralPath $candidate -Raw -ErrorAction Stop).Trim()
-                if ($text) { return $text }
-            }
-        } catch { }
-    }
-    return 'unknown'
-}
-
-$AppVersion = Get-FrivoVersion
+$AppVersion = '1.1.2'
 $LogPath    = Get-SetupLogPath
 $script:SetupDataDir = if ($DataPath) { $DataPath } else { Get-DataPath }
 
@@ -331,54 +300,6 @@ function Test-RequirementsChanged {
     return (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash -ne
            (Get-FileHash -LiteralPath $installed -Algorithm SHA256).Hash
 }
-
-function Update-ShellIconCache {
-    <#
-        Makes replaced icon artwork actually appear.
-
-        Windows caches icons per path, so writing new artwork to the same
-        .ico changes nothing on screen — Explorer keeps drawing what it
-        cached, through uninstalls and reinstalls, which reads as "the new
-        icon did not install".
-
-        Two mechanisms, because one is not enough:
-
-          SHChangeNotify(SHCNE_ASSOCCHANGED) is the documented way to tell
-          the shell its icon associations changed. Explorer re-reads icons
-          on the next paint, with no restart.
-
-          ie4uinit rebuilds the on-disk cache database, which SHChangeNotify
-          alone does not touch.
-
-        Neither covers an icon compiled into an .exe as a resource — that
-        needs the executable rebuilt, not a cache refresh.
-
-        Best effort throughout: a stale icon is cosmetic and must never
-        fail an install.
-    #>
-    try {
-        if (-not ('FrivoShell.Notify' -as [type])) {
-            $signature = @'
-[DllImport("shell32.dll", CharSet = CharSet.Auto, SetLastError = true)]
-public static extern void SHChangeNotify(int eventId, uint flags, IntPtr item1, IntPtr item2);
-'@
-            Add-Type -Namespace FrivoShell -Name Notify -MemberDefinition $signature -ErrorAction Stop
-        }
-        # SHCNE_ASSOCCHANGED = 0x08000000, SHCNF_IDLIST = 0x0000
-        [FrivoShell.Notify]::SHChangeNotify(0x08000000, 0x0000, [IntPtr]::Zero, [IntPtr]::Zero)
-    } catch { }
-
-    try {
-        $ie4uinit = Join-Path ([Environment]::GetFolderPath('System')) 'ie4uinit.exe'
-        if (Test-Path -LiteralPath $ie4uinit -PathType Leaf) {
-            # -show on Windows 10/11, -ClearIconCache on older builds. The
-            # wrong one is simply ignored, so try both.
-            Start-Process -FilePath $ie4uinit -ArgumentList '-show' -WindowStyle Hidden -ErrorAction SilentlyContinue | Out-Null
-            Start-Process -FilePath $ie4uinit -ArgumentList '-ClearIconCache' -WindowStyle Hidden -ErrorAction SilentlyContinue | Out-Null
-        }
-    } catch { }
-}
-
 
 function New-Shortcut {
     param(
@@ -718,12 +639,6 @@ function Install-Frivo {
                          -WorkingDir $Target -Description $AppName -IconPath $iconPath
         }
     }
-    # New artwork at an existing path is invisible until the shell cache
-    # is rebuilt, which is what makes a new icon look like it did not
-    # install. Runs whether or not shortcuts were just created, because an
-    # update replaces the .ico without touching the .lnk.
-    Update-ShellIconCache
-
     if ($Action -ne 'Update' -and $StartMenuShortcut) {
         & $Log 'Creating Start Menu entry...'
         $programs = Join-Path ([Environment]::GetFolderPath('CommonStartMenu')) 'Programs'
