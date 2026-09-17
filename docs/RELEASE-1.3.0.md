@@ -1,5 +1,12 @@
 # Frivo 1.3.0
 
+## 1.3.4: joint separation display
+
+Evora's joint separation preview can return separated speech even when just one
+person is active. These rows now say "unverified" and only say "overlap" when
+Evora reports overlapping speech. Temporary voice labels remain separate from
+confirmed people. A per-clip separation failure is shown in listening status.
+
 ## 1.3.3 patch
 
 Translate each recovered voice using its own detected language. Display Evora's

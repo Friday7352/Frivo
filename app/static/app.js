@@ -4693,8 +4693,8 @@ function fillListenEntry(node, data, interim = false) {
         updateSpeakerCount();
       }
     }
-    node.speaker.textContent += " · overlap (unverified)";
-    node.speaker.title = "Voice recovered from overlapping speech. Words and identity may be inaccurate.";
+    node.speaker.textContent += data.overlapping ? " · overlap (unverified)" : " · unverified";
+    node.speaker.title = "Estimated voice from separated audio. Words and identity may be inaccurate; this label does not pass strict speaker filters.";
   } else if (data.overlapping && !data.speaker) {
     node.speaker.classList.remove("is-hidden");
     node.speaker.textContent = "Overlapping voices · unidentified";
@@ -4768,6 +4768,8 @@ async function deliverListenSegment(chunks, mimeType, ref, interim = false) {
     if (!interim) ref.done = true;
     if (data.speaker_status?.state && data.speaker_status.state !== "ready") {
       setListenStatus(`Speaker recognition: ${data.speaker_status.state.replaceAll("_", " ")}. Select Speaker setup.`);
+    } else if (data.speaker_status?.notice?.includes("failed for this clip")) {
+      setListenStatus("Voice separation could not process this clip. Showing unidentified speech; check Speaker setup.");
     }
 
     if (!res.ok) {

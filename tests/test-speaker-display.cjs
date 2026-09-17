@@ -48,7 +48,7 @@ function extract(name) {
               people:listenPeopleCount.textContent,done:ref.done};
     });
     assert.deepEqual(result.labels, ['Alice','Speaker 2 · overlap (unverified)',
-      'Overlapping voices · unidentified','Speaker 3 · learning','Voice track 1 · overlap (unverified)']);
+      'Overlapping voices · unidentified','Speaker 3 · learning','Voice track 1 · unverified']);
     assert.deepEqual(result.text, ['Hello','Good morning','Unclear','New person','Tracked overlap']);
     assert.equal(result.count,5); assert.equal(result.people,'3 people · 1 unverified track'); assert.equal(result.done,true);
     console.log('Browser: separate speaker rows, saved names, overlap warnings, learning labels, late partial protection passed.');
