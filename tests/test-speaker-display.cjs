@@ -34,6 +34,7 @@ function extract(name) {
         {text:'Good morning', speaker:{id:2,confirmed:true}, source:'separated',overlapping:true},
         {text:'Unclear',speaker:null,source:'overlap',overlapping:true},
         {text:'New person',speaker:{id:3,confirmed:false},source:'clean'},
+        {text:'Tracked overlap',speaker:null,voice_track:{id:'session-track-1',label:'Voice track 1',verified:false},source:'separated'},
       ];
       window.fetch = async () => ({ok:true,json:async()=>({text:'all',segments,speaker_status:{state:'ready'}})});
       const owner = {sessionId:'test',pending:Promise.resolve()}; activeListenSession=owner;
@@ -47,9 +48,9 @@ function extract(name) {
               people:listenPeopleCount.textContent,done:ref.done};
     });
     assert.deepEqual(result.labels, ['Alice','Speaker 2 · overlap (unverified)',
-      'Overlapping voices · unidentified','Speaker 3 · learning']);
-    assert.deepEqual(result.text, ['Hello','Good morning','Unclear','New person']);
-    assert.equal(result.count,4); assert.equal(result.people,'3 people'); assert.equal(result.done,true);
+      'Overlapping voices · unidentified','Speaker 3 · learning','Voice track 1 · overlap (unverified)']);
+    assert.deepEqual(result.text, ['Hello','Good morning','Unclear','New person','Tracked overlap']);
+    assert.equal(result.count,5); assert.equal(result.people,'3 people · 1 unverified track'); assert.equal(result.done,true);
     console.log('Browser: separate speaker rows, saved names, overlap warnings, learning labels, late partial protection passed.');
   } finally { await browser.close(); }
 })().catch(e=>{console.error(e);process.exitCode=1;});

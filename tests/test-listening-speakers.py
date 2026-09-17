@@ -69,3 +69,19 @@ def test_unknown_overlap_is_kept_separate_from_known_voice(backend):
         {"start": 0, "end": 1, "text": " hello", "speaker": {"id": 1}, "source": "clean"},
         {"start": 1, "end": 2, "text": " mixed", "speaker": None, "source": "overlap", "overlapping": True}])
     assert len(rows) == 2 and rows[1]["speaker"] is None and rows[1]["overlapping"]
+
+
+def test_overlap_language_is_translated_independently(backend, monkeypatch):
+    payload = {"text": "Hello Bonjour", "language": "en", "segments": [
+        {"start":0,"end":1,"text":"Hello","source":"separated","language":"en","track":"a"},
+        {"start":0,"end":1,"text":"Bonjour","source":"separated","language":"fr","track":"b",
+         "voice_track":{"id":"track-b","label":"Voice track 1","verified":False}}]}
+    monkeypatch.setattr(requests, 'post', lambda *a, **k: SimpleNamespace(raise_for_status=lambda: None, json=lambda: payload))
+    translated = []
+    backend['translate_text'] = lambda text, lang: translated.append(text) or 'Hello'
+    response = backend['app'].test_client().post('/api/listen', data={
+        'audio':(io.BytesIO(b'audio'),'clip.wav'),'target_language':'en'})
+    assert response.status_code == 200
+    assert translated == ['Bonjour']
+    assert [r['detected_language'] for r in response.json['segments']] == ['en','fr']
+    assert response.json['segments'][1]['voice_track']['id'] == 'track-b'

@@ -1,5 +1,21 @@
 # Frivo 1.3.0
 
+## 1.3.3 patch
+
+Translate each recovered voice using its own detected language. Display Evora's
+optional persistent overlap tracks as Voice track N (unverified), separate from
+confirmed people. Track IDs are session-scoped and cannot select a trusted
+speaker. Requires Evora 1.3.1 with Follow repeated separated voices enabled;
+this experimental setting is off by default and is not validated for crowded
+VRChat worlds.
+
+## 1.3.2 patch
+
+Unassigned solo speech is now visibly labeled Unidentified voice. With Evora
+1.3.0, speaker numbers appear only after enough consistent clean speech has
+confirmed an identity. Restart listening after updating Evora to discard
+the previous session's uncertain profiles.
+
 ## 1.3.1 patch
 
 The Listening panel now has a Speaker setup link. It opens settings at the

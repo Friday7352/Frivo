@@ -1937,7 +1937,9 @@ def group_listen_segments(segments):
             continue
         speaker = segment.get("speaker")
         source = segment.get("source", "unknown")
-        key = (speaker.get("id") if speaker else segment.get("track"), source)
+        voice_track = segment.get("voice_track")
+        key = (speaker.get("id") if speaker else (voice_track or {}).get("id", segment.get("track")),
+               source, segment.get("language"))
         previous = tracks.get(key)
         start, end = segment.get("start", 0), segment.get("end", 0)
         if previous and start - previous["end"] <= 1.2 and (source == "separated" or previous is rows[-1]):
@@ -1946,7 +1948,8 @@ def group_listen_segments(segments):
         else:
             previous = {"original": text, "start": start, "end": end, "speaker": speaker,
                         "source": source, "overlapping": bool(segment.get("overlapping")),
-                        "accepted": bool(segment.get("accepted"))}
+                        "accepted": bool(segment.get("accepted")), "voice_track": voice_track,
+                        "detected_language": segment.get("language")}
             rows.append(previous)
             tracks[key] = previous
     for row in rows:
@@ -2067,9 +2070,11 @@ def listen():
     started = time.perf_counter()
     rows = group_listen_segments(segments) if not interim else []
     for row in rows:
-        row["text"] = row["original"] if same_language else translate_text(row["original"], target_language)
+        row_language = row["detected_language"] or detected
+        row_same_language = bool(row_language) and bool(target_iso) and row_language.lower() == target_iso
+        row["text"] = row["original"] if row_same_language else translate_text(row["original"], target_language)
         row["translated"] = row["text"] != row["original"]
-        row["detected_language"] = detected
+        row["detected_language"] = row_language
     translated = (" ".join(row["text"] for row in rows) if rows else
                   original if same_language else translate_text(original, target_language))
     translate_seconds = time.perf_counter() - started

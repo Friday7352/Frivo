@@ -4288,6 +4288,11 @@ function updateSpeakerCount() {
   });
   const n = ids.size;
   listenPeopleCount.textContent = `${n} ${n === 1 ? "person" : "people"}`;
+  const tracks = new Set();
+  listenLog.querySelectorAll(".listen-entry[data-voice-track]").forEach(el => {
+    if (el.dataset.speakerSession === SPEAKER_NAMES_KEY) tracks.add(el.dataset.voiceTrack);
+  });
+  if (tracks.size) listenPeopleCount.textContent += ` · ${tracks.size} unverified ${tracks.size === 1 ? "track" : "tracks"}`;
 }
 
 // The gate appears in two places — full-size in Setup, compact under the
@@ -4680,12 +4685,23 @@ function fillListenEntry(node, data, interim = false) {
   if (data.source === "separated") {
     node.entry.classList.add("is-uncertain");
     node.speaker.classList.remove("is-hidden");
-    if (!data.speaker) node.speaker.textContent = "Unidentified voice";
+    if (!data.speaker) {
+      node.speaker.textContent = data.voice_track?.label || "Unidentified voice";
+      if (data.voice_track) {
+        node.entry.dataset.voiceTrack = data.voice_track.id;
+        node.entry.dataset.speakerSession = SPEAKER_NAMES_KEY;
+        updateSpeakerCount();
+      }
+    }
     node.speaker.textContent += " · overlap (unverified)";
     node.speaker.title = "Voice recovered from overlapping speech. Words and identity may be inaccurate.";
   } else if (data.overlapping && !data.speaker) {
     node.speaker.classList.remove("is-hidden");
     node.speaker.textContent = "Overlapping voices · unidentified";
+  } else if (data.source === "unknown" && !data.speaker) {
+    node.speaker.classList.remove("is-hidden");
+    node.speaker.textContent = "Unidentified voice";
+    node.speaker.title = "Waiting for enough consistent, clear speech before assigning a speaker.";
   } else if (data.speaker && !data.speaker.confirmed) {
     node.speaker.textContent += " · learning";
     node.speaker.title = "Learning this voice from clear speech during this session.";
