@@ -3512,7 +3512,11 @@ function cancelAutoSend() {
   }
 }
 
-function scheduleAutoSend() {
+// CHANGED (dictation speed): takes the delay, so Live (Evora) can count
+// its grace period from when you stopped talking instead of from when the
+// text arrived — which used to put the whole transcription time in front
+// of the 1.4s on top of it.
+function scheduleAutoSend(delayMs = AUTO_SEND_DELAY_MS) {
   if (!autoSendToggle || !autoSendToggle.checked) return;
   cancelAutoSend();
   autoSendTimer = setTimeout(() => {
@@ -3523,8 +3527,11 @@ function scheduleAutoSend() {
     if (!autoSendToggle.checked) return;
     if (!messageInput.value.trim()) return;
     if (sendBtn.disabled) return;
+    // CHANGED (dictation speed): actually checked now. Mid-sentence again
+    // means the sentence is not finished; its own end reschedules this.
+    if (liveLocal && liveLocal.speaking) return;
     send();
-  }, AUTO_SEND_DELAY_MS);
+  }, Math.max(0, delayMs));
 }
 
 let mediaRecorder = null;
@@ -3919,10 +3926,22 @@ const LIVE_LOCAL = {
   SPEECH_THRESHOLD: 0.012,
   // Silence needed before an utterance is considered finished.
   SILENCE_MS: 800,
-  // How often to re-transcribe while speech continues.
-  INTERIM_MS: 1000,
+  // How often to re-transcribe while speech continues. CHANGED (dictation
+  // speed): 1000 -> 700. Evora now skips speaker analysis for dictation,
+  // so each pass is cheap enough to show words sooner.
+  INTERIM_MS: 700,
   // Don't bother sending anything shorter than this; it produces noise.
   MIN_CLIP_MS: 400,
+  // NEW (dictation speed): the final transcription starts this long after
+  // you go quiet — enough for the recorder to have flushed your last word —
+  // instead of after SILENCE_MS and the recorder stopping. If you start
+  // talking again first, it is thrown away. Usually its answer is back by
+  // the time SILENCE_MS is up, so the sentence lands with no wait at all.
+  FINAL_AFTER_MS: 300,
+  // NEW (dictation speed): with Auto on, send once the text is in AND you
+  // have been quiet this long, counted from when you stopped talking. It
+  // used to be 1.4s counted from when the transcription came back.
+  AUTO_SEND_QUIET_MS: 1500,
 };
 
 let liveLocal = null;
@@ -3975,6 +3994,7 @@ async function startLocalLiveDictation() {
     mimeType: pickRecorderMimeType() || "audio/webm",
     speaking: false,
     silenceSince: 0,
+    speculative: null,   // NEW (dictation speed): the early final, see FINAL_AFTER_MS
     startedAt: 0,
     lastInterimAt: 0,
     inflight: false,
@@ -4020,12 +4040,17 @@ function beginUtterance() {
   recorder.addEventListener("dataavailable", (e) => {
     if (e.data && e.data.size > 0) chunks.push(e.data);
   });
-  recorder.addEventListener("stop", () => finishUtterance(chunks, recorder.speechMs || 0));
+  recorder.addEventListener("stop", () =>
+    finishUtterance(chunks, recorder.speechMs || 0, recorder.speculative || null, recorder.endedAt || Date.now()));
 
   // Small timeslice so there's always recent audio available to send
   // without waiting for the recorder to stop.
   recorder.start(250);
   s.recorder = recorder;
+  s.speculative = null;
+  // NEW (dictation speed): talking again means the last sentence was not
+  // the end of the thought; don't send it out from under you.
+  cancelAutoSend();
   s.speaking = true;
   s.startedAt = Date.now();
   s.lastInterimAt = Date.now();
@@ -4054,7 +4079,21 @@ async function sendInterim() {
   }
 }
 
-async function finishUtterance(chunks, speechMs) {
+// NEW (dictation speed): the final transcription, started early — as soon
+// as you have been quiet for FINAL_AFTER_MS — on everything recorded so far.
+// Nothing said after this point belongs to it: speech resuming discards it.
+function startSpeculativeFinal() {
+  const s = liveLocal;
+  if (!s || !s.chunks.length) return;
+  const blob = new Blob(s.chunks, { type: s.mimeType });
+  const spec = { promise: null };
+  spec.promise = transcribeBlob(blob, s.mimeType);
+  // A discarded one must not surface as an unhandled rejection.
+  spec.promise.catch(() => {});
+  s.speculative = spec;
+}
+
+async function finishUtterance(chunks, speechMs, speculative, endedAt) {
   const s = liveLocal;
   if (!s) return;
 
@@ -4068,7 +4107,20 @@ async function finishUtterance(chunks, speechMs) {
 
   const blob = new Blob(chunks, { type: s.mimeType });
   try {
-    const text = await transcribeBlob(blob, s.mimeType);
+    // CHANGED (dictation speed): the early final already covers every word
+    // of this utterance (any speech after it would have discarded it), so
+    // its answer is used, usually already back. Only without one — dictation
+    // stopped by hand mid-word — is the whole clip sent now.
+    let text;
+    if (speculative) {
+      try {
+        text = await speculative.promise;
+      } catch (err) {
+        text = await transcribeBlob(blob, s.mimeType);
+      }
+    } else {
+      text = await transcribeBlob(blob, s.mimeType);
+    }
     if (text) {
       // The final pass sees the whole utterance, so it supersedes whatever
       // the interim passes guessed.
@@ -4079,7 +4131,8 @@ async function finishUtterance(chunks, speechMs) {
   } finally {
     liveInterim = "";
     renderLiveText();
-    scheduleAutoSend();
+    // CHANGED (dictation speed): counted from when you stopped talking.
+    scheduleAutoSend(LIVE_LOCAL.AUTO_SEND_QUIET_MS - (Date.now() - endedAt));
   }
 }
 
@@ -4091,6 +4144,12 @@ function pollLocalLevel() {
   const now = Date.now();
 
   if (level > LIVE_LOCAL.SPEECH_THRESHOLD) {
+    if (s.silenceSince) {
+      // NEW (dictation speed): the pause was not the end. The early final
+      // is missing whatever is said now, so it is no longer the answer.
+      s.speculative = null;
+      cancelAutoSend();
+    }
     s.silenceSince = 0;
     if (!s.speaking) beginUtterance();
     else if (now - s.lastInterimAt > LIVE_LOCAL.INTERIM_MS) {
@@ -4103,14 +4162,22 @@ function pollLocalLevel() {
   if (!s.speaking) return;
 
   if (!s.silenceSince) s.silenceSince = now;
+  // NEW (dictation speed): start the final transcription early.
+  if (!s.speculative && now - s.silenceSince > LIVE_LOCAL.FINAL_AFTER_MS &&
+      s.silenceSince - s.startedAt >= LIVE_LOCAL.MIN_CLIP_MS) {
+    startSpeculativeFinal();
+  }
   if (now - s.silenceSince > LIVE_LOCAL.SILENCE_MS) {
     // Speech ran from the start of the utterance to the moment it went
     // quiet — not to now, which is SILENCE_MS later.
     s.speaking = false;
     if (s.recorder && s.recorder.state !== "inactive") {
       s.recorder.speechMs = s.silenceSince - s.startedAt;
+      s.recorder.speculative = s.speculative;   // NEW (dictation speed)
+      s.recorder.endedAt = s.silenceSince;      // NEW: when you stopped talking
       s.recorder.stop();
     }
+    s.speculative = null;
     s.silenceSince = 0;
   }
 }

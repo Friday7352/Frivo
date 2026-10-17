@@ -259,3 +259,27 @@ fingerprint, "setup", registry check and cleanup. Setup failing, a tampered
 download, and a version that isn't a release each ended in the right
 state. That run isn't kept as a test because it rewrites the script to run
 it, so the real thing still needs a first run on Windows.
+
+## test-dictation-speed.py
+
+    python3 tests/test-dictation-speed.py
+
+Live (Evora) dictation took about ten seconds from the end of a sentence
+to the send. Three delays added up: Evora's speaker analysis ran on every
+clip, the final transcription waited for silence and then queued behind a
+live preview, and auto-send waited another 1.4s after the text came back.
+The test drives the real page against the real server with a deliberately
+slow fake Evora (0.6s per clip) and a microphone level the test controls:
+
+- The sentence is sent about 1.5s after you stop talking.
+- A pause that turns out not to be the end gives one message, not two.
+- A breath mid-sentence discards the early final, so no words are lost.
+
+On the server side it checks that Frivo asks Evora for words only
+(`speaker=0`), retries a busy Evora a bounded number of times, and leaves
+the listening panel's speaker requests alone.
+
+Run against the old dictation code, it fails. The send comes 2.9s after
+speech ends even with the fast fake Evora, and pausing then carrying on
+sent the first half of the sentence on its own. That second bug is fixed
+too.

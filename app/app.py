@@ -1180,26 +1180,54 @@ class _ShimResponse:
         self.choices = [_ShimChoice(content, finish_reason)]
 
 
+# CHANGED (dictation speed): one kept-alive connection to Evora instead of a
+# new TCP connection per clip. Live dictation sends a clip about every
+# 0.7s while you talk; the handshake is small, but it is paid every time.
+EVORA_HTTP = requests.Session()
+
+# CHANGED (dictation speed): Evora answers 429 at once when its model is
+# busy (another client, or the listening panel) instead of queueing. A
+# dictation clip is worth a short wait rather than a failed sentence.
+EVORA_BUSY_RETRIES = 6
+EVORA_BUSY_WAIT = 0.15
+
+
 def local_whisper_transcribe(file_tuple, language=None):
     """
     Sends audio to a local faster-whisper service and returns the text.
 
     The endpoint follows OpenAI's transcription request and response shape.
+
+    CHANGED (dictation speed): asks for words only — speaker=0. Evora runs
+    its full speaker analysis on every clip unless told not to, and that
+    analysis is most of what each clip cost. Dictation never uses it: the
+    speaker is always you. The listening panel, which does use it, goes
+    through local_whisper_transcribe_verbose and is unaffected. An Evora
+    from before the speaker field existed ignores it.
     """
     filename, audio_bytes, content_type = file_tuple
     files = {"file": (filename, audio_bytes, content_type)}
-    data = {}
+    data = {"speaker": "0"}
     if language:
         data["language"] = language
 
-    with EVORA_TRANSCRIPTION_LOCK:
-        response = requests.post(
-            f"{whisper_base_url()}/v1/audio/transcriptions",
-            files=files,
-            data=data,
-            timeout=(LOCAL_CONNECT_TIMEOUT, LOCAL_READ_TIMEOUT),
-        )
+    started = time.perf_counter()
+    for attempt in range(EVORA_BUSY_RETRIES + 1):
+        with EVORA_TRANSCRIPTION_LOCK:
+            response = EVORA_HTTP.post(
+                f"{whisper_base_url()}/v1/audio/transcriptions",
+                files=files,
+                data=data,
+                timeout=(LOCAL_CONNECT_TIMEOUT, LOCAL_READ_TIMEOUT),
+            )
+        if response.status_code != 429 or attempt == EVORA_BUSY_RETRIES:
+            break
+        time.sleep(EVORA_BUSY_WAIT)
     response.raise_for_status()
+    elapsed = time.perf_counter() - started
+    # Slow clips are what make dictation feel laggy; leave a trail of them.
+    if elapsed > 2.0:
+        log_server_event(f"slow dictation clip: {elapsed:.1f}s for {len(audio_bytes):,} bytes")
     return (response.json().get("text") or "").strip()
 
 
