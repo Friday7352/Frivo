@@ -304,3 +304,37 @@ In a real browser:
   stay up while you keep talking.
 - With the Chatbox switch off, or the Settings switch off, the dots never
   appear, and the Settings switch stays off after a reload.
+
+## test-restart-after-update.ps1
+
+    pwsh -NoProfile -File tests/test-restart-after-update.ps1
+
+Frivo usually runs on a PC nobody is sitting at, and gets updated from a
+browser somewhere else. When an update stopped Frivo and nothing started
+it again, it stayed down until someone walked over to that PC.
+
+The restart now lives in setup (`Install.ps1`'s silent update), not in the
+updater. During an update, the updater that runs belongs to the old
+version, but setup always belongs to the new one. Two restart fixes were
+put in the updater first, and both had to wait a release before they could
+run at all.
+
+Before stopping Frivo, setup notes which Windows account Frivo is running
+as. Afterwards it starts Frivo again as that account through a one-off
+Interactive scheduled task. Setup runs as SYSTEM, so anything it started
+directly would also run as SYSTEM: invisible, and with the wrong settings.
+
+The test runs the real functions under StrictMode, with Windows' process
+list and Task Scheduler replaced:
+
+- It restarts the right account once, never SYSTEM, and never someone else's
+  Python from another folder.
+- The restart goes through `Frivo.vbs -Tray`, in the user's session, without
+  admin rights, and with no time limit (Task Scheduler's default stops a
+  task after three days).
+- The one-off task is always removed afterwards.
+- It reports failure honestly instead of claiming success.
+- Who Frivo runs as is noted before setup stops it.
+- The restart also happens after a failed update.
+- It doesn't start a second launcher when Frivo is already back, and neither
+  does the watcher.

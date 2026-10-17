@@ -76,7 +76,27 @@ function Close-Launcher {
     }
 }
 
+function Test-FrivoRunning {
+    <# NEW (restart): our own Frivo processes from this install. #>
+    foreach ($name in @('pythonw', 'python', 'FrivoHost')) {
+        foreach ($process in @(Get-Process -Name $name -ErrorAction SilentlyContinue)) {
+            try {
+                if ($process.Path -and $process.Path.StartsWith($InstallDir.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) {
+                    return $true
+                }
+            } catch { }
+        }
+    }
+    return $false
+}
+
 function Start-Frivo {
+    # NEW (restart): setup now starts Frivo again itself. Starting a second
+    # launcher on top would pop the first one's window open.
+    if (Test-FrivoRunning) {
+        Write-WatchLog 'Frivo is already running again; nothing to start'
+        return
+    }
     if (-not (Test-Path -LiteralPath $Shim -PathType Leaf)) {
         Write-WatchLog ('cannot restart: {0} is missing' -f $Shim)
         return

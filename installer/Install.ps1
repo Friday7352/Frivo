@@ -251,6 +251,106 @@ function Clear-PartialInstall {
 # Work
 # ==================================================================
 
+function Get-FrivoRunningUsers {
+    <#
+        NEW (restart): the Windows accounts Frivo is running as right now,
+        from this install. Asked before an update stops Frivo, so it can be
+        started again afterwards as the same people, in their own sessions.
+
+        This lives in setup rather than in the updater on purpose: during an
+        update, the updater that runs is the OLD version's, but this script
+        is always the NEW version's. A restart fix put here works on the
+        very next update instead of the one after.
+    #>
+    param([string] $Target)
+
+    $users = New-Object System.Collections.ArrayList
+    try {
+        $processes = @(Get-CimInstance Win32_Process `
+            -Filter "Name = 'python.exe' OR Name = 'pythonw.exe' OR Name = 'FrivoHost.exe'" `
+            -ErrorAction Stop |
+            Where-Object { $_.ExecutablePath -and (Test-PathWithinDirectory -Path $_.ExecutablePath -Directory $Target) })
+    } catch {
+        return ,@()
+    }
+    foreach ($process in $processes) {
+        try {
+            $owner = Invoke-CimMethod -InputObject $process -MethodName GetOwner -ErrorAction Stop
+            if ($owner.ReturnValue -ne 0 -or -not $owner.User) { continue }
+            $name = if ($owner.Domain) { '{0}\{1}' -f $owner.Domain, $owner.User } else { [string] $owner.User }
+            # Never SYSTEM or a service account: Frivo started as one of
+            # those would run invisibly, with somebody else's settings.
+            if ($name -match '^(NT AUTHORITY|BUILTIN|Window Manager|Font Driver Host)\\') { continue }
+            if (-not ($users -contains $name)) { [void] $users.Add($name) }
+        } catch { }
+    }
+    return ,$users.ToArray()
+}
+
+function Test-FrivoRunningFrom {
+    param([string] $Target)
+    try {
+        $found = @(Get-CimInstance Win32_Process `
+            -Filter "Name = 'python.exe' OR Name = 'pythonw.exe' OR Name = 'FrivoHost.exe'" `
+            -ErrorAction Stop |
+            Where-Object { $_.ExecutablePath -and (Test-PathWithinDirectory -Path $_.ExecutablePath -Directory $Target) })
+        return $found.Count -gt 0
+    } catch {
+        return $false
+    }
+}
+
+function Start-FrivoAsUser {
+    <#
+        NEW (restart): starts Frivo the way Windows sign-in does —
+        Frivo.vbs -Tray, which starts the server and its tray icon — as
+        $User, in that user's own session, on this machine.
+
+        Setup runs as SYSTEM during an in-app update, and anything it
+        started directly would run as SYSTEM: invisible, in the wrong
+        account, reading the wrong settings. A one-off scheduled task with
+        an Interactive logon runs in the session the user already has open,
+        and needs no password for exactly that reason. It is removed again
+        straight away.
+    #>
+    param([string] $Target, [string] $User)
+
+    $shim = Join-Path $Target 'Frivo.vbs'
+    if (-not (Test-Path -LiteralPath $shim -PathType Leaf)) {
+        Write-SetupLog ('restart: {0} is missing' -f $shim)
+        return $false
+    }
+    $root = if ($env:SystemRoot) { $env:SystemRoot } else { 'C:\Windows' }
+    $taskName = 'Frivo Restart'
+    try {
+        $action = New-ScheduledTaskAction -Execute ($root.TrimEnd('\') + '\System32\wscript.exe') `
+            -Argument ('"{0}" -Tray' -f $shim) -WorkingDirectory $Target
+        $principal = New-ScheduledTaskPrincipal -UserId $User -LogonType Interactive -RunLevel Limited
+        # No time limit: Task Scheduler's default would end what it started
+        # after three days.
+        $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
+            -ExecutionTimeLimit ([TimeSpan]::Zero)
+        Register-ScheduledTask -TaskName $taskName -Action $action -Principal $principal `
+            -Settings $settings -Force | Out-Null
+        Start-ScheduledTask -TaskName $taskName
+        $deadline = (Get-Date).AddSeconds(30)
+        while ((Get-Date) -lt $deadline) {
+            if (Test-FrivoRunningFrom $Target) {
+                Write-SetupLog ('restart: Frivo is running again as {0}' -f $User)
+                return $true
+            }
+            Start-Sleep -Milliseconds 500
+        }
+        Write-SetupLog ('restart: started the task for {0}, but Frivo is not running. Is that account signed in?' -f $User)
+        return $false
+    } catch {
+        Write-SetupLog ('restart: could not start Frivo as {0}: {1}' -f $User, $_.Exception.Message)
+        return $false
+    } finally {
+        try { Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction Stop } catch { }
+    }
+}
+
 function Stop-FrivoProcesses {
     <#
         The running app can hold images and scripts open, preventing an
@@ -804,6 +904,8 @@ if ($Silent) {
     #  - a failure is logged as "FAILED: <reason>" — the updater reads that
     #    line back to say why — and then thrown, so FrivoHost returns 1 and
     #    Setup exits non-zero.
+    $restartUsers = @()   # NEW (restart)
+    $restartTarget = ''
     try {
         $existing = Get-ExistingInstall
         if ($Action -eq 'Update' -and $existing.State -ne 'Installed') {
@@ -833,6 +935,10 @@ if ($Silent) {
             $effectiveAction = 'Repair'
         }
         Write-SetupLog ('Silent {0} of {1} -> {2} at {3}' -f $effectiveAction, $existing.Version, $AppVersion, $target)
+        # NEW (restart): who Frivo is running as, before Install-Frivo stops it.
+        $restartTarget = $target
+        $restartUsers = Get-FrivoRunningUsers -Target $target
+        Write-SetupLog ('restart: Frivo is running as: {0}' -f $(if ($restartUsers.Count) { $restartUsers -join ', ' } else { 'nobody' }))
         $cleanFirst = ($effectiveAction -eq 'Repair')
         $savedSettings = if ($effectiveAction -eq 'Update') { Get-InstallSettings } else { $null }
         Install-Frivo -Target $target `
@@ -845,6 +951,16 @@ if ($Silent) {
     } catch {
         Write-SetupLog ('FAILED: ' + $_.Exception.Message)
         throw
+    } finally {
+        # NEW (restart): Frivo was running and this update stopped it, so it
+        # is started again — after a failure too, because a stopped Frivo
+        # is the one outcome nobody can fix from a browser on another PC.
+        # Only if it is not already back (an older version's watcher may
+        # have managed it): a second launcher would pop the first one open.
+        foreach ($user in $restartUsers) {
+            if (Test-FrivoRunningFrom $restartTarget) { break }
+            [void] (Start-FrivoAsUser -Target $restartTarget -User $user)
+        }
     }
     exit 0
 }

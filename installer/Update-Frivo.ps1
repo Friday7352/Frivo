@@ -249,7 +249,12 @@ function Restart-FrivoIfNeeded {
         $action = New-ScheduledTaskAction -Execute ($root.TrimEnd('\') + '\System32\wscript.exe') `
             -Argument ('"{0}" -Tray' -f $shim) -WorkingDirectory $InstallDir
         $principal = New-ScheduledTaskPrincipal -UserId $Owner -LogonType Interactive -RunLevel Limited
-        Register-ScheduledTask -TaskName $taskName -Action $action -Principal $principal -Force | Out-Null
+        # No time limit: Task Scheduler's default would end what it started
+        # after three days.
+        $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
+            -ExecutionTimeLimit ([TimeSpan]::Zero)
+        Register-ScheduledTask -TaskName $taskName -Action $action -Principal $principal `
+            -Settings $settings -Force | Out-Null
         Start-ScheduledTask -TaskName $taskName
         $deadline = (Get-Date).AddSeconds(30)
         while ((Get-Date) -lt $deadline -and -not (Test-FrivoRunning)) { Start-Sleep -Seconds 1 }
