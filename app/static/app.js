@@ -968,6 +968,14 @@ function updateFaderReadout() {
   lengthEcho.textContent = words;
   creditEcho.textContent = chars.toLocaleString();
   secondsEcho.textContent = seconds;
+  // NEW (1.5.0): a free voice costs no credits, so don't quote any.
+  const free = typeof isFreeVoiceId === "function" && isFreeVoiceId(activeVoiceId());
+  const creditPart = $("creditPart");
+  const freePart = $("freePart");
+  if (creditPart && freePart) {
+    creditPart.style.display = free ? "none" : "";
+    freePart.style.display = free ? "" : "none";
+  }
 }
 
 lengthSlider.addEventListener("input", () => {
@@ -1471,7 +1479,7 @@ function addTurn(who, text, opts = {}) {
       time.title =
         opts.spoke === false
           ? `ChatGPT: ${opts.textSeconds.toFixed(1)}s · not spoken`
-          : `ChatGPT: ${opts.textSeconds.toFixed(1)}s · ElevenLabs: ${opts.audioSeconds.toFixed(1)}s`;
+          : `ChatGPT: ${opts.textSeconds.toFixed(1)}s · ${opts.voiceEngineName || "ElevenLabs"}: ${opts.audioSeconds.toFixed(1)}s`;  // CHANGED (1.5.0)
     }
     meta.appendChild(time);
   }
@@ -1727,6 +1735,8 @@ function setSettingsOpen(open) {
   if (open && typeof refreshSettingsSummaries === "function") refreshSettingsSummaries();
   // NEW (1.5.0): the microphone list is always current when you look at it.
   if (open && typeof loadMicrophones === "function") loadMicrophones();
+  // NEW (1.5.0)
+  if (open && typeof refreshFreeVoices === "function") refreshFreeVoices();
 }
 
 settingsToggle.addEventListener("click", () => {
@@ -2348,6 +2358,8 @@ function voiceLanguageLabel(v) {
 
 function renderVoiceTrigger() {
   const id = activeVoiceId();
+  // NEW (1.5.0): "credits" or "free" under the length fader follows the voice.
+  updateFaderReadout();
   const v = voiceById(id);
 
   // Falls back to the stored name so the row still reads correctly before
@@ -2932,7 +2944,7 @@ function renderVoiceList() {
   if (!allVoices.length) {
     const note = document.createElement("p");
     note.className = "voice-none";
-    note.textContent = "No voices loaded. Check your ElevenLabs key in Settings, then Reload.";
+    note.textContent = "No voices loaded. Add your ElevenLabs key in Settings, or run Frivo's setup again (Repair) to add the free voices — then Reload.";
     voiceList.appendChild(note);
     voiceFoot.textContent = "";
     return;
@@ -3012,8 +3024,14 @@ function playVoicePreview(v) {
   });
   audio.play().catch((err) => {
     voicePreviewId = "";
-    setStatus(`Couldn't play that preview: ${err.message}`, true);
     renderVoiceList();
+    // NEW (1.5.0): a free voice's preview is made on this PC, which needs
+    // the model downloaded first.
+    if (isFreeVoiceId(v.voice_id)) {
+      ensureFreeVoicesReady(v.voice_id);
+      return;
+    }
+    setStatus(`Couldn't play that preview: ${err.message}`, true);
   });
   voicePreviewAudio = audio;
   voicePreviewId = v.voice_id;
@@ -3049,6 +3067,9 @@ async function chooseVoice(v) {
     setStatus(
       profileId ? `${profileName} now speaks as ${v.name}.` : `Default voice is now ${v.name}.`
     );
+    // NEW (1.5.0): a Kokoro voice needs its model; fetch it now, not on the
+    // first reply.
+    if (isFreeVoiceId(v.voice_id)) ensureFreeVoicesReady(v.voice_id);
   } catch (err) {
     applyVoiceLocally(profileId, previous.id, previous.name);
     setStatus(`Voice not saved: ${err.message}`, true);
@@ -3188,6 +3209,8 @@ async function loadVoices() {
       return;
     }
     allVoices = data.voices || [];
+    // NEW (1.5.0): e.g. ElevenLabs unreachable while the free voices loaded.
+    if (data.notice) setStatus(data.notice, !allVoices.length);
     syncVoiceSortOptions();
     renderVoiceFilters();
     renderVoiceList();
@@ -3486,6 +3509,92 @@ promptToggle.addEventListener("click", async () => {
 // while it's open
 function refreshPromptIfOpen() {
   if (!promptPanel.classList.contains("is-hidden")) loadPromptPreview();
+}
+
+
+// ---------- NEW (1.5.0): free voices (Kokoro, Windows) ----------
+//
+// A free voice is chosen like any other, from the Voice list. Kokoro's model
+// is downloaded once, the first time it's needed: picking a Kokoro voice,
+// previewing one, or the Download button in Settings. Progress shows on the
+// status line and in Settings.
+const freeVoicesStatus = $("freeVoicesStatus");
+const freeVoicesDownloadBtn = $("freeVoicesDownloadBtn");
+let freeVoicesPoll = null;
+
+function isFreeVoiceId(id) {
+  return /^(kokoro|windows):/.test(id || "");
+}
+
+function describeFreeVoices(data) {
+  const k = data.kokoro || {};
+  const lines = [];
+  if (!k.available) lines.push(`Kokoro: ${k.problem || "not available."}`);
+  else if (k.downloading) lines.push(`Kokoro: downloading… ${k.progress}% of ${k.download_mb} MB (only this once).`);
+  else if (k.downloaded) lines.push("Kokoro: ready — natural male and female voices, under \"free on this PC\" in the Voice list.");
+  else if (k.error) lines.push(`Kokoro: ${k.error}`);
+  else lines.push(`Kokoro: natural male and female voices. Downloads once (${k.download_mb} MB) the first time you pick one.`);
+  const w = data.windows || {};
+  if (w.available) lines.push(`Windows: ${w.count} voice${w.count === 1 ? "" : "s"} installed, under "built into Windows".`);
+  return lines.join(" ");
+}
+
+async function refreshFreeVoices() {
+  if (!freeVoicesStatus) return null;
+  try {
+    const data = await (await fetch("/api/voices/free")).json();
+    freeVoicesStatus.textContent = describeFreeVoices(data);
+    const k = data.kokoro || {};
+    if (freeVoicesDownloadBtn) {
+      // style, not the hidden attribute: the button's own CSS sets display.
+      freeVoicesDownloadBtn.style.display = k.available && !k.downloaded && !k.downloading ? "" : "none";
+      freeVoicesDownloadBtn.textContent = k.error ? "Try again" : "Download";
+    }
+    return data;
+  } catch (err) {
+    freeVoicesStatus.textContent = "Couldn't check the free voices.";
+    return null;
+  }
+}
+
+async function ensureFreeVoicesReady(voiceId) {
+  if (!/^kokoro:/.test(voiceId || "")) return;
+  let data = await refreshFreeVoices();
+  if (!data) return;
+  const k = data.kokoro || {};
+  if (!k.available) {
+    setStatus(`Kokoro voices can't be used here: ${k.problem}`, true);
+    return;
+  }
+  if (k.downloaded) return;
+  if (!k.downloading) {
+    try { await fetch("/api/voices/free/download", { method: "POST" }); } catch (err) { /* polled below */ }
+  }
+  watchFreeVoicesDownload();
+}
+
+function watchFreeVoicesDownload() {
+  if (freeVoicesPoll) return;
+  const tick = async () => {
+    const data = await refreshFreeVoices();
+    const k = (data && data.kokoro) || {};
+    if (k.downloading) {
+      setStatus(`Downloading the free voices… ${k.progress}% of ${k.download_mb} MB (only this once).`);
+      freeVoicesPoll = setTimeout(tick, 1000);
+      return;
+    }
+    freeVoicesPoll = null;
+    if (k.downloaded) setStatus("Free voices are ready.");
+    else if (k.error) setStatus(`Free voices: ${k.error}`, true);
+  };
+  tick();
+}
+
+if (freeVoicesDownloadBtn) {
+  freeVoicesDownloadBtn.addEventListener("click", async () => {
+    try { await fetch("/api/voices/free/download", { method: "POST" }); } catch (err) { /* polled below */ }
+    watchFreeVoicesDownload();
+  });
 }
 
 
@@ -5606,6 +5715,8 @@ async function send() {
       // Nothing is coming, so the dots would sit there for good.
       removeTypingBubble();
       setStatus(data.error, true);
+      // NEW (1.5.0): the free voice's model is on its way; show its progress.
+      if (/^Downloading the free voices/.test(data.error || "")) watchFreeVoicesDownload();
       setLamp("ready");
       return;
     }
@@ -5623,6 +5734,7 @@ async function send() {
       condensed: data.condensed,
       repaired: data.repaired,
       keptExact: data.kept_exact,  // NEW (1.5.0)
+      voiceEngineName: data.voice_engine_name,  // NEW (1.5.0)
       spoke: data.spoke,
       totalSeconds: data.total_seconds,
       textSeconds: data.text_seconds,

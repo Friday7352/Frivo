@@ -396,6 +396,9 @@ function Copy-AppFiles {
     }
     Copy-Item (Join-Path $SourceApp 'app.py')           -Destination $Target -Force
     Copy-Item (Join-Path $SourceApp 'requirements.txt') -Destination $Target -Force
+    # NEW (1.5.0): the optional free voices
+    $voicesReq = Join-Path $SourceApp 'requirements-voices.txt'
+    if (Test-Path -LiteralPath $voicesReq) { Copy-Item $voicesReq -Destination $Target -Force }
     # Installed alongside the app so a running Frivo can say which version
     # it is — /diagnose reads it. Written rather than copied, because the
     # payload keeps VERSION one level up from the app folder and this is
@@ -792,6 +795,8 @@ function Install-Frivo {
     } else {
         $venvPython = New-Venv -Target $Target -Python $python -Log $Log
     }
+    # NEW (1.5.0): the free voices. Best effort — never fails setup.
+    [void] (Sync-FreeVoiceDependencies -VenvPython $venvPython -Target $Target -Log $Log)
     & $Progress 65
 
     if ($Action -ne 'Update') {

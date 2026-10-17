@@ -270,7 +270,7 @@
             </div>
             <p class="fader-note">
               Asks for about <strong id="lengthEcho">80</strong> words —
-              roughly <strong id="creditEcho">480</strong> credits
+              <span id="creditPart">roughly <strong id="creditEcho">480</strong> credits</span><span id="freePart" style="display:none">free with this voice</span><!-- CHANGED (1.5.0) -->
               (<span id="secondsEcho">29</span>s of audio) per reply.
             </p>
             <button id="promptToggle" class="link-btn" type="button">Show what's sent to the model</button>
@@ -621,6 +621,15 @@
                   <span class="srow-chevron"><svg class="icon-16"><use href="#i-chevron"/></svg></span>
                 </button>
 
+                <!-- NEW (1.5.0): voices that run on this PC, no ElevenLabs needed -->
+                <div class="srow srow--stacked" id="freeVoicesRow">
+                  <span class="srow-label">Free voices <span class="field-hint">— made on this PC, no ElevenLabs account needed</span></span>
+                  <div class="row">
+                    <p class="field-note" id="freeVoicesStatus">Checking…</p>
+                    <button id="freeVoicesDownloadBtn" class="btn-ghost btn-sm" type="button" style="display:none">Download</button>
+                  </div>
+                </div>
+
                 <div class="srow">
                   <span class="srow-main"><span class="srow-label">Speaking Speed</span></span>
                   <span class="srow-slider">
@@ -647,8 +656,9 @@
                 </button>
               </div>
               <p class="settings-note">
-                Speed is applied by ElevenLabs as the voice is generated, so it costs
-                nothing extra and doesn't change the credits a reply uses.
+                Speed is applied as the voice is generated — by ElevenLabs, or on this
+                PC for the free voices — so it costs nothing extra and doesn't change
+                the credits a reply uses.
               </p>
             </div>
           </section>

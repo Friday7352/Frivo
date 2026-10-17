@@ -56,3 +56,15 @@ The Microphone setting sometimes looked reset, and could really reset, until you
 - There's now a **System default** choice, which uses whatever Windows is set to.
 - If your saved microphone isn't plugged in, the list says **Saved microphone (not connected)**. Dictation then uses the default microphone instead of failing, and the status line tells you.
 - Live (Evora) dictation uses the microphone you pick here too, so the hint now says so.
+
+## Free voices that run on your PC
+
+Frivo can now speak without ElevenLabs. Pick a free voice in the Voice list and it's made right on the PC Frivo runs on, with no account, no key and no cost per reply. ElevenLabs works exactly as before. If you pick an ElevenLabs voice, nothing changes.
+
+- **Kokoro** ("free on this PC" in the Voice list): 45 natural-sounding male and female voices. Most are American and British English, and there are also Spanish, French, Italian, Brazilian Portuguese, Hindi, Japanese and Mandarin voices. The best-sounding ones are marked *recommended*. They run on the CPU, so no graphics card is needed.
+  - The voices download once (206 MB), the first time you pick, preview or use one, or when you press **Download** in **Settings → Voice & Speech → Free voices**. Progress shows on the status line, and the download is checked before it's used.
+  - Any Kokoro voice can speak the languages above. For other languages (German, Korean, Russian and so on), pick a Windows or ElevenLabs voice.
+- **Windows voices** ("built into Windows"): the voices that come with Windows, plus any language packs you've added. There's nothing to download and they're instant, but they sound more robotic.
+- With a free voice selected, replies need no ElevenLabs key and use no credits. The reply-length card says "free with this voice" instead of quoting credits.
+- **Speaking speed** works with every engine. Hovering a reply's time shows which engine spoke it.
+- Setup installs the free voices automatically. If they can't be installed, setup still finishes: Frivo runs normally, ElevenLabs and Windows voices still work, and Settings says why Kokoro isn't available. Setup also installs the Microsoft Visual C++ runtime Kokoro needs if the PC doesn't already have it. Kokoro needs Python 3.10–3.13, which is what setup installs by default.

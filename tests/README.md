@@ -397,3 +397,27 @@ Removing the `takeTypedText()` call, or the preview replacement in `commitDictat
 The test simulates hidden names by blanking what `enumerateDevices` returns, because headless Chromium's fake devices always show their names.
 
 `test-response-styles.py` now tests Clean up (`cleanup_stays_on_message`). Fixes and clarifications pass. Filler, pet names, new content and answers are caught.
+
+## test-free-voices.py (1.5.0)
+
+`python3 tests/test-free-voices.py` covers the free voices, Kokoro and Windows. Kokoro, PowerShell and the downloads are replaced, so it runs anywhere. It checks:
+
+- the engine is chosen from the voice id;
+- the voice list works with and without an ElevenLabs key, and when ElevenLabs is down;
+- free voices speak without a key and record no credits, and ElevenLabs is unchanged;
+- the one-time download checks the file's size and SHA-256, throws away a bad download, and works when retried;
+- a language Kokoro can't speak gets a clear message;
+- text sent to Windows voices goes through a file and is never pasted into the script;
+- the speaking speed reaches both engines;
+- previews are made once and kept;
+- the Visual C++ and wrong-Python messages are shown.
+
+To also run one real Kokoro reply end to end, set `FRIVO_KOKORO_DIR` to a folder holding `kokoro-v1.0.fp16.onnx` and `voices-v1.0.bin`.
+
+## test-free-voices-setup.ps1 (1.5.0)
+
+`pwsh -NoProfile -File tests/test-free-voices-setup.ps1` checks that setup:
+
+- installs `requirements-voices.txt` once per version of that file, retries after a failure, and never fails setup because of it;
+- installs the Visual C++ runtime only when it's missing, treating exit codes 0, 1638 and 3010 as success;
+- wires this into both install and update.
