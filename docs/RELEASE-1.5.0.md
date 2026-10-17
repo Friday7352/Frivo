@@ -34,7 +34,9 @@ The response styles have clearer names, and each one now does exactly what it sa
 
 The profile editor has a new **Follow reply length** switch, and it works with every response style.
 
-- **On:** Reply keeps to the **Reply length** slider, the same as before. Clean up and Word for word stop a long message at the last whole sentence that fits. Nothing is reworded. If even the first sentence is too long, it's cut at a word, any dangling "the" or "and" is dropped, and it gets a full stop so it doesn't sound chopped off. The message shows **Trimmed to last full sentence** underneath when this happens.
+- **On:** Reply keeps to the **Reply length** slider, the same as before. Clean up and Word for word **summarize** anything longer than the slider so it fits. The summary stays in your voice, in the first person, and adds nothing you didn't say. The message shows **Shortened to fit the reply length** underneath.
+  - Sometimes a summary can't be used: there's no OpenAI key, the request fails, or the summary added things you didn't say. Then Frivo keeps your whole sentences up to the limit instead, and the message shows **Trimmed to last full sentence**.
+  - Short messages are never sent for summarizing, so Word for word in English still uses no AI unless a message is over the limit.
 - **Off:** nothing is shortened. Clean up and Word for word say your whole message, and Reply isn't held to the slider either.
 - Profiles made before 1.5.0 keep working the way they did: Reply follows the slider, and Clean up and Word for word say everything. Until you flip the switch yourself, it changes to match the style you pick.
 

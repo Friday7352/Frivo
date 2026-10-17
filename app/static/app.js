@@ -1510,7 +1510,7 @@ function addTurn(who, text, opts = {}) {
   if (opts.condensed) {
     const flag = document.createElement("span");
     flag.className = "turn-flag";
-    flag.textContent = "Ran long — rewritten to length";
+    flag.textContent = "Shortened to fit the reply length";  // CHANGED (1.5.0)
     stack.appendChild(flag);
   } else if (opts.repaired) {
     const flag = document.createElement("span");
@@ -3333,7 +3333,7 @@ function updateFollowLengthHint(style) {
   showStyleNote(profileResponseStyleNote, style);
   profileFollowLengthHint.textContent = style === "reply"
     ? (on ? "Replies keep to the Reply length slider." : "Replies can be any length; the slider is ignored.")
-    : (on ? "Long messages stop at the last whole sentence that fits the Reply length slider — never reworded."
+    : (on ? "Messages longer than the Reply length slider are summarized to fit, in your voice."
           : "Says your whole message, however long.");
 }
 profileFollowLength.addEventListener("change", () => {

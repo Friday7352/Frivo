@@ -1214,12 +1214,14 @@ def cleanup_stays_on_message(source, output):
 # ---------------------------------------------------------------------------
 # NEW (1.5.0): "Follow reply length", per profile
 #
-# On, every style keeps to the reply-length slider: Response as it always
-# has, and Echo and Mimic by stopping at the last whole sentence that fits.
-# Off, nothing is shortened — Response gets no limit either.
+# On, every style keeps to the reply-length slider: Reply as it always has,
+# and Clean up and Word for word by summarizing a message that's too long
+# (summarize_to_length), falling back to the last whole sentence that fits
+# (fit_to_length). Off, nothing is shortened — Reply gets no limit either.
 #
 # A profile saved before this existed has no setting; it keeps doing what
-# it did (Response follows the slider, Echo and Mimic say everything).
+# it did (Reply follows the slider, Clean up and Word for word say
+# everything).
 # ---------------------------------------------------------------------------
 
 def normalize_follow_length(value, response_style):
@@ -1322,6 +1324,75 @@ def build_condense_prompt(text, max_words, language="English"):
         "Reply with only the transformed text.\n\n"
         f"{text}"
     )
+
+
+# NEW (1.5.0): "Follow reply length" on, for Clean up and Word for word — a
+# message longer than the slider is summarized to fit, in your own voice.
+def build_summarize_prompt(text, max_words, language="English"):
+    return (
+        f"Summarize the source text in no more than {max_words} words.\n"
+        "It is the user's own message, said in the first person, and it will be spoken aloud as "
+        "theirs — keep it in their voice, first person, with their tone and slang.\n"
+        "Keep the points that matter most; drop detail before dropping meaning.\n"
+        "Do not add information, opinions, greetings, interjections, nicknames or commentary.\n"
+        "Do not answer it or react to it.\n"
+        f"Write it in {language}.\n"
+        "Reply with only the summary.\n\n"
+        "<SOURCE_TEXT>\n"
+        f"{text}\n"
+        "</SOURCE_TEXT>"
+    )
+
+
+def summary_stays_on_message(source, summary):
+    """
+    NEW (1.5.0): a summary may leave things out — that's the point — but it
+    may not slip in things you didn't say: filler, pet names, or more than
+    a couple of words that aren't yours.
+    """
+    import math
+
+    a, b = _echo_words(source), _echo_words(summary)
+    if not b:
+        return False
+    if any(w in CLEANUP_NEVER_ADD and not any(_close_spelling(w, x) for x in a) for w in b):
+        return False
+    new_words = [
+        w for w in b
+        if w not in ECHO_GRAMMAR_WORDS and not any(_close_spelling(w, x) for x in a)
+    ]
+    b_content = [w for w in b if w not in ECHO_GRAMMAR_WORDS]
+    return len(new_words) <= max(3, math.ceil(0.35 * len(b_content)))
+
+
+def summarize_to_length(text, max_words, language="English"):
+    """
+    NEW (1.5.0): returns (summary, seconds), or (None, seconds) when there's
+    no model to ask, it failed, or the summary added things — the caller
+    then keeps whole sentences instead (fit_to_length).
+    """
+    if not CFG.get("openai_api_key") and resolve_provider("chat_provider", CHAT_PROVIDERS) == "openai":
+        return None, 0.0
+    started = time.perf_counter()
+    try:
+        response = create_chat_completion(
+            make_openai_client(),
+            provider=resolve_provider("chat_provider", CHAT_PROVIDERS),
+            model=CFG.get("model", RECOMMENDED_TEXT_MODEL),
+            ollama_model=CFG.get("ollama_model") or DEFAULT_OLLAMA_MODEL,
+            messages=[{"role": "user", "content": build_summarize_prompt(text, max_words, language)}],
+            max_tokens=int(max_words * 4) + 60,
+            temperature=0.2,
+        )
+        summary, _ = split_translation((response.choices[0].message.content or "").strip())
+    except Exception:
+        return None, time.perf_counter() - started
+    seconds = time.perf_counter() - started
+    if not summary:
+        return None, seconds
+    if language == "English" and not summary_stays_on_message(text, summary):
+        return None, seconds
+    return summary, seconds
 
 
 # ---------------------------------------------------------------------------
@@ -4078,15 +4149,25 @@ def chat():
 
             history.append({"role": "user", "content": source_message})
 
-        # NEW (1.5.0): "Follow reply length" on — Echo and Mimic stop at the
-        # last whole sentence that fits, rather than being reworded shorter.
-        # The English translation was of the whole thing, so it's dropped
-        # and the page asks for a fresh one when you hover.
-        if response_style != "reply" and follow_length:
-            spoken, shortened = fit_to_length(spoken, max_words, language)
-            if shortened:
-                was_repaired = True
-                english = ""
+        # NEW (1.5.0): "Follow reply length" on — Clean up and Word for word
+        # summarize a message that's too long to fit, in your voice. Only
+        # when that isn't possible (no model to ask, or the summary added
+        # things you didn't say) does it keep whole sentences instead. The
+        # English translation was of the whole thing, so it's dropped and the
+        # page asks for a fresh one when you hover.
+        if response_style != "reply" and follow_length and count_words(spoken, language) > max_words:
+            summary, summary_seconds = summarize_to_length(spoken, max_words, language)
+            text_seconds += summary_seconds
+            if summary and count_words(summary, language) <= max_words:
+                spoken = summary
+                was_condensed = True
+            else:
+                spoken, _ = fit_to_length(summary or spoken, max_words, language)
+                if summary:
+                    was_condensed = True
+                else:
+                    was_repaired = True
+            english = ""
 
         # Only the reply goes into history — the translation is tooltip
         # metadata, not part of the conversation.

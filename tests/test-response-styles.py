@@ -250,28 +250,56 @@ def say_profile(message, max_words=15, language="English"):
                                          "session_id": "pf", "profile_id": "pf"})
     return res.get_json()
 
+summary = "I typed a first sentence and then kept going for ages."
+
 setup("mimic")
 make_profile("mimic", True)
+script.append(summary)
 body = say_profile(long_msg)
-check("Mimic, on: stops at the last whole sentence that fits", body.get("reply") == "This is the first sentence I typed.", body.get("reply"))
-check("and says it was shortened", body.get("repaired") is True)
+check("Word for word, on: a long message is summarized to fit", body.get("reply") == summary, body.get("reply"))
+check("and flagged as shortened", body.get("condensed") is True, body)
+check("with one call, asking for a first-person summary within the limit",
+      len(calls) == 1 and "no more than 15 words" in calls[0]["messages"][-1]["content"]
+      and "first person" in calls[0]["messages"][-1]["content"], len(calls))
+check("short enough already: no summary, no call", say_profile("short and sweet").get("reply") == "short and sweet" and len(calls) == 1)
+
+setup("mimic")
+make_profile("mimic", True)
+script.append("Darling, I typed a first sentence and then kept going for ages.")
+body = say_profile(long_msg)
+check("a summary that adds things you didn't say isn't used — whole sentences instead",
+      body.get("reply") == "This is the first sentence I typed." and body.get("repaired") is True, body.get("reply"))
+
+setup("mimic")
+make_profile("mimic", True)
+script.append("This is the first sentence I typed. Then I kept going and going and going for ages and ages.")
+body = say_profile(long_msg)
+check("a summary that's still too long is cut to whole sentences", body.get("reply") == "This is the first sentence I typed.", body.get("reply"))
+
+setup("mimic", key="")
+make_profile("mimic", True)
+body = say_profile(long_msg)
+check("no OpenAI key: whole sentences that fit, and no error", body.get("reply") == "This is the first sentence I typed." and not calls, body)
+
+setup("mimic")
 make_profile("mimic", False)
-check("Mimic, off: the whole message", say_profile(long_msg).get("reply") == long_msg.strip())
+check("Word for word, off: the whole message", say_profile(long_msg).get("reply") == long_msg.strip())
 make_profile("mimic")
-check("Mimic, saved before the switch existed: the whole message", say_profile(long_msg).get("reply") == long_msg.strip())
+check("Word for word, saved before the switch existed: the whole message", say_profile(long_msg).get("reply") == long_msg.strip())
 
 setup("echo")
 make_profile("echo", True)
-script.append(long_msg.strip())
+script.extend([long_msg.strip(), summary])
 body = say_profile(long_msg)
-check("Echo, on: whole sentences that fit, words unchanged", body.get("reply") == "This is the first sentence I typed.", body.get("reply"))
+check("Clean up, on: cleaned up, then summarized to fit", body.get("reply") == summary and len(calls) == 2, (body.get("reply"), len(calls)))
 
 setup("echo")
 make_profile("echo", True)
-script.append("Hola, soy yo. Y luego segui y segui durante mucho tiempo sin parar nunca jamas, de verdad, toda la noche entera.\n---EN---\nHi, it's me. And then...")
-body = say_profile("hi its me. and then i kept going for ages without ever stopping", max_words=15, language="Spanish")
-check("Echo in another language, on: shortened, and the stale translation dropped",
-      body.get("reply") == "Hola, soy yo." and body.get("english") == "", body)
+script.extend(["Hola, soy yo. Y luego segui y segui durante mucho tiempo sin parar nunca jamas, de verdad, toda la noche entera.\n---EN---\nHi, it's me. And then...",
+               "Soy yo, y segui toda la noche."])
+body = say_profile("hi its me. and then i kept going for ages without ever stopping all night long, really", max_words=15, language="Spanish")
+check("Clean up in another language, on: summarized in that language, stale translation dropped",
+      body.get("reply") == "Soy yo, y segui toda la noche." and body.get("english") == "", body)
 
 setup("reply")
 make_profile("reply", False)
