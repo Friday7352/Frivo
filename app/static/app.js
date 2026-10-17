@@ -2155,8 +2155,10 @@ function requestVrchatUnmute() {
 }
 
 function sendToChatbox(text, { speaking = false } = {}) {
-  if (!text) return;
+  // NEW (1.5.0): every way out of here ends the reply's typing dots.
+  if (!text) { endReplyTyping(); return; }
   if (!oscConfigured) {
+    endReplyTyping();
     setStatus(
       oscEnabled_setting
         ? "VRChat chatbox is on, but FrivOSC isn't connected."
@@ -2180,7 +2182,11 @@ function sendToChatbox(text, { speaking = false } = {}) {
         setStatus(`Sent to VRChat in ${data.pages} pages.`);
       }
     })
-    .catch((err) => setStatus(`VRChat chatbox: ${err.message}`, true));
+    .catch((err) => setStatus(`VRChat chatbox: ${err.message}`, true))
+    // NEW (1.5.0): the dots drop once the message is queued for VRChat,
+    // not before — queued first, so the same FrivOSC poll that clears the
+    // dots also delivers the text that replaces them.
+    .finally(endReplyTyping);
 }
 
 oscToggle.addEventListener("change", () => {
@@ -3532,6 +3538,46 @@ function cancelAutoSend() {
   }
 }
 
+// NEW (1.5.0): auto-send is for what you SAY. Dictate a sentence, start
+// fixing a word, and the timer from the dictation used to fire and send it
+// mid-edit. Now any typing in the box makes that message yours: a pending
+// auto-send is cancelled and only Enter sends it. Sending or clearing the
+// box hands the next message back to auto-send, so dictating hands-free
+// still sends by itself.
+//
+// The 'input' event, because it fires for the keyboard, paste and IME but
+// never for the value dictation writes in code — exactly the line between
+// "you typed" and "you said".
+let typedByHand = false;
+const autoSendSwitch = autoSendToggle ? autoSendToggle.closest(".switch") : null;
+const AUTO_SEND_TITLE = autoSendSwitch ? autoSendSwitch.title : "";
+
+function setTypedByHand(on) {
+  if (typedByHand === on) return;
+  typedByHand = on;
+  if (!autoSendSwitch) return;
+  // Shown on the switch itself — dimmed and outlined, nothing that changes
+  // its size — so it cannot look as if auto-send quietly broke.
+  autoSendSwitch.classList.toggle("is-paused", on);
+  autoSendSwitch.title = on
+    ? "Auto-send is paused for this message because you typed in it. Press Enter to send."
+    : AUTO_SEND_TITLE;
+}
+
+messageInput.addEventListener("input", () => {
+  if (!messageInput.value.trim()) {
+    // Emptied by hand: a clean slate again.
+    setTypedByHand(false);
+    return;
+  }
+  const wasPending = Boolean(autoSendTimer);
+  cancelAutoSend();
+  if (!typedByHand && autoSendToggle && autoSendToggle.checked && (wasPending || isDictating)) {
+    setStatus("Auto-send paused for this message — press Enter to send.");
+  }
+  setTypedByHand(true);
+});
+
 // CHANGED (dictation speed): takes the delay, so Live (Evora) can count
 // its grace period from when you stopped talking instead of from when the
 // text arrived — which used to put the whole transcription time in front
@@ -3539,6 +3585,8 @@ function cancelAutoSend() {
 function scheduleAutoSend(delayMs = AUTO_SEND_DELAY_MS) {
   if (!autoSendToggle || !autoSendToggle.checked) return;
   cancelAutoSend();
+  // NEW (1.5.0): a message you have typed into is yours — only Enter sends it.
+  if (typedByHand) return;
   autoSendTimer = setTimeout(() => {
     autoSendTimer = null;
     // Re-checked at fire time, not just when scheduled: you may have
@@ -5343,6 +5391,8 @@ async function send() {
 
   messageInput.value = "";
   cancelAutoSend();
+  setTypedByHand(false);   // NEW (1.5.0): the next message is back to auto-send
+  beginReplyTyping();      // NEW (1.5.0): dots stay up until the chatbox message goes out
   // Start a fresh dictation utterance after sending.
   resetLiveDictation();
   // Open the VRChat microphone now rather than when the reply plays: the
@@ -5355,6 +5405,12 @@ async function send() {
   setStatus("Generating…");
   setLamp("busy");
   sendBtn.disabled = true;
+  // NEW (1.5.0): set when a voice is coming — the chatbox message waits for
+  // it to start playing, and so do the dots.
+  let replyAudioComing = false;
+  // NEW (1.5.0): set once the reply has been handed to the chatbox, whose
+  // own send takes the dots down when it is queued.
+  let chatboxHandled = false;
 
   try {
     const res = await fetch("/api/chat", {
@@ -5399,10 +5455,15 @@ async function send() {
       // current toggle here honors changes made while the reply was generated.
       onAudioStart: () => {
         if (oscEnabled()) sendToChatbox(data.reply, { speaking: true });
+        else endReplyTyping();
       },
     });
+    replyAudioComing = Boolean(data.audio_url);
 
-    if (!data.audio_url && oscEnabled()) sendToChatbox(data.reply, { speaking: false });
+    if (!data.audio_url && oscEnabled()) {
+      chatboxHandled = true;   // NEW (1.5.0)
+      sendToChatbox(data.reply, { speaking: false });
+    }
 
     // Falls back to char_count for an app.py that predates the split.
     // They're the same number whenever a reply was actually spoken.
@@ -5416,9 +5477,15 @@ async function send() {
     removeTypingBubble();
     setStatus(`Request failed: ${err.message}`, true);
     setLamp("ready");
+    endReplyTyping();   // NEW (1.5.0): nothing is coming
   } finally {
     sendBtn.disabled = false;
     messageInput.focus();
+    // NEW (1.5.0): every way out of a send that leaves no voice to wait for
+    // and nothing handed to the chatbox — an error reply, a failed request,
+    // the chatbox switched off — takes the dots down here. Covers the early
+    // return on a server error, which is not an exception and skips catch.
+    if (!replyAudioComing && !chatboxHandled) endReplyTyping();
   }
 }
 
@@ -6926,9 +6993,25 @@ let typingSentAt = 0;
 let typingLastValue = "";
 let typingLastChangeAt = 0;
 
+// NEW (1.5.0): from "send" until the reply reaches the chatbox — the
+// seconds of thinking, translating and speaking that used to show nothing.
+// Capped, so a request that hangs cannot leave the dots up for good.
+const REPLY_TYPING_CAP_MS = 30000;
+let replyTypingSince = 0;
+
+function beginReplyTyping() {
+  replyTypingSince = Date.now();
+}
+
+function endReplyTyping() {
+  replyTypingSince = 0;
+  syncTypingIndicator();
+}
+
 function respondingNow() {
   if (!typingIndicatorEnabled || !oscConfigured || !oscEnabled()) return false;
   const now = Date.now();
+  if (replyTypingSince && now - replyTypingSince < REPLY_TYPING_CAP_MS) return true;
   if (messageInput.value !== typingLastValue) {
     typingLastValue = messageInput.value;
     typingLastChangeAt = now;

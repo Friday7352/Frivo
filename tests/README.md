@@ -338,3 +338,25 @@ list and Task Scheduler replaced:
 - The restart also happens after a failed update.
 - It doesn't start a second launcher when Frivo is already back, and neither
   does the watcher.
+
+## test-reply-flow.py
+
+    python3 tests/test-reply-flow.py
+
+New in 1.5.0. Covers two things that used to go wrong between hitting send
+and the reply landing.
+
+**Typing dots through the reply.** The dots stay up while a slow reply is
+being written, even though the message box is already empty. They come
+down when the reply is handed to the chatbox. A failed reply takes them
+down at once, including a server error, which returns early rather than
+throwing.
+
+**Auto-send is for speech.** Dictating hands-free still sends by itself.
+Typing into a dictated message cancels its pending auto-send. The Auto
+switch shows it's paused and the status line says so. Speaking more into
+that message doesn't re-arm the send. Enter sends it, after which the next
+dictated message auto-sends again. Typed text on its own never
+auto-sends, and emptying the box clears the pause.
+
+Run against the 1.4.x code, seven of these checks fail.

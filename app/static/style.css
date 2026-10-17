@@ -3061,3 +3061,14 @@ button.srow:hover .srow-chevron { color: var(--ink-dim); }
   .update-progress.is-indeterminate .update-progress-bar { animation: none; }
   .update-progress.is-indeterminate .update-progress-bar { width: 100%; opacity: 0.45; }
 }
+
+/* NEW (1.5.0): Auto-send paused for this message because you typed in it.
+   Dimmed and outlined rather than relabelled: the switch sits inside the
+   message bar, and nothing there may change size and nudge the send
+   button. The tooltip says why and what to do (press Enter). */
+.switch.is-paused .switch-label { opacity: 0.5; text-decoration: line-through; }
+.switch.is-paused .switch-track {
+  opacity: 0.45;
+  outline: 1px dashed var(--ink-faint);
+  outline-offset: 2px;
+}
