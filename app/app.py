@@ -2660,7 +2660,7 @@ def frivosc_outbox():
         FRIVOSC_OUTBOX.clear()
     # NEW (typing): carried on the reply FrivOSC already polls twice a
     # second, so the dots need no new connection. A FrivOSC from before
-    # 1.1.0 ignores the field.
+    # 1.2.0 ignores the field.
     return jsonify({"messages": messages, "enabled": True, "typing": frivosc_typing()})
 
 

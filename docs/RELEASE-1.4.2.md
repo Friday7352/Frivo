@@ -9,4 +9,4 @@ While you're putting a reply together, VRChat now shows the typing dots over you
 - They only appear when the **Chatbox** switch is on and FrivOSC is connected.
 - To turn them off: Settings > VRChat > **Show typing while I respond**.
 
-**Requires FrivOSC 1.1.0** on your VRChat PC. Older versions of FrivOSC keep working, just without the dots.
+**Requires FrivOSC 1.2.0** on your VRChat PC. Older versions of FrivOSC keep working, just without the dots.

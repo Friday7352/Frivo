@@ -290,7 +290,7 @@ too.
 
 Covers VRChat's typing dots while you respond. Frivo decides whether you're
 replying and adds a `typing` flag to the outbox reply FrivOSC already
-polls. FrivOSC 1.1.0 turns that flag into `/chatbox/typing`. FrivOSC's own
+polls. FrivOSC 1.2.0 turns that flag into `/chatbox/typing`. FrivOSC's own
 `test-end-to-end.py` checks the VRChat side.
 
 Server side: the flag is only set with VRChat OSC on and the switch on. A

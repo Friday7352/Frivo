@@ -2,7 +2,7 @@
 """NEW (typing): VRChat's typing dots while you respond.
 
 Frivo works out whether you are putting a reply together and says so on the
-outbox reply FrivOSC already polls; FrivOSC (1.1.0+) turns that into
+outbox reply FrivOSC already polls; FrivOSC (1.2.0+) turns that into
 /chatbox/typing. This checks Frivo's half:
 
   * the outbox carries "typing", and only with OSC on and the switch on
