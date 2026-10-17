@@ -195,6 +195,49 @@ GitHub.
 This repository intentionally excludes keys, preferences, logs, certificates,
 and generated audio.
 
+## Updates
+
+Frivo keeps itself up to date. A few seconds after it starts, and every six
+hours after that, it looks at the releases on GitHub. When a newer version
+is out, an **Update available** chip appears at the bottom of the sidebar —
+nothing pops up. Click it to see what changed, then:
+
+- **Update now** — downloads the new `FrivoSetup.exe`, checks it against the
+  SHA-256 fingerprint GitHub publishes for it, and installs it on the PC
+  Frivo runs on. Frivo restarts by itself and the page reloads into the new
+  version. Settings, profiles and API keys are kept.
+- **Later** — the chip stays.
+- **Skip this version** — the chip goes away until a newer release is out.
+
+This works from any device you use Frivo on: the install happens on the
+Frivo PC, with no permission prompt. Setup registers a small task in Task
+Scheduler, **Frivo Updater**, that does the installing. Frivo can start
+it, and it only ever installs `FrivoSetup.exe` from this repository's
+releases, after checking the fingerprint. If that task is missing, Frivo
+asks Windows for permission on the Frivo PC instead, and running
+`FrivoSetup.exe` once sets the task up again.
+
+**Settings** > **About Frivo** shows the installed version, has **Check for
+updates**, and the switch for the automatic check.
+
+### Going back to an earlier version
+
+**Settings** > **About Frivo** > **Earlier versions** lists the releases you
+can go back to and installs one the same way. Your settings are kept. Only
+versions from 1.4.0 onward are offered, because 1.4.0 is the first version
+that can update itself. Going back further would leave you with no way to
+update from inside Frivo.
+
+### Publishing an update
+
+1. Change `VERSION` and run `Build-Installer.bat`.
+2. Create a GitHub release tagged with that version, such as `v1.4.1`. It
+   can't be a pre-release or a draft.
+3. Attach `dist\FrivoSetup.exe` to the release, keeping that exact name.
+
+Installed copies offer the update within six hours, or right away through
+**Check for updates**. The release notes appear in the update dialog.
+
 ## Uninstalling
 
 Open **Settings** > **Apps** > **Installed apps**, choose **Frivo**, and
@@ -210,7 +253,8 @@ Running a newer Frivo setup also detects an existing installation and offers:
 - **Uninstall** — removes Frivo from the setup wizard.
 
 The uninstaller removes Frivo, its shortcuts, its Windows startup entry, the
-Frivo firewall rule, its local address and certificate. It asks whether to
+Frivo firewall rule, its local address and certificate, and the Frivo
+Updater task. It asks whether to
 also remove Frivo's saved API keys and preferences. Leave that option
 unchecked if you plan to reinstall later.
 
@@ -220,6 +264,13 @@ If installation fails, the setup log is saved here:
 
     %TEMP%\Frivo-Setup.log
 
+If an in-app update fails, the update dialog says why. The Frivo tray icon
+also shows the result once Frivo restarts. The details are in:
+
+    %ProgramData%\Frivo\Updates\updater.log
+
+That log also names the setup log the updater's run wrote to.
+
 The Frivo launcher also includes buttons to open its server log and settings
 folder.
 
@@ -227,7 +278,7 @@ folder.
 
 The version lives in one file, `VERSION`, at the root of this repository:
 
-    1.1.2
+    1.4.0
 
 Edit that line before a release and everything picks it up on the next
 build — the Apps & features entry, the setup wizard's welcome page, the

@@ -139,6 +139,11 @@
               stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
         <path d="M5 12.5l5 5L19 7"/>
       </symbol>
+      <!-- NEW (updates) -->
+      <symbol id="i-download" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 3.5v11.5M7.5 10.5 12 15l4.5-4.5"/><path d="M4.5 16.5v1.5a2.5 2.5 0 0 0 2.5 2.5h10a2.5 2.5 0 0 0 2.5-2.5v-1.5"/>
+      </symbol>
       <symbol id="i-ear" viewBox="0 0 24 24" fill="none" stroke="currentColor"
               stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
         <path d="M6 8a6 6 0 1 1 12 0c0 3-2 4-3 5.5S13 17 13 19a3 3 0 0 1-6 0"/>
@@ -297,6 +302,15 @@
              Both are money-or-silence problems, so they sit together at the
              bottom of the column where a glance finds them. -->
         <section class="side-group">
+          <!-- NEW (updates): only shown when a newer Frivo is out (and not
+               skipped), or while one is being installed. Opens the update
+               dialog. Never interrupts: this chip is the whole announcement. -->
+          <button id="updateChip" class="update-chip is-hidden" type="button">
+            <span class="update-chip-icon" aria-hidden="true">
+              <svg class="icon-16"><use href="#i-download"/></svg>
+            </span>
+            <span class="update-chip-text" id="updateChipText">Update available</span>
+          </button>
           <div class="credit-block">
             <button class="credit-card" id="creditsToggle" type="button"
                     aria-expanded="false" aria-controls="creditsPanel"
@@ -965,6 +979,59 @@
             </div>
           </section>
 
+          <!-- NEW (updates): About and updates. The automatic check and
+               "Check for updates" live here; the chip in the sidebar is
+               only the announcement. -->
+          <section class="settings-section" id="aboutSection">
+            <div class="settings-section-icon"><svg width="22" height="22"><use href="#i-download"/></svg></div>
+            <div class="settings-section-body">
+              <div class="settings-section-head">
+                <div>
+                  <h3 class="settings-section-title">About Frivo</h3>
+                  <p class="settings-section-sub">Version and updates</p>
+                </div>
+              </div>
+              <div class="settings-card">
+                <div class="srow">
+                  <span class="srow-main"><span class="srow-label">Version</span></span>
+                  <span class="srow-spacer"></span>
+                  <span class="srow-value srow-value--mono" id="aboutVersionValue">—</span>
+                </div>
+                <button class="srow" type="button" id="checkUpdatesRow">
+                  <span class="srow-main"><span class="srow-label">Check for updates</span></span>
+                  <span class="srow-spacer"></span>
+                  <span class="srow-value" id="checkUpdatesValue">—</span>
+                  <span class="srow-chevron"><svg class="icon-16"><use href="#i-chevron"/></svg></span>
+                </button>
+                <!-- Saves itself (POST /api/updates/settings): it is not
+                     part of what "Save settings" sends. -->
+                <label class="srow">
+                  <span class="srow-main srow-main--flex">
+                    <span class="srow-label">Check for updates automatically</span>
+                    <span class="srow-sub">When Frivo starts and every six hours. A newer version only shows as a chip in the sidebar.</span>
+                  </span>
+                  <span class="switch">
+                    <input type="checkbox" id="updateAutoToggle" checked>
+                    <span class="switch-track" aria-hidden="true"></span>
+                  </span>
+                </label>
+                <button class="srow" type="button" data-settings-page="earlier-versions" id="earlierVersionsRow">
+                  <span class="srow-main">
+                    <span class="srow-label">Earlier versions</span>
+                    <span class="srow-sub">Go back to a version you had before</span>
+                  </span>
+                  <span class="srow-spacer"></span>
+                  <span class="srow-chevron"><svg class="icon-16"><use href="#i-chevron"/></svg></span>
+                </button>
+              </div>
+              <p class="settings-note" id="updateNote">
+                Updates come from Frivo's releases on GitHub and install on the PC Frivo runs on.
+                The installer is checked against the fingerprint GitHub publishes before it runs,
+                and your settings, profiles and API keys are kept.
+              </p>
+            </div>
+          </section>
+
         </div><!-- /settingsRoot -->
 
         <!-- ---------- detail pages ---------- -->
@@ -1140,6 +1207,17 @@
             </div>
           </div>
 
+          <!-- NEW (updates) -->
+          <div class="settings-page is-hidden" data-page="earlier-versions" data-title="Earlier versions">
+            <div class="settings-card" id="earlierList">
+              <div class="srow"><span class="srow-main"><span class="srow-sub">Loading…</span></span></div>
+            </div>
+            <p class="settings-note" id="earlierNote">
+              Going back keeps your settings, profiles and API keys. What was added after that
+              version is gone until you update again, which you can do at any time from here.
+            </p>
+          </div>
+
         </div><!-- /settingsPages -->
       </div><!-- /settings-scroll -->
     </section>
@@ -1280,6 +1358,35 @@
       <div class="actions">
         <button id="profileModalSave" class="btn">Save profile</button>
         <button id="profileModalCancel" class="btn-ghost">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- NEW (updates): the update dialog. The same one installs an earlier
+       version from Settings > Earlier versions; the wording changes and
+       "Skip this version" is left out. -->
+  <div id="updateOverlay" class="overlay is-hidden">
+    <div class="modal update-modal" role="dialog" aria-modal="true" aria-labelledby="updateTitle">
+      <div class="update-head">
+        <span class="update-badge" aria-hidden="true">
+          <svg width="22" height="22"><use href="#i-download"/></svg>
+        </span>
+        <div class="update-titles">
+          <h2 class="update-title" id="updateTitle">Frivo is available</h2>
+          <p class="update-sub" id="updateSub"></p>
+        </div>
+      </div>
+      <div class="update-notes is-hidden" id="updateNotes"></div>
+      <p class="modal-note update-where is-hidden" id="updateWhere"></p>
+      <div class="update-progress is-hidden" id="updateProgress" role="progressbar"
+           aria-valuemin="0" aria-valuemax="100" aria-labelledby="updateStatus">
+        <div class="update-progress-bar" id="updateProgressBar"></div>
+      </div>
+      <p class="update-status is-hidden" id="updateStatus" aria-live="polite"></p>
+      <div class="actions update-actions">
+        <button id="updateSkipBtn" class="btn-ghost" type="button">Skip this version</button>
+        <button id="updateLaterBtn" class="btn-ghost" type="button">Later</button>
+        <button id="updateInstallBtn" class="btn" type="button">Update now</button>
       </div>
     </div>
   </div>

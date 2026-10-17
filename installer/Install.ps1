@@ -32,6 +32,8 @@ $PackageDir = Split-Path -Parent $ScriptDir
 $SourceApp  = Join-Path $PackageDir 'app'
 
 Import-Module (Join-Path $ScriptDir 'Frivo.Setup.psm1') -Force
+# NEW (updates): the updater task and its folder. See Frivo.Update.psm1.
+Import-Module (Join-Path $ScriptDir 'Frivo.Update.psm1') -Force
 
 $AppName    = 'Frivo'
 # One file decides the version for the whole app: the Apps & features
@@ -308,6 +310,11 @@ function Copy-AppFiles {
     Copy-Item (Join-Path $ScriptDir 'Launcher.ps1')            -Destination (Join-Path $Target 'installer') -Force
     Copy-Item (Join-Path $ScriptDir 'Frivo.Setup.psm1') -Destination (Join-Path $Target 'installer') -Force
     Copy-Item (Join-Path $ScriptDir 'Frivo.Ui.psm1')    -Destination (Join-Path $Target 'installer') -Force
+    # NEW (updates): the in-app updater. update-policy.json is read by both
+    # the updater and app.py, so it ships beside them rather than in either.
+    foreach ($name in @('Frivo.Update.psm1', 'Update-Frivo.ps1', 'Update-Watch.ps1', 'update-policy.json')) {
+        Copy-Item (Join-Path $ScriptDir $name) -Destination (Join-Path $Target 'installer') -Force
+    }
     # The native host gives the launcher the Frivo process identity.
     $nativeHost = Join-Path $ScriptDir 'FrivoHost.exe'
     if (Test-Path -LiteralPath $nativeHost -PathType Leaf) {
@@ -595,6 +602,27 @@ function Set-FirewallRule {
     }
 }
 
+function Register-FrivoUpdater {
+    <#
+        NEW (updates): the "Frivo Updater" task and the folder it shares
+        with Frivo. Done on every install, repair and update — including the
+        first update FROM a version that had no updater, which is how an
+        existing install gets one. Never fatal: without it Frivo works, and
+        updating falls back to asking Windows for permission each time.
+    #>
+    param([string] $Target, [scriptblock] $Log)
+
+    & $Log 'Setting up in-app updates...'
+    try {
+        [void] (Initialize-FrivoUpdateFolder)
+        $result = Register-FrivoUpdaterTask -InstallDir $Target
+        Write-SetupLog ('updater task: ' + $result)
+    } catch {
+        Write-SetupLog ('updater setup failed: ' + $_.Exception.Message)
+        & $Log 'In-app updates could not be set up. Frivo will ask for permission when it updates.'
+    }
+}
+
 function Install-Frivo {
     param(
         [string]      $Target,
@@ -748,6 +776,7 @@ function Install-Frivo {
     Register-Uninstaller -Target $Target -Log $Log
     Save-InstallSettings -DesktopShortcut $DesktopShortcut -StartMenuShortcut $StartMenuShortcut `
         -Startup $Startup -Firewall $Firewall
+    Register-FrivoUpdater -Target $Target -Log $Log   # NEW (updates)
     & $Progress 95
     if ($Action -ne 'Update') {
         Set-FirewallRule -Enabled $Firewall -Target $Target -Log $Log
@@ -764,33 +793,59 @@ function Install-Frivo {
 # ==================================================================
 
 if ($Silent) {
-    $target = if ($InstallPath) { $InstallPath } else { Get-DefaultInstallPath }
-    $existing = Get-ExistingInstall
-    $knownExisting = $false
+    # CHANGED (updates): this is what an in-app update runs — FrivoSetup.exe
+    # /VERYSILENT, started by the updater task as SYSTEM, with no desktop
+    # and nobody to answer anything. So:
+    #  - an update goes to wherever Frivo is installed, not the default path
+    #  - -Action Update means update and nothing else. A half-installed
+    #    Frivo is refused rather than repaired: repairing as SYSTEM would
+    #    build the venv and the settings files in SYSTEM's own profile.
+    #  - progress goes to the setup log, never Write-Host (there is no host)
+    #  - a failure is logged as "FAILED: <reason>" — the updater reads that
+    #    line back to say why — and then thrown, so FrivoHost returns 1 and
+    #    Setup exits non-zero.
     try {
-        $knownExisting = ($existing.State -ne 'None' -and
-            [System.IO.Path]::GetFullPath($target).TrimEnd('\', '/').Equals(
-                [System.IO.Path]::GetFullPath($existing.Path).TrimEnd('\', '/'),
-                [System.StringComparison]::OrdinalIgnoreCase)) -or (Test-FrivoRecoverableResidue $target)
-    } catch { }
-    if ($existing.State -ne 'None' -and -not $knownExisting) {
-        throw 'Frivo is already installed in a different folder. Uninstall it before choosing a new destination.'
+        $existing = Get-ExistingInstall
+        if ($Action -eq 'Update' -and $existing.State -ne 'Installed') {
+            throw 'Frivo is not fully installed on this PC, so it cannot be updated in place. Run FrivoSetup.exe to repair it.'
+        }
+        $target = if ($InstallPath) {
+            $InstallPath
+        } elseif ($existing.State -eq 'Installed') {
+            $existing.Path
+        } else {
+            Get-DefaultInstallPath
+        }
+        $knownExisting = $false
+        try {
+            $knownExisting = ($existing.State -ne 'None' -and
+                [System.IO.Path]::GetFullPath($target).TrimEnd('\', '/').Equals(
+                    [System.IO.Path]::GetFullPath($existing.Path).TrimEnd('\', '/'),
+                    [System.StringComparison]::OrdinalIgnoreCase)) -or (Test-FrivoRecoverableResidue $target)
+        } catch { }
+        if ($existing.State -ne 'None' -and -not $knownExisting) {
+            throw 'Frivo is already installed in a different folder. Uninstall it before choosing a new destination.'
+        }
+        $effectiveAction = $Action
+        if ($effectiveAction -eq 'Install' -and $existing.State -eq 'Installed') {
+            $effectiveAction = 'Update'
+        } elseif ($effectiveAction -eq 'Install' -and $existing.State -eq 'Partial') {
+            $effectiveAction = 'Repair'
+        }
+        Write-SetupLog ('Silent {0} of {1} -> {2} at {3}' -f $effectiveAction, $existing.Version, $AppVersion, $target)
+        $cleanFirst = ($effectiveAction -eq 'Repair')
+        $savedSettings = if ($effectiveAction -eq 'Update') { Get-InstallSettings } else { $null }
+        Install-Frivo -Target $target `
+            -DesktopShortcut $(if ($savedSettings) { $savedSettings.DesktopShortcut } else { -not $NoShortcut }) `
+            -StartMenuShortcut $(if ($savedSettings) { $savedSettings.StartMenuShortcut } else { -not $NoShortcut }) `
+            -Startup $(if ($savedSettings) { $savedSettings.Startup } else { [bool] $RunAtStartup }) `
+            -Firewall $(if ($savedSettings) { $savedSettings.Firewall } else { [bool] $AllowFirewall }) `
+            -CleanFirst $cleanFirst -AllowKnownLegacyInstall $knownExisting -Action $effectiveAction `
+            -Log { param($m) if ($m) { Write-SetupLog ('silent: ' + $m) } } -Progress { param($p) } | Out-Null
+    } catch {
+        Write-SetupLog ('FAILED: ' + $_.Exception.Message)
+        throw
     }
-    $effectiveAction = $Action
-    if ($effectiveAction -eq 'Install' -and $existing.State -eq 'Installed') {
-        $effectiveAction = 'Update'
-    } elseif ($effectiveAction -eq 'Install' -and $existing.State -eq 'Partial') {
-        $effectiveAction = 'Repair'
-    }
-    $cleanFirst = ($effectiveAction -eq 'Repair')
-    $savedSettings = if ($effectiveAction -eq 'Update') { Get-InstallSettings } else { $null }
-    Install-Frivo -Target $target `
-        -DesktopShortcut $(if ($savedSettings) { $savedSettings.DesktopShortcut } else { -not $NoShortcut }) `
-        -StartMenuShortcut $(if ($savedSettings) { $savedSettings.StartMenuShortcut } else { -not $NoShortcut }) `
-        -Startup $(if ($savedSettings) { $savedSettings.Startup } else { [bool] $RunAtStartup }) `
-        -Firewall $(if ($savedSettings) { $savedSettings.Firewall } else { [bool] $AllowFirewall }) `
-        -CleanFirst $cleanFirst -AllowKnownLegacyInstall $knownExisting -Action $effectiveAction `
-        -Log { param($m) if ($m) { Write-Host $m } } -Progress { param($p) } | Out-Null
     exit 0
 }
 
