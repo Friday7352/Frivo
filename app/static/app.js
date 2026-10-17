@@ -181,6 +181,9 @@ const profileNameInput = $("profileName");
 const profileVoiceNote = $("profileVoiceNote");
 const profileLanguageSelect = $("profileLanguageSelect");
 const profileResponseStyleRadios = $("profileResponseStyleRadios");
+// NEW (1.5.0): Follow reply length
+const profileFollowLength = $("profileFollowLength");
+const profileFollowLengthHint = $("profileFollowLengthHint");
 const profilePersonalityPresetSelect = $("profilePersonalityPresetSelect");
 const profileSystemPromptInput = $("profileSystemPrompt");
 const profileModalSave = $("profileModalSave");
@@ -984,6 +987,7 @@ lengthSlider.addEventListener("change", async () => {
 });
 
 async function handleSettingsResponseStyleChange(value) {
+  showStyleNote(responseStyleNote, value);  // NEW (1.5.0)
   refreshPromptIfOpen();
   await fetch("/api/settings", {
     method: "POST",
@@ -1518,7 +1522,7 @@ function addTurn(who, text, opts = {}) {
     const flag = document.createElement("span");
     flag.className = "turn-flag";
     flag.textContent = "Kept to your words";
-    flag.title = "The model changed more than spelling and grammar, so Frivo used your wording instead.";
+    flag.title = "The clean-up added things you didn't say, so Frivo used your own wording instead.";
     stack.appendChild(flag);
   }
 
@@ -1647,9 +1651,10 @@ async function loadSettings() {
       responseStyleRadios,
       responseStyles,
       "responseStyleSettings",
-      data.response_style || "echo",  // CHANGED (1.5.0): Echo is the default
+      data.response_style || "echo",  // CHANGED (1.5.0): Clean up is the default
       handleSettingsResponseStyleChange
     );
+    showStyleNote(responseStyleNote, data.response_style || "echo");  // NEW (1.5.0)
   } else {
     responseStyleRadios.innerHTML = '<span class="readout">Update app.py for response style options</span>';
   }
@@ -1720,6 +1725,8 @@ function setSettingsOpen(open) {
   // helpful — you asked for Settings, not for the page you left.
   if (!open && typeof closeSettingsPage === "function") closeSettingsPage();
   if (open && typeof refreshSettingsSummaries === "function") refreshSettingsSummaries();
+  // NEW (1.5.0): the microphone list is always current when you look at it.
+  if (open && typeof loadMicrophones === "function") loadMicrophones();
 }
 
 settingsToggle.addEventListener("click", () => {
@@ -3265,12 +3272,22 @@ function openModal(profile) {
       ? `Starts on the voice you have selected now (${name}), and can be changed any time from the Voice row.`
       : "Pick a voice from the Voice row first — a profile needs one.";
   }
+  const startStyle = profile ? (profile.response_style || "echo") : getRadioValue(responseStyleRadios, "echo");
+  // NEW (1.5.0): a profile saved before "Follow reply length" existed keeps
+  // what it did — Response followed the slider, Echo and Mimic didn't. Until
+  // you touch the switch, changing the style moves it to match.
+  followLengthTouched = Boolean(profile && typeof profile.follow_length === "boolean");
+  profileFollowLength.checked = followLengthTouched ? profile.follow_length : startStyle === "reply";
+  updateFollowLengthHint(startStyle);
   buildRadioGroup(
     profileResponseStyleRadios,
     responseStyles,
     "responseStyleProfile",
-    profile ? (profile.response_style || "echo") : getRadioValue(responseStyleRadios, "echo"),
-    null
+    startStyle,
+    (id) => {
+      if (!followLengthTouched) profileFollowLength.checked = id === "reply";
+      updateFollowLengthHint(id);
+    }
   );
   fillOptionList(
     profilePersonalityPresetSelect,
@@ -3296,6 +3313,33 @@ function openModal(profile) {
 function closeModal() {
   overlay.classList.add("is-hidden");
 }
+
+// NEW (1.5.0): the picked response style's one-line description, shown
+// under the buttons rather than only as a tooltip, so the names don't have
+// to explain everything on their own.
+const responseStyleNote = $("responseStyleNote");
+const profileResponseStyleNote = $("profileResponseStyleNote");
+function showStyleNote(el, id) {
+  if (!el) return;
+  const style = responseStyles.find((s) => s.id === id);
+  el.textContent = style ? style.description : "";
+}
+
+// NEW (1.5.0): what "Follow reply length" means for the style picked.
+let followLengthTouched = false;
+function updateFollowLengthHint(style) {
+  if (!profileFollowLengthHint) return;
+  const on = profileFollowLength.checked;
+  showStyleNote(profileResponseStyleNote, style);
+  profileFollowLengthHint.textContent = style === "reply"
+    ? (on ? "Replies keep to the Reply length slider." : "Replies can be any length; the slider is ignored.")
+    : (on ? "Long messages stop at the last whole sentence that fits the Reply length slider — never reworded."
+          : "Says your whole message, however long.");
+}
+profileFollowLength.addEventListener("change", () => {
+  followLengthTouched = true;
+  updateFollowLengthHint(getRadioValue(profileResponseStyleRadios, "echo"));
+});
 
 newProfileBtn.addEventListener("click", () => openModal(null));
 
@@ -3355,6 +3399,7 @@ profileModalSave.addEventListener("click", async () => {
     voice_name: voiceName,
     system_prompt: systemPrompt,
     response_style: getRadioValue(profileResponseStyleRadios, "echo"),
+    follow_length: profileFollowLength.checked,  // NEW (1.5.0)
     personality_preset: profilePersonalityPresetSelect.value,
     language: profileLanguageSelect.value,
   };
@@ -3420,7 +3465,7 @@ async function loadPromptPreview() {
   promptYours.textContent = data.your_prompt;
   promptAppended.textContent = data.appended;
   // CHANGED (1.5.0): Response, Echo, Mimic.
-  const styleLabels = { reply: "Response", echo: "Echo", mimic: "Mimic", flair: "Echo" };
+  const styleLabels = { reply: "Reply", echo: "Clean up", mimic: "Word for word", flair: "Clean up" };
   const styleLabel = styleLabels[data.response_style] || data.response_style;
   promptMeta.textContent =
     `${data.model} · ${data.language} · ${styleLabel} · ${data.personality_source} · ` +
@@ -3446,23 +3491,49 @@ function refreshPromptIfOpen() {
 
 const MIC_STORAGE_KEY = "voice_console_mic_device_id";
 
+// CHANGED (1.5.0): the microphone list.
+//
+// Until the page is allowed to use the mic, browsers hide every device's id
+// and name. The old list was built from that anyway, so it showed
+// "Microphone 1" instead of the one you picked — it looked reset — and
+// picking from it could save a blank and really reset it. It also never
+// refreshed after the mic was allowed, so the names only appeared after a
+// click on Reload. Now:
+//   - with ids hidden, the list shows your saved microphone and nothing else
+//     (it's still the one dictation uses), and nothing is overwritten
+//   - the list rebuilds itself as soon as the mic is allowed (dictation
+//     starting, Reload), when a device is plugged in or out, and when the
+//     Dictation settings are opened
+//   - a saved microphone that isn't plugged in is shown as such, and
+//     dictation falls back to the default one rather than failing
+function micOption(value, text) {
+  const opt = document.createElement("option");
+  opt.value = value;
+  opt.textContent = text;
+  return opt;
+}
+
 function fillMicrophones(devices, selectedId) {
   const mics = devices.filter((d) => d.kind === "audioinput");
+  const visible = mics.some((d) => d.deviceId && d.label);
   micSelect.innerHTML = "";
-  if (!mics.length) {
-    const opt = document.createElement("option");
-    opt.value = "";
-    opt.textContent = "No microphones found";
-    micSelect.appendChild(opt);
-    return;
+
+  if (!visible) {
+    micSelect.appendChild(micOption(selectedId, selectedId ? "Your saved microphone" : "System default"));
+    micSelect.value = selectedId;
+    return false;
   }
-  mics.forEach((mic, i) => {
-    const opt = document.createElement("option");
-    opt.value = mic.deviceId;
-    opt.textContent = mic.label || `Microphone ${i + 1}`;
-    if (mic.deviceId === selectedId) opt.selected = true;
-    micSelect.appendChild(opt);
-  });
+
+  // Chrome lists the system default itself, as "default"; elsewhere it's
+  // offered here, so "use whatever Windows is set to" is a real choice.
+  if (!mics.some((d) => d.deviceId === "default")) micSelect.appendChild(micOption("", "System default"));
+  if (selectedId && !mics.some((d) => d.deviceId === selectedId)) {
+    micSelect.appendChild(micOption(selectedId, "Saved microphone (not connected)"));
+  }
+  mics.forEach((mic, i) => micSelect.appendChild(micOption(mic.deviceId, mic.label || `Microphone ${i + 1}`)));
+  micSelect.value = selectedId;
+  if (micSelect.value !== selectedId) micSelect.selectedIndex = 0;
+  return true;
 }
 
 async function loadMicrophones() {
@@ -3472,11 +3543,10 @@ async function loadMicrophones() {
   }
   try {
     const devices = await navigator.mediaDevices.enumerateDevices();
-    fillMicrophones(devices, localStorage.getItem(MIC_STORAGE_KEY) || "");
-    const hasLabels = devices.some((d) => d.kind === "audioinput" && d.label);
-    micNote.textContent = hasLabels
-      ? "Used when you click the dictation mic button."
-      : "Click Reload once to grant microphone access and see device names.";
+    const visible = fillMicrophones(devices, localStorage.getItem(MIC_STORAGE_KEY) || "");
+    micNote.textContent = visible
+      ? "Used by Accurate and Live (Evora) dictation."
+      : "Your browser hides microphone names until it's allowed to use the mic — click Reload, or start dictation, to see them.";
   } catch (err) {
     console.error("enumerateDevices failed:", err);
   }
@@ -3485,6 +3555,33 @@ async function loadMicrophones() {
 micSelect.addEventListener("change", () => {
   localStorage.setItem(MIC_STORAGE_KEY, micSelect.value);
 });
+
+// NEW (1.5.0): plugged in, unplugged, or newly allowed.
+if (navigator.mediaDevices && navigator.mediaDevices.addEventListener) {
+  navigator.mediaDevices.addEventListener("devicechange", () => loadMicrophones());
+}
+
+// NEW (1.5.0): one way to open the chosen microphone, for every dictation
+// mode that honours it. A saved device that's gone falls back to the
+// default instead of failing; either way the list is refreshed, since
+// the mic being allowed is what makes the real names available.
+let micFellBack = false;
+async function openMicrophone() {
+  const deviceId = localStorage.getItem(MIC_STORAGE_KEY) || "";
+  micFellBack = false;
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio: deviceId ? { deviceId: { exact: deviceId } } : true,
+    });
+  } catch (err) {
+    if (!deviceId || (err.name !== "OverconstrainedError" && err.name !== "NotFoundError")) throw err;
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    micFellBack = true;
+  }
+  loadMicrophones();
+  return stream;
+}
 
 refreshMicsBtn.addEventListener("click", async () => {
   try {
@@ -3573,6 +3670,10 @@ function setTypedByHand(on) {
 }
 
 messageInput.addEventListener("input", () => {
+  // NEW (1.5.0): what you type is part of the message from now on. Dictation
+  // used to keep its own copy of the box and write it back over the top on
+  // the next word it heard, erasing whatever you had typed in the meantime.
+  if (isDictating) takeTypedText();
   if (!messageInput.value.trim()) {
     // Emptied by hand: a clean slate again.
     setTypedByHand(false);
@@ -3705,12 +3806,9 @@ async function startDictation() {
     return;
   }
 
-  const deviceId = localStorage.getItem(MIC_STORAGE_KEY) || "";
   let stream;
   try {
-    stream = await navigator.mediaDevices.getUserMedia({
-      audio: deviceId ? { deviceId: { exact: deviceId } } : true,
-    });
+    stream = await openMicrophone();  // CHANGED (1.5.0)
   } catch (err) {
     setStatus(`Couldn't access the microphone: ${err.message}`, true);
     return;
@@ -3742,7 +3840,9 @@ async function startDictation() {
   mediaRecorder.start();
   isDictating = true;
   setDictateUI(true);
-  setStatus("Listening… click the mic again to stop.");
+  setStatus(micFellBack
+    ? "Listening on the default microphone — your saved one isn't connected. Click the mic again to stop."
+    : "Listening… click the mic again to stop.");  // CHANGED (1.5.0)
 }
 
 function stopDictation() {
@@ -3794,6 +3894,51 @@ let recognition = null;
 let liveCommitted = "";
 let liveInterim = "";
 let liveStopping = false;
+// NEW (1.5.0): a preview of words still being spoken that was on screen
+// when you typed, and so became part of your text. When the finished
+// transcription of those words arrives it takes the preview's place rather
+// than being added a second time; until then no more previews are shown,
+// so nothing moves around under your cursor.
+let liveBakedInterim = "";
+
+// NEW (1.5.0): one spacing rule for dictated text, and it leaves a space
+// you typed at the end alone instead of doubling it.
+function joinDictated(before, after) {
+  if (!after) return before;
+  if (!before.trim()) return after;
+  return /\s$/.test(before) ? before + after : `${before} ${after}`;
+}
+
+// NEW (1.5.0): the box, exactly as you left it, is now the text dictation
+// adds to.
+function takeTypedText() {
+  if (!messageInput.value.trim()) {
+    liveCommitted = "";
+    liveInterim = "";
+    liveBakedInterim = "";
+    return;
+  }
+  if (liveInterim) liveBakedInterim = liveInterim;
+  liveCommitted = messageInput.value;
+  liveInterim = "";
+}
+
+// NEW (1.5.0): a finished transcription goes into the text — in place of
+// its preview if you typed while the preview was showing, otherwise on the
+// end.
+function commitDictated(text) {
+  const baked = liveBakedInterim;
+  liveBakedInterim = "";
+  if (!text) return;
+  if (baked) {
+    const at = liveCommitted.lastIndexOf(baked);
+    if (at >= 0) {
+      liveCommitted = liveCommitted.slice(0, at) + text + liveCommitted.slice(at + baked.length);
+      return;
+    }
+  }
+  liveCommitted = joinDictated(liveCommitted, text);
+}
 
 const DICTATION_LANG_KEY = "voice_console_dictation_lang";
 
@@ -3847,12 +3992,14 @@ if (dictationLangSelect) {
 }
 
 function liveDisplayText() {
-  return [liveCommitted, liveInterim].filter(Boolean).join(" ").trim();
+  // CHANGED (1.5.0): no longer trims, so a space you just typed survives.
+  return joinDictated(liveCommitted, liveInterim);
 }
 
 function resetLiveDictation() {
   liveCommitted = "";
   liveInterim = "";
+  liveBakedInterim = "";  // NEW (1.5.0)
 
   if (isDictating && recognition && !liveStopping) {
     try {
@@ -3871,7 +4018,21 @@ function syncLiveFromInput() {
 }
 
 function renderLiveText() {
-  messageInput.value = liveDisplayText();
+  const next = liveDisplayText();
+  if (messageInput.value === next) return;
+  // NEW (1.5.0): if you're typing in the box, your cursor stays where it is
+  // when dictated words are added — as long as the text before it didn't
+  // change.
+  const typing = document.activeElement === messageInput;
+  const start = messageInput.selectionStart;
+  const end = messageInput.selectionEnd;
+  const keepCaret = typing && start != null &&
+    next.slice(0, end) === messageInput.value.slice(0, end) && end < messageInput.value.length;
+  messageInput.value = next;
+  if (keepCaret) {
+    messageInput.setSelectionRange(start, end);
+    return;
+  }
   // Keep the view at the end so the box scrolls with the speech rather
   // than sitting on the first few words.
   messageInput.scrollLeft = messageInput.scrollWidth;
@@ -3894,6 +4055,7 @@ function startLiveDictation() {
   // Dictating on top of something already typed shouldn't wipe it.
   liveCommitted = messageInput.value.trim();
   liveInterim = "";
+  liveBakedInterim = "";  // NEW (1.5.0)
   liveStopping = false;
 
   recognition.addEventListener("result", (event) => {
@@ -3905,12 +4067,14 @@ function startLiveDictation() {
       const chunk = result[0].transcript;
       if (result.isFinal) {
         const trimmed = chunk.trim();
-        if (trimmed) liveCommitted = [liveCommitted, trimmed].filter(Boolean).join(" ");
+        if (trimmed) commitDictated(trimmed);  // CHANGED (1.5.0)
       } else {
         interim += chunk;
       }
     }
-    liveInterim = interim.trim();
+    // CHANGED (1.5.0): no preview while one you typed over is still waiting
+    // for its final words.
+    liveInterim = liveBakedInterim ? "" : interim.trim();
     renderLiveText();
 
     // Any new speech cancels a pending auto-send and restarts the clock,
@@ -4043,12 +4207,9 @@ async function startLocalLiveDictation() {
     return;
   }
 
-  const deviceId = localStorage.getItem(MIC_STORAGE_KEY) || "";
   let stream;
   try {
-    stream = await navigator.mediaDevices.getUserMedia({
-      audio: deviceId ? { deviceId: { exact: deviceId } } : true,
-    });
+    stream = await openMicrophone();  // CHANGED (1.5.0)
   } catch (err) {
     setStatus(`Couldn't access the microphone: ${err.message}`, true);
     return;
@@ -4079,10 +4240,13 @@ async function startLocalLiveDictation() {
 
   liveCommitted = messageInput.value.trim();
   liveInterim = "";
+  liveBakedInterim = "";  // NEW (1.5.0)
   liveStopping = false;
   isDictating = true;
   setDictateUI(true);
-  setStatus("Listening — text appears as you speak.");
+  setStatus(micFellBack
+    ? "Listening on the default microphone — your saved one isn't connected."
+    : "Listening — text appears as you speak.");
 
   liveLocal.timer = setInterval(pollLocalLevel, 50);
 }
@@ -4144,7 +4308,8 @@ async function sendInterim() {
     // Only show it if dictation is still running and this utterance hasn't
     // already been finalised — a slow response arriving late shouldn't
     // resurrect text that's since been committed or cleared.
-    if (isDictating && liveLocal === s && s.speaking) {
+    // CHANGED (1.5.0): not while a preview you typed over is waiting.
+    if (isDictating && liveLocal === s && s.speaking && !liveBakedInterim) {
       liveInterim = text;
       renderLiveText();
     }
@@ -4177,6 +4342,7 @@ async function finishUtterance(chunks, speechMs, speculative, endedAt) {
 
   if (!chunks.length || tooShort) {
     liveInterim = "";
+    liveBakedInterim = "";  // NEW (1.5.0)
     renderLiveText();
     return;
   }
@@ -4197,14 +4363,14 @@ async function finishUtterance(chunks, speechMs, speculative, endedAt) {
     } else {
       text = await transcribeBlob(blob, s.mimeType);
     }
-    if (text) {
-      // The final pass sees the whole utterance, so it supersedes whatever
-      // the interim passes guessed.
-      liveCommitted = [liveCommitted, text].filter(Boolean).join(" ");
-    }
+    // The final pass sees the whole utterance, so it supersedes whatever
+    // the interim passes guessed. CHANGED (1.5.0): including one you typed
+    // over, which it replaces where it stands.
+    commitDictated(text);
   } catch (err) {
     setStatus(`Transcription failed: ${err.message}`, true);
   } finally {
+    liveBakedInterim = "";  // NEW (1.5.0)
     liveInterim = "";
     renderLiveText();
     // CHANGED (dictation speed): counted from when you stopped talking.
@@ -5088,6 +5254,7 @@ async function startListening() {
   const savedDevice = localStorage.getItem(LISTEN_DEVICE_KEY) || "";
   await ensureDeviceAccess();
   await loadListenDevices();
+  loadMicrophones();  // NEW (1.5.0): access granted means real names for this list too
 
   const deviceId = listenDeviceSelect ? listenDeviceSelect.value : "";
 

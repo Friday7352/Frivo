@@ -816,7 +816,7 @@
               </div>
               <div class="settings-card">
                 <div class="srow srow--stacked">
-                  <label class="srow-label" for="micSelect">Microphone <span class="field-hint">— used by Accurate dictation</span></label>
+                  <label class="srow-label" for="micSelect">Microphone <span class="field-hint">— used by Accurate and Live (Evora) dictation</span></label>
                   <div class="row">
                     <select id="micSelect"></select>
                     <button id="refreshMicsBtn" class="btn-ghost btn-sm" type="button">Reload</button>
@@ -977,6 +977,7 @@
                 <div class="srow srow--stacked">
                   <span class="srow-label">Response style</span>
                   <div class="radio-row" id="responseStyleRadios" role="radiogroup" aria-label="Response style"></div>
+                  <p class="field-note" id="responseStyleNote"></p><!-- NEW (1.5.0) -->
                 </div>
                 <div class="srow srow--stacked">
                   <label class="srow-label" for="personalityPresetSelect">Personality preset <span class="field-hint">— used when the box below is empty</span></label>
@@ -1346,6 +1347,21 @@
       <div class="field">
         <label>Response style</label>
         <div class="radio-row" id="profileResponseStyleRadios" role="radiogroup" aria-label="Response style"></div>
+        <p class="field-note" id="profileResponseStyleNote"></p><!-- NEW (1.5.0) -->
+      </div>
+
+      <!-- NEW (1.5.0): Follow reply length, for every response style. -->
+      <div class="field">
+        <label class="field-toggle">
+          <span class="field-toggle-text">
+            <span class="field-toggle-label">Follow reply length</span>
+            <span class="field-hint" id="profileFollowLengthHint">Keeps replies to the Reply length slider.</span>
+          </span>
+          <span class="switch">
+            <input type="checkbox" id="profileFollowLength">
+            <span class="switch-track" aria-hidden="true"></span>
+          </span>
+        </label>
       </div>
 
       <div class="field">

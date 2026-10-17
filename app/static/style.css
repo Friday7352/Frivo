@@ -3072,3 +3072,9 @@ button.srow:hover .srow-chevron { color: var(--ink-dim); }
   outline: 1px dashed var(--ink-faint);
   outline-offset: 2px;
 }
+
+/* NEW (1.5.0): an on/off row inside a modal field ("Follow reply length"). */
+.field > label.field-toggle { display: flex; align-items: center; gap: 16px; margin: 0; cursor: pointer; }
+.field-toggle-text { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.field-toggle-label { color: var(--ink); }
+.field-toggle .switch { flex: none; }

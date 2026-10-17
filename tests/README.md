@@ -372,3 +372,28 @@ Run against the 1.4.x code, seven of these checks fail.
 - **Old settings:** profiles and settings saved as "flair" read as Echo.
 
 To mutation-check it, break the word check, the Mimic shortcut, the no-history rule or the "flair" alias in app.py. Each one makes the test fail.
+
+`test-response-styles.py` also checks **Follow reply length**. Long Echo and Mimic messages stop at the last whole sentence that fits, and a too-long first sentence is cut cleanly with a full stop. With the switch off, nothing is shortened. Profiles saved before the switch existed behave as they used to. New and edited profiles save the switch.
+
+## test-dictation-typing.py (1.5.0)
+
+`python3 tests/test-dictation-typing.py` drives the page in a real browser with Live (Evora) dictation, under the test's control. It checks that:
+
+- text typed while the mic is on isn't erased, and what you say afterwards goes after it;
+- typing over a preview means the finished words replace the preview, not add it twice;
+- a space you typed isn't doubled.
+
+Removing the `takeTypedText()` call, or the preview replacement in `commitDictated()`, makes it fail.
+
+## test-microphone-setting.py (1.5.0)
+
+`python3 tests/test-microphone-setting.py` runs the Settings microphone list in a real browser with fake microphones. It checks that:
+
+- a microphone you picked is still shown after a reload;
+- before the mic is allowed, while names are hidden, your saved choice is shown and can't be overwritten with a blank;
+- the list fills in by itself once the mic is allowed, and when Settings is opened;
+- a saved microphone that's gone is labelled as not connected, and dictation falls back to the default one.
+
+The test simulates hidden names by blanking what `enumerateDevices` returns, because headless Chromium's fake devices always show their names.
+
+`test-response-styles.py` now tests Clean up (`cleanup_stays_on_message`). Fixes and clarifications pass. Filler, pet names, new content and answers are caught.

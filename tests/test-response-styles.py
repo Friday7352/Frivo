@@ -1,20 +1,21 @@
 #!/usr/bin/env python3
-"""NEW (1.5.0): Response, Echo and Mimic do what they say.
+"""NEW (1.5.0): Reply, Clean up and Word for word do what they say.
 
-The old styles asked the model nicely not to reword things, and it didn't
-always listen. Now:
+On screen the styles are Reply / Clean up / Word for word; in settings,
+profiles and this file they are still "reply" / "echo" / "mimic".
 
-  * Mimic in English never calls the model — what you typed is what's said,
-    character for character, and it works with no OpenAI key at all. In
-    another language it's one literal translation at temperature 0, with no
-    personality and no earlier turns to drift from.
-  * Echo fixes spelling and grammar only. Its output is checked word by word
-    against what you typed (echo_keeps_words); if the model reworded
-    anything, it gets one more try with no personality, and if that rewords
-    too, your own words are used. Either way the reply is flagged.
-  * Echo and Mimic are never shortened to the length fader.
-  * Response (reply) works exactly as before.
-  * Settings and profiles saved with the old "flair" style read as Echo.
+  * Word for word ("mimic") in English never calls the model: what you typed
+    is what's said, and it works with no OpenAI key. In another language
+    it's one literal translation at temperature 0, with no personality and
+    no earlier turns.
+  * Clean up ("echo") fixes typos, misheard words and grammar and makes
+    garbled bits clear. Its output is checked (cleanup_stays_on_message):
+    filler, pet names, new content or an answer instead of your message are
+    caught; then it gets one more try with no personality, then your own
+    words are used, and the reply is flagged.
+  * Follow reply length: whole sentences that fit, or nothing shortened.
+  * Reply works exactly as before.
+  * Settings and profiles saved with the old "flair" style read as Clean up.
 
 The model is replaced with a script; nothing goes over the network.
 
@@ -85,35 +86,35 @@ def say(message, language="English", max_words=80, session="s1"):
 
 
 # --- the word check on its own ---------------------------------------------------
-print("--- Echo's word check ---")
+print("--- Clean up's check ---")
 allowed = [
     ("u coming?", "You coming?"),
     ("teh game is so laggy rn", "The game is SO laggy right now!"),
-    ("im heading out now", "I'm heading out now..."),
-    ("hey whats up", "Hey! What's up?"),
+    ("i ment teh thing wiht hte guy", "I meant the thing with the guy."),
+    ("can u tel him im runing late caus trafic", "Can you tell him I'm running late because of traffic?"),
+    ("lets go too the stor and by some milk", "Let's go to the store and buy some milk."),
+    ("the thing at the place was weird yesterday you know", "The thing at the place yesterday was weird, you know?"),
+    ("me want food now hungry", "I want food now, I'm hungry."),
+    ("my frend sed hi", "My friend said hi."),
+    ("i think we shud of left erlier", "I think we should have left earlier."),
     ("brb", "Be right back!"),
-    ("i going to store", "I am going to the store."),
-    ("thats alot of ppl", "That's a lot of people!"),
-    ("recieve the pakage", "Receive the package."),
-    ("their going to be late", "They're going to be late."),
-    ("yo what are we doing tonight", "Yo, what are we doing TONIGHT?"),
 ]
 for src, out in allowed:
-    check("allowed: %r -> %r" % (src, out), mod.echo_keeps_words(src, out))
+    check("allowed: %r -> %r" % (src, out), mod.cleanup_stays_on_message(src, out))
 caught = [
     ("im heading out now", "Alright, I'm off!"),
     ("i dont think thats a good idea", "Ugh, honestly, I don't think that's a good idea."),
     ("i dont think thats a good idea", "I don't think that's a good idea, darling."),
     ("can you grab me a drink", "Could you possibly fetch me a beverage?"),
-    ("this game is bad", "This game is terrible."),
     ("what time is it", "It is 5pm."),
+    ("where are you", "I am at home right now, chilling."),
     ("i love it", "I absolutely love it!"),
     ("good job", "Good job, champ!"),
-    ("ok", "Okay, sure."),
+    ("thanks", "Thanks so much, I really appreciate everything you do!"),
     ("hey", ""),
 ]
 for src, out in caught:
-    check("caught: %r -> %r" % (src, out), not mod.echo_keeps_words(src, out))
+    check("caught: %r -> %r" % (src, out), not mod.cleanup_stays_on_message(src, out))
 
 # --- Mimic -----------------------------------------------------------------------
 print()
@@ -168,7 +169,7 @@ check("and that try is used when it keeps the words", body.get("reply") == "I'm 
 check("and flagged", body.get("kept_exact") is True, body)
 
 setup("echo")
-script.extend(["Alright, I'm off!", "Heading off now!"])
+script.extend(["Alright, I'm off!", "Alright, I'm off, buddy!"])
 code, body = say("im heading out now")
 check("reworded twice: your own words, as typed", body.get("reply") == "im heading out now", body)
 check("and flagged", body.get("kept_exact") is True, body)
@@ -207,7 +208,7 @@ check("the default is Echo", mod.load_config.__globals__["DEFAULT_RESPONSE_STYLE
 mod.CFG["response_style"] = "flair"
 check("/api/settings reports an old 'flair' as Echo", client.get("/api/settings").get_json().get("response_style") == "echo")
 names = [s["name"] for s in client.get("/api/settings").get_json().get("response_styles", [])]
-check("the three choices are Response, Echo, Mimic", names == ["Response", "Echo", "Mimic"], names)
+check("the three choices are Reply, Clean up, Word for word", names == ["Reply", "Clean up", "Word for word"], names)
 with open(mod.PROFILES_PATH, "w", encoding="utf-8") as handle:
     json.dump([{"id": "p1", "name": "Old", "voice_id": "v", "response_style": "flair"}], handle)
 check("a profile saved as 'flair' loads as Echo", mod.load_profiles()[0]["response_style"] == "echo")
@@ -221,6 +222,73 @@ check("Echo: your personality shown separately", "hype" in prev["your_prompt"].l
 mod.CFG["response_style"] = "mimic"
 prev = client.get("/api/preview-prompt").get_json()
 check("Mimic: says nothing is sent in English", "nothing is sent" in prev["personality_source"], prev["personality_source"])
+
+# --- NEW (1.5.0): Follow reply length -------------------------------------------
+print()
+print("--- Follow reply length ---")
+fit = mod.fit_to_length
+t, cut = fit("I went to the store. Then I bought milk and eggs. After that I went home and slept.", 10)
+check("whole sentences kept while they fit", t == "I went to the store." and cut, t)
+t, cut = fit("So I was walking down the street with my friend and we saw this really weird dog barking", 12)
+check("one long sentence: cut at a word, no dangling 'the/and', ends with a full stop",
+      t.endswith(".") and t.split()[-1].rstrip(".").lower() not in mod._DANGLING_WORDS and len(t.split()) <= 12, t)
+check("short enough already: untouched", fit("hey whats up", 15) == ("hey whats up", False))
+t, cut = fit("今日はとても良い天気ですね。明日は雨が降るかもしれません。週末は晴れるでしょう。", 15, "Japanese")
+check("Japanese: whole sentences too", cut and t.endswith("。") and "週末" not in t, t)
+
+long_msg = "This is the first sentence I typed. " + "And then I just kept on going and going for ages. " * 10
+
+def make_profile(style, follow=None):
+    entry = {"id": "pf", "name": "P", "voice_id": "v", "response_style": style}
+    if follow is not None:
+        entry["follow_length"] = follow
+    with open(mod.PROFILES_PATH, "w", encoding="utf-8") as handle:
+        json.dump([entry], handle)
+
+def say_profile(message, max_words=15, language="English"):
+    res = client.post("/api/chat", json={"message": message, "language": language, "max_words": max_words,
+                                         "session_id": "pf", "profile_id": "pf"})
+    return res.get_json()
+
+setup("mimic")
+make_profile("mimic", True)
+body = say_profile(long_msg)
+check("Mimic, on: stops at the last whole sentence that fits", body.get("reply") == "This is the first sentence I typed.", body.get("reply"))
+check("and says it was shortened", body.get("repaired") is True)
+make_profile("mimic", False)
+check("Mimic, off: the whole message", say_profile(long_msg).get("reply") == long_msg.strip())
+make_profile("mimic")
+check("Mimic, saved before the switch existed: the whole message", say_profile(long_msg).get("reply") == long_msg.strip())
+
+setup("echo")
+make_profile("echo", True)
+script.append(long_msg.strip())
+body = say_profile(long_msg)
+check("Echo, on: whole sentences that fit, words unchanged", body.get("reply") == "This is the first sentence I typed.", body.get("reply"))
+
+setup("echo")
+make_profile("echo", True)
+script.append("Hola, soy yo. Y luego segui y segui durante mucho tiempo sin parar nunca jamas, de verdad, toda la noche entera.\n---EN---\nHi, it's me. And then...")
+body = say_profile("hi its me. and then i kept going for ages without ever stopping", max_words=15, language="Spanish")
+check("Echo in another language, on: shortened, and the stale translation dropped",
+      body.get("reply") == "Hola, soy yo." and body.get("english") == "", body)
+
+setup("reply")
+make_profile("reply", False)
+script.append("Sure thing.")
+say_profile("hello", max_words=15)
+check("Response, off: no limit sent to the model", calls and "%d words is the MAXIMUM" % mod.MAX_WORDS in calls[0]["messages"][0]["content"])
+setup("reply")
+make_profile("reply")
+script.append("Sure thing.")
+say_profile("hello", max_words=15)
+check("Response, saved before the switch existed: still follows the slider", calls and "15 words is the MAXIMUM" in calls[0]["messages"][0]["content"])
+
+made = client.post("/api/profiles", json={"name": "N", "voice_id": "v", "response_style": "echo", "follow_length": True}).get_json()
+check("a new profile saves the switch", made.get("profile", {}).get("follow_length") is True, made)
+pid = made["profile"]["id"]
+edited = client.put("/api/profiles/" + pid, json={"follow_length": False}).get_json()
+check("and editing changes it", edited.get("profile", {}).get("follow_length") is False, edited)
 
 print()
 if failures:
