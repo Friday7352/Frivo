@@ -68,14 +68,6 @@ if (-not $createdMutex) {
     exit
 }
 
-# NEW (updates): asked to close by the update watcher (Update-Watch.ps1)
-# just before setup replaces Frivo's files. Closing on request takes the
-# tray icon with it; being killed by setup leaves a ghost icon behind until
-# the taskbar repaints, which makes a working update look broken.
-$quitSignal = New-Object System.Threading.EventWaitHandle($false,
-    [System.Threading.EventResetMode]::ManualReset, 'Local\FrivoLauncherQuit')
-[void] $quitSignal.Reset()
-
 # ==================================================================
 # Settings
 # ==================================================================
@@ -83,7 +75,6 @@ $quitSignal = New-Object System.Threading.EventWaitHandle($false,
 $script:settings = @{
     closeAction = 'keep'    # keep | stop — what closing the window does
     openBrowser = $false    # open the dashboard once the server is up
-    lastUpdateNotice = ''   # NEW (updates): the update result already announced
 }
 
 function Read-LauncherSettings {
@@ -95,9 +86,6 @@ function Read-LauncherSettings {
         }
         if ($raw.PSObject.Properties['openBrowser']) {
             $script:settings.openBrowser = [bool] $raw.openBrowser
-        }
-        if ($raw.PSObject.Properties['lastUpdateNotice']) {   # NEW (updates)
-            $script:settings.lastUpdateNotice = [string] $raw.lastUpdateNotice
         }
     } catch { }
 }
@@ -668,33 +656,6 @@ function Show-Launcher {
     $form.TopMost = $false
 }
 
-function Show-UpdateResult {
-    <#
-        NEW (updates): after an in-app update the watcher starts a fresh
-        launcher in the tray. Say once what happened, so an update that
-        restarted Frivo while you were away does not go unexplained — and
-        so a failed one says why, in the one place still on screen when the
-        browser could not reconnect.
-    #>
-    try {
-        $programData = if ($env:ProgramData) { $env:ProgramData } else { 'C:\ProgramData' }
-        $path = [System.IO.Path]::Combine($programData, 'Frivo', 'Updates', 'status.json')
-        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return }
-        $s = [System.IO.File]::ReadAllText($path) | ConvertFrom-Json
-        $id = [string] $s.id
-        if (-not $id -or $id -eq $script:settings.lastUpdateNotice) { return }
-        if ([string] $s.state -notin @('done', 'failed')) { return }
-        $when = [DateTime]::Parse([string] $s.updated_utc).ToUniversalTime()
-        if (([DateTime]::UtcNow - $when).TotalMinutes -gt 15) { return }
-
-        $script:settings.lastUpdateNotice = $id
-        Save-LauncherSettings
-        $icon = if ([string] $s.state -eq 'done') { 'Info' } else { 'Warning' }
-        $title = if ([string] $s.state -eq 'done') { $AppName } else { ('{0} update did not finish' -f $AppName) }
-        $notify.ShowBalloonTip(6000, $title, [string] $s.message, [System.Windows.Forms.ToolTipIcon]::$icon)
-    } catch { }
-}
-
 function Update-Status {
     $up = Test-ServerUp
 
@@ -901,17 +862,6 @@ $timer.Add_Tick({
         [void] $showSignal.Reset()
         Show-Launcher
     }
-    # NEW (updates): an update is about to replace Frivo's files. Leave
-    # without stopping the server — setup stops it, and the watcher starts
-    # Frivo again afterwards.
-    if ($quitSignal.WaitOne(0)) {
-        [void] $quitSignal.Reset()
-        $script:quitting = $true
-        $timer.Stop()
-        $notify.Visible = $false
-        $form.Close()
-        [System.Windows.Forms.Application]::Exit()
-    }
 })
 $timer.Start()
 
@@ -921,7 +871,6 @@ $timer.Start()
 
 Start-Server
 Update-Status
-Show-UpdateResult   # NEW (updates)
 
 if ($Tray) {
     # Started at sign-in: no window, just the tray icon and the server.

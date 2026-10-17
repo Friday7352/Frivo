@@ -243,8 +243,3 @@ $out = Join-Path (Split-Path -Parent $here) 'dist\FrivoSetup.exe'
 Write-Host ''
 Write-Host ('Built: {0} (version {1})' -f $out, $version)
 Write-Host 'This single file is what you distribute.'
-# NEW (updates): what makes a build reach installed copies.
-Write-Host ''
-Write-Host 'To ship it as an in-app update: create a GitHub release tagged'
-Write-Host ('v{0} (not a pre-release) and attach this file as FrivoSetup.exe.' -f $version)
-Write-Host 'Installed copies offer it within six hours, or at once from Settings.'

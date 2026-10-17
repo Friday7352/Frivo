@@ -22,13 +22,6 @@ internal static class Program
         string script = null;
         string dataPath = null;
         string tray = null;
-        // NEW (updates): an in-app update runs setup as SYSTEM with no
-        // desktop. --silent passes -Silent to the script and never shows a
-        // message box: a box nobody can see would wait for ever, and setup
-        // with it. The script logs its own reason; the exit code says it
-        // failed. --action picks Install.ps1's -Action (Update for updates).
-        bool silent = false;
-        string action = null;
 
         for (var index = 0; index < args.Length; index++)
         {
@@ -39,17 +32,12 @@ internal static class Program
                 dataPath = args[++index];
             else if (string.Equals(argument, "--tray", StringComparison.OrdinalIgnoreCase))
                 tray = "true";
-            else if (string.Equals(argument, "--silent", StringComparison.OrdinalIgnoreCase))   // NEW (updates)
-                silent = true;
-            else if (string.Equals(argument, "--action", StringComparison.OrdinalIgnoreCase) && index + 1 < args.Length)   // NEW (updates)
-                action = args[++index];
         }
 
         if (string.IsNullOrWhiteSpace(script) || !File.Exists(script))
         {
-            if (!silent)
-                MessageBox.Show("Frivo's startup script could not be found.", "Frivo",
-                    MessageBoxButtons.OK, MessageBoxIcon.Error);
+            MessageBox.Show("Frivo's startup script could not be found.", "Frivo",
+                MessageBoxButtons.OK, MessageBoxIcon.Error);
             return 1;
         }
 
@@ -81,10 +69,6 @@ internal static class Program
                         powerShell.AddParameter("DataPath", dataPath);
                     if (tray != null)
                         powerShell.AddParameter("Tray");
-                    if (silent)   // NEW (updates)
-                        powerShell.AddParameter("Silent");
-                    if (!string.IsNullOrWhiteSpace(action))   // NEW (updates)
-                        powerShell.AddParameter("Action", action);
 
                     powerShell.Invoke();
                     if (powerShell.HadErrors)
@@ -92,8 +76,7 @@ internal static class Program
                         var message = "Frivo could not start.";
                         if (powerShell.Streams.Error.Count > 0)
                             message += "\r\n\r\n" + powerShell.Streams.Error[0].ToString();
-                        if (!silent)   // CHANGED (updates)
-                            MessageBox.Show(message, "Frivo", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        MessageBox.Show(message, "Frivo", MessageBoxButtons.OK, MessageBoxIcon.Error);
                         return 1;
                     }
                 }
@@ -102,9 +85,8 @@ internal static class Program
         }
         catch (Exception exception)
         {
-            if (!silent)   // CHANGED (updates)
-                MessageBox.Show("Frivo could not start.\r\n\r\n" + exception.Message,
-                    "Frivo", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            MessageBox.Show("Frivo could not start.\r\n\r\n" + exception.Message,
+                "Frivo", MessageBoxButtons.OK, MessageBoxIcon.Error);
             return 1;
         }
     }
