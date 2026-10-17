@@ -173,6 +173,13 @@ Check 'the task runs setup silently' ($worker -match '/VERYSILENT')
 Check 'the task downloads into the program folder, not a shared one' ($worker.Contains('[System.IO.Path]::Combine($InstallDir, ''updates'')'))
 Check 'the task resets its folder''s permissions before using it' ($worker.IndexOf('Initialize-FrivoUpdateFolder') -lt $worker.IndexOf('Read-FrivoUpdateRequest -Path'))
 
+# NEW (restart): when the watcher does not start Frivo again, the task does.
+Check 'the task makes sure Frivo is started again after setup stopped it' ($worker -match 'if \(\$status\.restart -and \$isSystem\)\s*\{\s*try \{ Restart-FrivoIfNeeded')
+Check 'as the person who asked, read from who owns the request file' ($worker.IndexOf('Get-RequestOwner -Path $RequestPath') -lt $worker.IndexOf('Remove-Item -LiteralPath $RequestPath'))
+Check 'in their own session, without a password (Interactive)' ($worker -match '-LogonType Interactive')
+Check 'and only when nothing from this install is running (not a port check)' ($worker -match 'function Restart-FrivoIfNeeded[\s\S]*Test-FrivoRunning' -and $worker -notmatch 'TcpClient')
+Check 'the one-off task is always removed' ($worker -match 'finally \{\s*try \{ Unregister-ScheduledTask -TaskName \$taskName')
+
 $install = Strip-PsComments (Read-Source 'installer/Install.ps1')
 foreach ($name in @('Frivo.Update.psm1', 'Update-Frivo.ps1', 'Update-Watch.ps1', 'update-policy.json')) {
     Check ('setup installs {0}' -f $name) ($install -match [regex]::Escape("'$name'"))

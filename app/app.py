@@ -3151,8 +3151,12 @@ def _spawn_update_watcher(request_id):
     powershell = os.path.join(root, "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
     args = [powershell, "-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden",
             "-File", os.path.join(_installer_dir(), "Update-Watch.ps1"), "-RequestId", request_id]
-    detached, new_group, breakaway = 0x00000008, 0x00000200, 0x01000000
-    for flags in (detached | new_group | breakaway, detached | new_group):
+    # CHANGED (restart): a hidden console (CREATE_NO_WINDOW), not none at all
+    # (DETACHED_PROCESS). Windows PowerShell is a console program, and started
+    # with no console it is not something to rely on. Either way the watcher
+    # outlives this process: Windows does not end children with their parent.
+    no_window, new_group, breakaway = 0x08000000, 0x00000200, 0x01000000
+    for flags in (no_window | new_group | breakaway, no_window | new_group):
         try:
             subprocess.Popen(args, creationflags=flags, close_fds=True, cwd=root,
                              stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,

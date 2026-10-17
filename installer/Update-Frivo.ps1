@@ -69,6 +69,7 @@ if (-not $createdMutex) {
     } catch [System.Threading.AbandonedMutexException] { }
 }
 
+$requestOwner = ''   # NEW (restart)
 $status = @{
     id       = ''
     state    = 'starting'
@@ -181,6 +182,89 @@ function Save-Installer {
     Move-Item -LiteralPath $partial -Destination $Target -Force
 }
 
+# NEW (restart): who asked for this update. request.json is created by the
+# Frivo server process, which runs as the signed-in user, so the file's owner
+# is that user. It is the account Frivo has to be started again as.
+function Get-RequestOwner {
+    param([string] $Path)
+    try { return [string] (Get-Acl -LiteralPath $Path).Owner } catch { return '' }
+}
+
+function Test-FrivoRunning {
+    <# Any Frivo server or launcher running from this install. #>
+    try {
+        $found = @(Get-CimInstance Win32_Process `
+            -Filter "Name = 'python.exe' OR Name = 'pythonw.exe' OR Name = 'FrivoHost.exe'" `
+            -ErrorAction Stop |
+            Where-Object { $_.ExecutablePath -and (Test-PathWithinDirectory -Path $_.ExecutablePath -Directory $InstallDir) })
+        return $found.Count -gt 0
+    } catch {
+        return $false
+    }
+}
+
+function Restart-FrivoIfNeeded {
+    <#
+        NEW (restart): the backup for Update-Watch.ps1.
+
+        Starting Frivo again is the watcher's job, because anything this
+        script starts would run as SYSTEM, invisibly, in the wrong account.
+        But when the watcher did not do it, nothing did, and Frivo stayed
+        stopped until someone went to that PC. So: give the watcher time,
+        then look. If nothing from this install is running, start Frivo
+        the way Windows sign-in does (Frivo.vbs -Tray), as the person who
+        asked for the update, in their own session, through a one-off
+        scheduled task. An Interactive task needs no password: it only runs
+        in a session that user already has open.
+
+        Only checks for a process, never for the port: a launcher that is
+        still starting would otherwise be started a second time, and a
+        second launcher opens the first one's window.
+    #>
+    param([string] $Owner)
+
+    $deadline = (Get-Date).AddSeconds(20)
+    while ((Get-Date) -lt $deadline) {
+        if (Test-FrivoRunning) {
+            Write-UpdaterLog 'Frivo is running again.'
+            return
+        }
+        Start-Sleep -Seconds 1
+    }
+
+    if (-not $Owner -or $Owner -match '^(NT AUTHORITY|BUILTIN)\\') {
+        Write-UpdaterLog ('Frivo did not start again, and the request has no user to start it as ({0}).' -f $Owner)
+        return
+    }
+    $shim = Join-Path $InstallDir 'Frivo.vbs'
+    if (-not (Test-Path -LiteralPath $shim -PathType Leaf)) {
+        Write-UpdaterLog ('Frivo did not start again, and {0} is missing.' -f $shim)
+        return
+    }
+
+    Write-UpdaterLog ('Frivo did not start again; starting it as {0}.' -f $Owner)
+    $taskName = 'Frivo Restart'
+    try {
+        $root = if ($env:SystemRoot) { $env:SystemRoot } else { 'C:\Windows' }
+        $action = New-ScheduledTaskAction -Execute ($root.TrimEnd('\') + '\System32\wscript.exe') `
+            -Argument ('"{0}" -Tray' -f $shim) -WorkingDirectory $InstallDir
+        $principal = New-ScheduledTaskPrincipal -UserId $Owner -LogonType Interactive -RunLevel Limited
+        Register-ScheduledTask -TaskName $taskName -Action $action -Principal $principal -Force | Out-Null
+        Start-ScheduledTask -TaskName $taskName
+        $deadline = (Get-Date).AddSeconds(30)
+        while ((Get-Date) -lt $deadline -and -not (Test-FrivoRunning)) { Start-Sleep -Seconds 1 }
+        if (Test-FrivoRunning) {
+            Write-UpdaterLog 'Started Frivo again.'
+        } else {
+            Write-UpdaterLog 'Asked Windows to start Frivo, but it is still not running. Is that user signed in?'
+        }
+    } catch {
+        Write-UpdaterLog ('Could not start Frivo again: ' + $_.Exception.Message)
+    } finally {
+        try { Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction Stop } catch { }
+    }
+}
+
 function Clear-Downloads {
     if (-not (Test-Path -LiteralPath $Downloads)) { return }
     Get-ChildItem -LiteralPath $Downloads -Force -ErrorAction SilentlyContinue |
@@ -199,6 +283,8 @@ try {
     }
 
     $request = Read-FrivoUpdateRequest -Path $RequestPath
+    $requestOwner = Get-RequestOwner -Path $RequestPath   # NEW (restart)
+    Write-UpdaterLog ('requested by ' + $requestOwner)
     Remove-Item -LiteralPath $RequestPath -Force -ErrorAction SilentlyContinue
     $status.id = $request.Id
     $status.version = $request.Version
@@ -291,5 +377,15 @@ try {
     Set-UpdateState 'failed' $message
 } finally {
     Clear-Downloads
+    # NEW (restart): setup stopped Frivo, so make sure something starts it.
+    # Run as SYSTEM only: run elevated by hand, the watcher and the person
+    # running it are the same account, and there is nobody else to start.
+    $isSystem = $false
+    try { $isSystem = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value -eq 'S-1-5-18' } catch { }
+    if ($status.restart -and $isSystem) {
+        try { Restart-FrivoIfNeeded -Owner $requestOwner } catch {
+            Write-UpdaterLog ('restart check failed: ' + $_.Exception.Message)
+        }
+    }
     try { $mutex.ReleaseMutex() } catch { }
 }
