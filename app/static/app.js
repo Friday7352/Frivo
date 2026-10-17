@@ -1513,6 +1513,13 @@ function addTurn(who, text, opts = {}) {
     flag.className = "turn-flag";
     flag.textContent = "Trimmed to last full sentence";
     stack.appendChild(flag);
+  } else if (opts.keptExact) {
+    // NEW (1.5.0): Echo tried to reword it, so your own words were used.
+    const flag = document.createElement("span");
+    flag.className = "turn-flag";
+    flag.textContent = "Kept to your words";
+    flag.title = "The model changed more than spelling and grammar, so Frivo used your wording instead.";
+    stack.appendChild(flag);
   }
 
   // Under the bubble, in the margin — present when you look for it, out of
@@ -1640,7 +1647,7 @@ async function loadSettings() {
       responseStyleRadios,
       responseStyles,
       "responseStyleSettings",
-      data.response_style || "flair",
+      data.response_style || "echo",  // CHANGED (1.5.0): Echo is the default
       handleSettingsResponseStyleChange
     );
   } else {
@@ -1751,7 +1758,7 @@ saveSettingsBtn.addEventListener("click", async () => {
     model: getModelValue(textModelList, textModelCustom, recommendedTextModel),
     translation_model: getModelValue(translationModelList, translationModelCustom, recommendedTranslationModel),
     system_prompt: systemPromptInput.value,
-    response_style: getRadioValue(responseStyleRadios, "flair"),
+    response_style: getRadioValue(responseStyleRadios, "echo"),
     personality_preset: personalityPresetSelect.value,
     max_words: parseInt(lengthSlider.value, 10),
     speaking_speed: speakingSpeedSlider ? parseInt(speakingSpeedSlider.value, 10) / 100 : 1,
@@ -3262,7 +3269,7 @@ function openModal(profile) {
     profileResponseStyleRadios,
     responseStyles,
     "responseStyleProfile",
-    profile ? (profile.response_style || "flair") : getRadioValue(responseStyleRadios, "flair"),
+    profile ? (profile.response_style || "echo") : getRadioValue(responseStyleRadios, "echo"),
     null
   );
   fillOptionList(
@@ -3347,7 +3354,7 @@ profileModalSave.addEventListener("click", async () => {
     voice_id: voiceId,
     voice_name: voiceName,
     system_prompt: systemPrompt,
-    response_style: getRadioValue(profileResponseStyleRadios, "flair"),
+    response_style: getRadioValue(profileResponseStyleRadios, "echo"),
     personality_preset: profilePersonalityPresetSelect.value,
     language: profileLanguageSelect.value,
   };
@@ -3412,7 +3419,8 @@ async function loadPromptPreview() {
   promptSource.textContent = `· ${data.source}`;
   promptYours.textContent = data.your_prompt;
   promptAppended.textContent = data.appended;
-  const styleLabels = { echo: "Exact echo", flair: "With personality", reply: "Reply" };
+  // CHANGED (1.5.0): Response, Echo, Mimic.
+  const styleLabels = { reply: "Response", echo: "Echo", mimic: "Mimic", flair: "Echo" };
   const styleLabel = styleLabels[data.response_style] || data.response_style;
   promptMeta.textContent =
     `${data.model} · ${data.language} · ${styleLabel} · ${data.personality_source} · ` +
@@ -5447,6 +5455,7 @@ async function send() {
       english: data.english,
       condensed: data.condensed,
       repaired: data.repaired,
+      keptExact: data.kept_exact,  // NEW (1.5.0)
       spoke: data.spoke,
       totalSeconds: data.total_seconds,
       textSeconds: data.text_seconds,

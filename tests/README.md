@@ -360,3 +360,15 @@ dictated message auto-sends again. Typed text on its own never
 auto-sends, and emptying the box clears the pause.
 
 Run against the 1.4.x code, seven of these checks fail.
+
+## test-response-styles.py (1.5.0)
+
+`python3 tests/test-response-styles.py` checks that Response, Echo and Mimic behave as described in `docs/RELEASE-1.5.0.md`. A script stands in for the model, so nothing goes over the network.
+
+- **Mimic:** in English, sends exactly what was typed, makes no model call, and needs no key. In another language, it makes one literal translation at temperature 0, with no personality or earlier turns sent.
+- **Echo's word check** (`echo_keeps_words`): spelling, grammar, shorthand and emphasis are allowed. Added words, removed words and synonyms are caught.
+- **Echo when the model rewords:** it retries once without the personality, then falls back to the text as typed. The reply is flagged either way.
+- **Length:** Echo and Mimic are never shortened.
+- **Old settings:** profiles and settings saved as "flair" read as Echo.
+
+To mutation-check it, break the word check, the Mimic shortcut, the no-history rule or the "flair" alias in app.py. Each one makes the test fail.
