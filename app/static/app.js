@@ -1461,7 +1461,12 @@ function addTurn(who, text, opts = {}) {
     const target = opts.targetWords ? ` / ${opts.targetWords} target` : "";
     // "0 credits" reads like a failure. Saying it wasn't spoken says the
     // same thing about the bill and also explains why there's no player.
-    const spent = opts.spoke === false ? "not spoken" : `${opts.charCount} credits`;
+    // CHANGED (1.5.0): a free voice (Kokoro, Windows) costs nothing, so the
+    // line says so instead of quoting what ElevenLabs would have charged.
+    const freeVoice = opts.voiceEngine && opts.voiceEngine !== "elevenlabs";
+    const spent = opts.spoke === false ? "not spoken"
+      : freeVoice ? "free voice"
+      : `${opts.credits != null ? opts.credits : opts.charCount} credits`;
     cost.textContent = `${opts.wordCount} words${target} · ${spent}`;
     meta.appendChild(cost);
   }
@@ -5735,6 +5740,8 @@ async function send() {
       repaired: data.repaired,
       keptExact: data.kept_exact,  // NEW (1.5.0)
       voiceEngineName: data.voice_engine_name,  // NEW (1.5.0)
+      voiceEngine: data.voice_engine,  // NEW (1.5.0)
+      credits: data.credits,  // NEW (1.5.0): what was actually billed
       spoke: data.spoke,
       totalSeconds: data.total_seconds,
       textSeconds: data.text_seconds,
