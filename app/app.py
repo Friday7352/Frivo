@@ -55,12 +55,14 @@ import re
 import signal
 import socket
 import struct
+import subprocess  # NEW (updates): schtasks and the relaunch watcher
 import sys
 import time
 import uuid
 import threading
 
-from flask import Flask, request, jsonify, render_template, send_from_directory
+from flask import Flask, request, jsonify, render_template, send_from_directory, redirect
+from urllib.parse import urlsplit
 import requests
 from openai import OpenAI
 
@@ -686,6 +688,13 @@ def load_config():
         # because it presses a virtual key in VRChat, which the other two
         # never do.
         "osc_unmute_on_send": False,
+        # NEW (updates): look for a newer Frivo a few seconds after starting
+        # and every six hours after that. Only ever shows a chip; installing
+        # is always a click.
+        "update_auto_check": True,
+        # NEW (updates): "Skip this version". The chip stays away until a
+        # release newer than this one comes out.
+        "update_skipped": "",
     }
     if os.path.exists(CONFIG_PATH):
         try:
@@ -1194,7 +1203,7 @@ def local_whisper_transcribe(file_tuple, language=None):
     return (response.json().get("text") or "").strip()
 
 
-def local_whisper_transcribe_verbose(file_tuple, want_speaker=True):
+def local_whisper_transcribe_verbose(file_tuple, want_speaker=True, listening_session=None):
     """
     As local_whisper_transcribe, but also returns the language Whisper
     detected. The listening panel wants that — knowing a segment came back
@@ -1206,7 +1215,7 @@ def local_whisper_transcribe_verbose(file_tuple, want_speaker=True):
         response = requests.post(
             f"{whisper_base_url()}/v1/audio/transcriptions",
             files={"file": (filename, audio_bytes, content_type)},
-            data={"speaker": "1" if want_speaker else "0"},
+            data={"speaker": "1" if want_speaker else "0", "listening_session": listening_session or ""},
             timeout=(LOCAL_CONNECT_TIMEOUT, LOCAL_READ_TIMEOUT),
         )
     response.raise_for_status()
@@ -1215,6 +1224,8 @@ def local_whisper_transcribe_verbose(file_tuple, want_speaker=True):
         (payload.get("text") or "").strip(),
         payload.get("language") or "",
         payload.get("speaker"),
+        payload.get("segments") or [],
+        payload.get("speaker_status") or {},
     )
 
 
@@ -1571,7 +1582,8 @@ def diagnose():
                        "responseStyleRadios", "personalityPresetSelect",
                        "dictateBtn", "micSelect", "dictationModeRadios",
                        "oscEnabledToggle", "oscMuteSyncToggle",
-                       "frivoscMicValue", "serviceStatus"]:
+                       "frivoscMicValue", "serviceStatus",
+                       "updateChip", "updateOverlay"]:   # NEW (updates)
             markers[marker] = marker in content
 
     js_path = os.path.join(BASE_DIR, "static", "app.js")
@@ -1580,7 +1592,8 @@ def diagnose():
         with open(js_path, "r", encoding="utf-8") as f:
             js = f.read()
         for marker in ["reportMissingElements", "buildAudioPlayer",
-                       "masterVolumeSlider", "fillLanguages", "fillOptionList"]:
+                       "masterVolumeSlider", "fillLanguages", "fillOptionList",
+                       "loadUpdates"]:   # NEW (updates)
             js_markers[marker] = marker in js
 
     try:
@@ -1602,6 +1615,11 @@ def diagnose():
         f"<tr><td>{k}</td><td>{'found' if v else 'MISSING'}</td></tr>" for k, v in js_markers.items()
     )
 
+    # NEW (updates): how this copy would install an update, if at all.
+    updater = update_support()
+    updater_mode = updater["mode"] or "unavailable"
+    updater_reason = updater["reason"]
+
     return f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>Frivo diagnostics</title></head>
 <body style="font-family:monospace;background:#16171c;color:#e6e2d8;padding:24px;line-height:1.6">
@@ -1613,6 +1631,7 @@ dark, the server is reachable from this device.</p>
 <p>Frivo version: <b>{APP_VERSION}</b><br>
 Asset version: <b>{asset_version()}</b><br>
 Server started: <b>{SERVER_STARTED}</b><br>
+Updates: <b>{updater_mode}</b> {updater_reason}<br>
 You requested this from: <b>{request.host}</b><br>
 Files load from: <b>{BASE_DIR or '(current directory)'}</b><br>
 Profiles on disk: <b>{profile_count}</b> {'' if profiles_ok else '(profiles.json is unreadable/corrupt)'}</p>
@@ -1841,51 +1860,6 @@ def local_status():
     })
 
 
-@app.route("/api/start-whisper", methods=["POST"])
-def start_whisper():
-    """
-    Runs the configured command to start the Whisper service remotely.
-
-    The command is read only from the locally saved configuration, never from
-    the request. It is empty by default.
-    """
-    command = (CFG.get("whisper_start_command") or "").strip()
-    if not command:
-        return jsonify({
-            "error": (
-                "No start command configured. Set one under "
-                "Settings -> Providers -> Evora start command."
-            )
-        }), 400
-
-    import subprocess
-
-    try:
-        result = subprocess.run(
-            command,
-            shell=True,
-            capture_output=True,
-            text=True,
-            # Bound execution time for external commands.
-            timeout=30,
-        )
-    except subprocess.TimeoutExpired:
-        return jsonify({"error": "Start command timed out after 30s."}), 504
-    except Exception as e:
-        return jsonify({"error": f"Couldn't run the start command: {e}"}), 500
-
-    output = (result.stdout or "").strip() or (result.stderr or "").strip()
-    log_server_event(f"Whisper start command exited {result.returncode}: {output[:400]}")
-
-    if result.returncode != 0:
-        return jsonify({
-            "error": f"Start command failed (exit {result.returncode}). {output[:300]}"
-        }), 502
-
-    # The client polls local-provider status while the service starts.
-    return jsonify({"ok": True, "message": output or "Start command sent."})
-
-
 @app.route("/api/provider-test", methods=["POST"])
 def provider_test():
     """
@@ -1969,6 +1943,66 @@ def translate_text(text, target_language):
         return text
 
 
+def group_listen_segments(segments):
+    """Build utterances per speaker, keeping recovered simultaneous tracks separate."""
+    rows = []
+    tracks = {}
+    for segment in sorted(segments, key=lambda item: (item.get("start", 0), item.get("end", 0))):
+        text = segment.get("text") or ""
+        if not text.strip():
+            continue
+        speaker = segment.get("speaker")
+        source = segment.get("source", "unknown")
+        voice_track = segment.get("voice_track")
+        key = (speaker.get("id") if speaker else (voice_track or {}).get("id", segment.get("track")),
+               source, segment.get("language"))
+        previous = tracks.get(key)
+        start, end = segment.get("start", 0), segment.get("end", 0)
+        if previous and start - previous["end"] <= 1.2 and (source == "separated" or previous is rows[-1]):
+            previous["original"] += text
+            previous["end"] = max(previous["end"], end)
+        else:
+            previous = {"original": text, "start": start, "end": end, "speaker": speaker,
+                        "source": source, "overlapping": bool(segment.get("overlapping")),
+                        "accepted": bool(segment.get("accepted")), "voice_track": voice_track,
+                        "detected_language": segment.get("language")}
+            rows.append(previous)
+            tracks[key] = previous
+    for row in rows:
+        row["original"] = row["original"].strip()
+    return rows
+
+
+@app.get("/api/evora-speaker-settings")
+def evora_speaker_settings():
+    base = whisper_base_url()
+    parsed = urlsplit(base)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password:
+        return "Set a valid Evora HTTP or HTTPS address in Frivo settings first.", 400
+    return redirect(base + "/speaker-settings")
+
+
+@app.route("/api/listen-session", methods=["POST", "DELETE"])
+def listen_session():
+    if resolve_provider("transcription_provider", TRANSCRIPTION_PROVIDERS) != "local_whisper":
+        return jsonify(listening_session=None, speaker_status={"state": "unavailable"})
+    try:
+        with EVORA_TRANSCRIPTION_LOCK:
+            if request.method == "POST":
+                response = requests.post(f"{whisper_base_url()}/v1/listening-sessions", timeout=LOCAL_CONNECT_TIMEOUT)
+            else:
+                data = request.get_json(silent=True) or {}
+                ident = data.get("listening_session", "")
+                if not isinstance(ident, str) or not re.fullmatch(r"[A-Za-z0-9_-]{20,64}", ident):
+                    return jsonify(error="Invalid listening session"), 400
+                response = requests.delete(f"{whisper_base_url()}/v1/listening-sessions/{ident}", timeout=LOCAL_CONNECT_TIMEOUT)
+        if response.status_code == 404:
+            return jsonify(error="Update Evora to 1.2.0 to use session speaker recognition."), 409
+        return jsonify(response.json()), response.status_code
+    except requests.RequestException:
+        return jsonify(error="Evora isn't reachable. Check its address and service status."), 502
+
+
 @app.route("/api/listen", methods=["POST"])
 def listen():
     """
@@ -2000,15 +2034,19 @@ def listen():
     original = ""
     detected = ""
     speaker = None
+    segments = []
+    speaker_status = {}
 
     try:
         if provider == "local_whisper":
             try:
-                original, detected, speaker = local_whisper_transcribe_verbose(
-                    file_tuple, want_speaker=not interim
+                original, detected, speaker, segments, speaker_status = local_whisper_transcribe_verbose(
+                    file_tuple, want_speaker=not interim, listening_session=request.form.get("listening_session")
                 )
             except Exception as e:
                 log_server_event(f"Listen: local Whisper unavailable ({e!r}).")
+                if isinstance(e, requests.HTTPError) and e.response is not None and e.response.status_code == 409:
+                    return jsonify(error="Speaker session expired. Stop and restart listening."), 409
                 if not fallback_allowed():
                     return jsonify({
                         "error": (
@@ -2045,18 +2083,24 @@ def listen():
     target_iso = language_iso(target_language)
     same_language = bool(detected) and bool(target_iso) and detected.lower() == target_iso
 
-    translate_seconds = 0.0
-    if same_language:
-        translated = original
-    else:
-        started = time.perf_counter()
-        translated = translate_text(original, target_language)
-        translate_seconds = time.perf_counter() - started
+    started = time.perf_counter()
+    rows = group_listen_segments(segments) if not interim else []
+    for row in rows:
+        row_language = row["detected_language"] or detected
+        row_same_language = bool(row_language) and bool(target_iso) and row_language.lower() == target_iso
+        row["text"] = row["original"] if row_same_language else translate_text(row["original"], target_language)
+        row["translated"] = row["text"] != row["original"]
+        row["detected_language"] = row_language
+    translated = (" ".join(row["text"] for row in rows) if rows else
+                  original if same_language else translate_text(original, target_language))
+    translate_seconds = time.perf_counter() - started
 
     return jsonify({
         "original": original,
         "text": translated,
         "speaker": speaker,
+        "segments": rows,
+        "speaker_status": speaker_status,
         "detected_language": detected,
         "target_language": target_language,
         # Drives whether the client shows the original underneath. False
@@ -2675,6 +2719,569 @@ def osc_chatbox():
     if not message_id:
         return jsonify({"error": "Nothing to send."}), 400
     return jsonify({"ok": True, "id": message_id, "delivery": "queued"})
+
+
+# ---------- Updates ----------
+# NEW (updates): Frivo updates itself the way Clearspace does — it reads the
+# releases on GitHub, offers a newer one, and installs it in one click; an
+# earlier one can be installed the same way to go back.
+#
+# This half only decides and asks. Installing needs administrator rights,
+# and the person clicking "Update now" is usually in a browser on another
+# machine, so the work is done by the "Frivo Updater" scheduled task that
+# setup registers (installer\Update-Frivo.ps1, running as SYSTEM). Frivo
+# writes the wanted version to %ProgramData%\Frivo\Updates\request.json and
+# starts the task; the task looks the version up on GitHub itself, checks
+# the download's fingerprint, runs FrivoSetup.exe silently and reports in
+# status.json. Update-Watch.ps1, started here as you, restarts Frivo after.
+#
+# What counts as an installable release, and how far back you may go, is
+# decided here for what the page offers and again by the task for what it
+# will actually run. Both read installer\update-policy.json and both are
+# checked against the same sample in tests/fixtures/github-releases.json,
+# so the two cannot quietly disagree.
+
+UPDATE_TASK_NAME = "Frivo Updater"
+UPDATE_FIRST_CHECK_SECONDS = 8
+UPDATE_ACTIVE_STATES = ("starting", "checking", "downloading", "verifying", "installing")
+# A request the task has not picked up in this long is reported as stuck.
+UPDATE_PICKUP_SECONDS = 120
+
+UPDATE_LOCK = threading.Lock()
+UPDATE_WAKE = threading.Event()
+UPDATE_STATE = {
+    "releases": None,      # installable releases, newest first, from the last check
+    "latest": None,        # the newest one when it is newer than this Frivo
+    "checked_at": None,    # time.time() of the last check that reached GitHub
+    "error": None,         # why the last check failed, if it did
+    "pending": None,       # the install this server last asked for
+    "support": None,       # (time, result) cache for update_support()
+}
+
+_VERSION_RE = re.compile(r"^[vV]?(\d{1,5})(?:\.(\d{1,5}))?(?:\.(\d{1,5}))?$")
+_SHA256_RE = re.compile(r"^sha256:([0-9a-fA-F]{64})$")
+
+
+def parse_version(text):
+    """"v1.4.0", "1.4" and "V2.0.1" are versions; "nightly" is not.
+
+    Always three parts, so 1.4 and 1.4.0 compare equal — the same rule as
+    ConvertTo-FrivoVersion in Frivo.Update.psm1.
+    """
+    if not isinstance(text, str):
+        return None
+    match = _VERSION_RE.match(text.strip())
+    if not match:
+        return None
+    return tuple(int(part) if part else 0 for part in match.groups())
+
+
+def version_text(version):
+    return "%d.%d.%d" % tuple(version)
+
+
+def update_policy_path():
+    """installer\\update-policy.json: beside app.py's installer folder when
+    installed, one level up in the repository."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    for candidate in (os.path.join(here, "installer", "update-policy.json"),
+                      os.path.join(os.path.dirname(here), "installer", "update-policy.json")):
+        if os.path.exists(candidate):
+            return candidate
+    return None
+
+
+def load_update_policy(path=None):
+    """The repository, installer name and oldest version to go back to.
+    None when the file is missing or wrong — an updater that cannot say
+    where updates come from must not guess."""
+    path = path or update_policy_path()
+    if not path:
+        return None
+    try:
+        with open(path, "r", encoding="utf-8-sig") as handle:
+            raw = json.load(handle)
+    except (OSError, ValueError):
+        return None
+    repository = str(raw.get("repository") or "")
+    asset = str(raw.get("asset") or "")
+    oldest = parse_version(str(raw.get("oldest_rollback") or ""))
+    if not re.match(r"^[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*$", repository):
+        return None
+    if not re.match(r"^[A-Za-z0-9][A-Za-z0-9_.-]*\.exe$", asset):
+        return None
+    if not oldest:
+        return None
+    try:
+        hours = float(raw.get("check_hours", 6))
+    except (TypeError, ValueError):
+        hours = 6.0
+    return {
+        "repository": repository,
+        "asset": asset,
+        "oldest_rollback": oldest,
+        "check_seconds": max(1.0, hours) * 3600,
+        "releases_api": "https://api.github.com/repos/%s/releases?per_page=50" % repository,
+        "releases_page": "https://github.com/%s/releases" % repository,
+        "download_prefix": "https://github.com/%s/releases/download/" % repository,
+    }
+
+
+def parse_release(release, policy):
+    """One release as GitHub describes it, or None when it is not something
+    Frivo can install: a draft or pre-release, a tag that is not a version,
+    or no installer from this repository. Mirrors ConvertFrom-FrivoRelease."""
+    if not isinstance(release, dict):
+        return None
+    if release.get("draft") is True or release.get("prerelease") is True:
+        return None
+    tag = str(release.get("tag_name") or "")
+    version = parse_version(tag)
+    if not version:
+        return None
+    for asset in release.get("assets") or []:
+        if not isinstance(asset, dict):
+            continue
+        if str(asset.get("name") or "").lower() != policy["asset"].lower():
+            continue
+        url = str(asset.get("browser_download_url") or "")
+        if not url.lower().startswith(policy["download_prefix"].lower()):
+            return None
+        try:
+            size = int(asset.get("size") or 0)
+        except (TypeError, ValueError):
+            size = 0
+        digest = _SHA256_RE.match(str(asset.get("digest") or ""))
+        page = str(release.get("html_url") or "")
+        if not page.lower().startswith(policy["releases_page"].lower()):
+            page = policy["releases_page"]
+        return {
+            "version": version_text(version),
+            "tag": tag,
+            "notes": str(release.get("body") or ""),
+            "page_url": page,
+            "download_url": url,
+            "size": size,
+            "sha256": digest.group(1).lower() if digest else None,
+            "published": str(release.get("published_at") or ""),
+        }
+    return None
+
+
+def parse_release_list(data, policy):
+    """Installable releases, newest first, each version once."""
+    found, seen = [], set()
+    for release in data if isinstance(data, list) else []:
+        info = parse_release(release, policy)
+        if not info or info["version"] in seen:
+            continue
+        seen.add(info["version"])
+        found.append(info)
+    found.sort(key=lambda r: parse_version(r["version"]), reverse=True)
+    return found
+
+
+def fetch_releases(policy):
+    response = requests.get(
+        policy["releases_api"],
+        headers={"User-Agent": "Frivo/%s" % APP_VERSION, "Accept": "application/vnd.github+json"},
+        timeout=20,
+    )
+    if response.status_code == 404:
+        return []   # nothing released yet
+    response.raise_for_status()
+    return parse_release_list(response.json(), policy)
+
+
+def earlier_releases(releases, current, policy):
+    """Older than this Frivo, but not older than the oldest version that can
+    update itself — going further back would leave no way back up."""
+    floor = policy["oldest_rollback"]
+    return [r for r in releases
+            if floor <= parse_version(r["version"]) < current]
+
+
+def check_install_target(releases, wanted, current, policy):
+    """The release to install, or raises ValueError with a reason someone
+    can act on. Same rules, in the same order, as Select-FrivoUpdateTarget
+    with -RequireFingerprint — which the task applies again regardless."""
+    match = next((r for r in releases if r["version"] == version_text(wanted)), None)
+    if not match:
+        raise ValueError("Frivo %s is not a release on GitHub that has %s attached."
+                         % (version_text(wanted), policy["asset"]))
+    if wanted == current:
+        raise ValueError("Frivo %s is already installed." % version_text(wanted))
+    if wanted < policy["oldest_rollback"]:
+        raise ValueError("Frivo %s is older than %s, the oldest version that can update "
+                         "itself, so it cannot be installed from here."
+                         % (version_text(wanted), version_text(policy["oldest_rollback"])))
+    if not match["sha256"]:
+        raise ValueError("GitHub publishes no SHA-256 fingerprint for %s in Frivo %s, so it "
+                         "cannot be checked and will not be installed."
+                         % (policy["asset"], version_text(wanted)))
+    return match
+
+
+def update_folder():
+    root = os.environ.get("ProgramData") or r"C:\ProgramData"
+    return os.path.join(root, "Frivo", "Updates")
+
+
+def _installer_dir():
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "installer")
+
+
+def _hidden_run(args, timeout=15):
+    flags = 0x08000000 if os.name == "nt" else 0   # CREATE_NO_WINDOW
+    return subprocess.run(args, capture_output=True, text=True, timeout=timeout, creationflags=flags)
+
+
+def update_support(refresh=False):
+    """Can this copy install updates, and how.
+
+      task      the "Frivo Updater" task exists: no prompt, works from any device
+      elevate   no task (setup could not register it): Windows asks for
+                permission on the PC Frivo runs on, each time
+
+    Cached for a minute — it costs a schtasks call.
+    """
+    with UPDATE_LOCK:
+        cached = UPDATE_STATE["support"]
+    if cached and not refresh and time.time() - cached[0] < 60:
+        return cached[1]
+
+    here = os.path.dirname(os.path.abspath(__file__))
+    if os.name != "nt":
+        result = {"ok": False, "mode": None,
+                  "reason": "Frivo installs updates on Windows only."}
+    elif not os.path.exists(os.path.join(here, ".frivo-install.json")):
+        result = {"ok": False, "mode": None,
+                  "reason": "This copy of Frivo runs from its source folder, so it can't "
+                            "update itself. Install it with FrivoSetup.exe for in-app updates."}
+    elif not os.path.exists(os.path.join(_installer_dir(), "Update-Frivo.ps1")):
+        result = {"ok": False, "mode": None,
+                  "reason": "The updater is missing from this install. Run FrivoSetup.exe "
+                            "once to repair it."}
+    else:
+        try:
+            found = _hidden_run(["schtasks", "/query", "/tn", UPDATE_TASK_NAME]).returncode == 0
+        except Exception:
+            found = False
+        if found:
+            result = {"ok": True, "mode": "task", "reason": ""}
+        else:
+            result = {"ok": True, "mode": "elevate",
+                      "reason": "Windows will ask for administrator permission on the PC "
+                                "Frivo runs on. Run FrivoSetup.exe once to stop it asking."}
+    with UPDATE_LOCK:
+        UPDATE_STATE["support"] = (time.time(), result)
+    return result
+
+
+def read_update_job():
+    """status.json, as the task last wrote it. None when there is none."""
+    try:
+        with open(os.path.join(update_folder(), "status.json"), "r", encoding="utf-8-sig") as handle:
+            job = json.load(handle)
+        return job if isinstance(job, dict) else None
+    except (OSError, ValueError):
+        return None
+
+
+def check_for_updates():
+    """Asks GitHub. Never raises: a failed check is recorded, not thrown —
+    being offline is not news."""
+    policy = load_update_policy()
+    if not policy:
+        with UPDATE_LOCK:
+            UPDATE_STATE["error"] = "The update policy file is missing from this copy of Frivo."
+        return
+    current = parse_version(APP_VERSION) or (0, 0, 0)
+    try:
+        releases = fetch_releases(policy)
+    except Exception as exc:
+        log_server_event("update check failed: %r" % (exc,))
+        with UPDATE_LOCK:
+            UPDATE_STATE["error"] = "GitHub couldn't be reached to look for a newer version."
+        return
+    newest = releases[0] if releases else None
+    with UPDATE_LOCK:
+        UPDATE_STATE["releases"] = releases
+        UPDATE_STATE["latest"] = (newest if newest and parse_version(newest["version"]) > current
+                                  else None)
+        UPDATE_STATE["checked_at"] = time.time()
+        UPDATE_STATE["error"] = None
+
+
+def _public_release(r):
+    if not r:
+        return None
+    return {k: r[k] for k in ("version", "notes", "page_url", "size", "published")} | {
+        "verifiable": bool(r.get("sha256"))}
+
+
+def update_payload():
+    policy = load_update_policy()
+    with UPDATE_LOCK:
+        latest = UPDATE_STATE["latest"]
+        checked_at = UPDATE_STATE["checked_at"]
+        error = UPDATE_STATE["error"]
+        pending = dict(UPDATE_STATE["pending"]) if UPDATE_STATE["pending"] else None
+    skipped = str(CFG.get("update_skipped") or "")
+    notify = latest if latest and latest["version"] != skipped else None
+    return {
+        "current": APP_VERSION,
+        "latest": _public_release(latest),
+        "notify": _public_release(notify),
+        "checked_at": checked_at,
+        "error": error,
+        "auto_check": bool(CFG.get("update_auto_check", True)),
+        "skipped": skipped,
+        "oldest_rollback": version_text(policy["oldest_rollback"]) if policy else None,
+        "releases_page": policy["releases_page"] if policy else None,
+        "support": update_support(),
+        "job": update_job_view(pending),
+    }
+
+
+def update_job_view(pending=None):
+    """What the browser shows while an install it asked for runs: the task's
+    own status once it has picked the request up, "queued" before that."""
+    if pending is None:
+        with UPDATE_LOCK:
+            pending = dict(UPDATE_STATE["pending"]) if UPDATE_STATE["pending"] else None
+    if not pending:
+        return None
+    job = read_update_job()
+    if job and job.get("id") == pending["id"]:
+        view = {k: job.get(k) for k in ("state", "message", "version", "from", "kind",
+                                        "received", "total", "restart")}
+    else:
+        waited = time.time() - pending["requested_at"]
+        if pending.get("error"):
+            view = {"state": "failed", "message": pending["error"], "restart": False}
+        elif waited > UPDATE_PICKUP_SECONDS:
+            view = {"state": "failed", "restart": False,
+                    "message": "The updater did not start. Check that the \"%s\" task exists "
+                               "in Task Scheduler, or run FrivoSetup.exe once to set it up."
+                               % UPDATE_TASK_NAME}
+        else:
+            view = {"state": "queued", "message": "Starting the updater.", "restart": False}
+    view["id"] = pending["id"]
+    view["target"] = pending["version"]
+    view["mode"] = pending["mode"]
+    return view
+
+
+def _spawn_update_watcher(request_id):
+    """Update-Watch.ps1, detached, as you: it starts Frivo again after setup
+    has stopped it. Detached, so it outlives this process — which is exactly
+    what setup is about to end."""
+    root = os.environ.get("SystemRoot") or r"C:\Windows"
+    powershell = os.path.join(root, "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
+    args = [powershell, "-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden",
+            "-File", os.path.join(_installer_dir(), "Update-Watch.ps1"), "-RequestId", request_id]
+    detached, new_group, breakaway = 0x00000008, 0x00000200, 0x01000000
+    for flags in (detached | new_group | breakaway, detached | new_group):
+        try:
+            subprocess.Popen(args, creationflags=flags, close_fds=True, cwd=root,
+                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL)
+            return
+        except OSError:
+            continue   # not allowed to break away from a job; try without
+
+
+def _start_update_task(mode):
+    """Starts the updater. Returns None, or why it could not be started.
+
+    The task route needs nothing from anyone. When the task cannot be
+    started (missing, or this account was not allowed to), Windows is asked
+    to run the updater elevated instead — which shows a permission prompt
+    on this PC, so it is only the fallback.
+    """
+    if mode == "task":
+        try:
+            if _hidden_run(["schtasks", "/run", "/tn", UPDATE_TASK_NAME]).returncode == 0:
+                return None
+        except Exception:
+            pass
+    try:
+        import ctypes
+
+        root = os.environ.get("SystemRoot") or r"C:\Windows"
+        powershell = os.path.join(root, "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
+        params = ('-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File "%s"'
+                  % os.path.join(_installer_dir(), "Update-Frivo.ps1"))
+        # Returns once the prompt is answered: above 32 means it started.
+        code = ctypes.windll.shell32.ShellExecuteW(None, "runas", powershell, params,
+                                                   _installer_dir(), 0)
+        if code > 32:
+            return None
+        return "Windows did not give the updater permission to run."
+    except Exception as exc:
+        return "The updater could not be started: %s" % (exc,)
+
+
+def _write_update_request(request_id, version):
+    """request.json, written whole and then moved into place, so the task
+    never reads half of one."""
+    folder = update_folder()
+    target = os.path.join(folder, "request.json")
+    temp = os.path.join(folder, ".request-%s.tmp" % request_id)
+    with open(temp, "w", encoding="utf-8") as handle:
+        json.dump({"id": request_id, "version": version,
+                   "requested_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}, handle)
+    os.replace(temp, target)
+
+
+def update_checker_loop():
+    """The automatic check: a few seconds after Frivo starts, then every
+    check_hours (6) while it runs, unless switched off in Settings. Quiet
+    on purpose — a newer version only shows as a chip in the sidebar."""
+    if UPDATE_WAKE.wait(UPDATE_FIRST_CHECK_SECONDS):
+        UPDATE_WAKE.clear()
+    while True:
+        policy = load_update_policy()
+        if CFG.get("update_auto_check", True):
+            check_for_updates()
+        interval = policy["check_seconds"] if policy else 6 * 3600
+        if UPDATE_WAKE.wait(interval):
+            UPDATE_WAKE.clear()
+
+
+def start_update_checker():
+    threading.Thread(target=update_checker_loop, name="update-check", daemon=True).start()
+
+
+@app.route("/api/updates")
+def updates_status():
+    return jsonify(update_payload())
+
+
+@app.route("/api/updates/check", methods=["POST"])
+def updates_check():
+    """Settings > Check for updates: checks now and answers with what it found."""
+    check_for_updates()
+    return jsonify(update_payload())
+
+
+@app.route("/api/updates/earlier")
+def updates_earlier():
+    """The releases you can go back to, newest first. Asks GitHub when the
+    last check is more than ten minutes old."""
+    policy = load_update_policy()
+    if not policy:
+        return jsonify({"error": "The update policy file is missing from this copy of Frivo."}), 500
+    with UPDATE_LOCK:
+        releases = UPDATE_STATE["releases"]
+        checked_at = UPDATE_STATE["checked_at"] or 0
+    if releases is None or time.time() - checked_at > 600:
+        check_for_updates()
+        with UPDATE_LOCK:
+            releases = UPDATE_STATE["releases"]
+            error = UPDATE_STATE["error"]
+        if releases is None:
+            return jsonify({"error": error or "GitHub couldn't be reached."}), 502
+    current = parse_version(APP_VERSION) or (0, 0, 0)
+    return jsonify({
+        "current": APP_VERSION,
+        "oldest_rollback": version_text(policy["oldest_rollback"]),
+        "releases": [_public_release(r) for r in earlier_releases(releases, current, policy)],
+    })
+
+
+@app.route("/api/updates/settings", methods=["POST"])
+def updates_settings():
+    """Saves itself, like the FrivOSC switches: these controls do not wait
+    for the Settings sheet's Save button. Touches only its own two keys."""
+    data = request.get_json(silent=True) or {}
+    if "auto_check" in data:
+        CFG["update_auto_check"] = bool(data.get("auto_check"))
+        if CFG["update_auto_check"]:
+            UPDATE_WAKE.set()   # check now rather than in up to six hours
+    if "skip" in data:
+        skip = parse_version(str(data.get("skip") or ""))
+        CFG["update_skipped"] = version_text(skip) if skip else ""
+    save_config(CFG)
+    return jsonify(update_payload())
+
+
+@app.route("/api/updates/install", methods=["POST"])
+def updates_install():
+    """Install a release: newer to update, older (not below
+    oldest_rollback) to go back. Answers as soon as the updater is asked;
+    the browser follows along through /api/updates/job."""
+    data = request.get_json(silent=True) or {}
+    wanted = parse_version(str(data.get("version") or ""))
+    if not wanted:
+        return jsonify({"error": "Choose a version to install."}), 400
+
+    support = update_support(refresh=True)
+    if not support["ok"]:
+        return jsonify({"error": support["reason"]}), 409
+
+    policy = load_update_policy()
+    if not policy:
+        return jsonify({"error": "The update policy file is missing from this copy of Frivo."}), 500
+
+    # Looked up fresh rather than from the last automatic check: a release
+    # can be edited or deleted on GitHub in six hours.
+    try:
+        releases = fetch_releases(policy)
+    except Exception:
+        return jsonify({"error": "GitHub couldn't be reached. Check the internet connection on "
+                                 "the PC Frivo runs on, and try again."}), 502
+    current = parse_version(APP_VERSION) or (0, 0, 0)
+    try:
+        release = check_install_target(releases, wanted, current, policy)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 409
+
+    with UPDATE_LOCK:
+        pending = UPDATE_STATE["pending"]
+    if pending:
+        view = update_job_view(pending)
+        if view and view.get("state") in UPDATE_ACTIVE_STATES + ("queued",):
+            return jsonify({"error": "An update is already running."}), 409
+
+    request_id = uuid.uuid4().hex
+    try:
+        _write_update_request(request_id, release["version"])
+    except OSError as exc:
+        log_server_event("update request could not be written: %r" % (exc,))
+        return jsonify({"error": "Frivo couldn't hand the request to the updater. Run "
+                                 "FrivoSetup.exe once to repair the update folder."}), 500
+
+    kind = "update" if wanted > current else "rollback"
+    with UPDATE_LOCK:
+        UPDATE_STATE["pending"] = {"id": request_id, "version": release["version"], "kind": kind,
+                                   "mode": support["mode"], "requested_at": time.time(),
+                                   "error": None}
+    log_server_event("%s to %s requested (%s)" % (kind, release["version"], support["mode"]))
+
+    _spawn_update_watcher(request_id)
+
+    def start():
+        problem = _start_update_task(support["mode"])
+        if problem:
+            log_server_event("updater did not start: " + problem)
+            with UPDATE_LOCK:
+                if UPDATE_STATE["pending"] and UPDATE_STATE["pending"]["id"] == request_id:
+                    UPDATE_STATE["pending"]["error"] = problem
+
+    # The elevated route waits on a permission prompt; the request must not.
+    threading.Thread(target=start, name="update-start", daemon=True).start()
+    return jsonify({"ok": True, "id": request_id, "version": release["version"], "kind": kind,
+                    "mode": support["mode"]})
+
+
+@app.route("/api/updates/job")
+def updates_job():
+    """Polled while an install runs. Small on purpose, and answers "which
+    version is running" — the page knows the update landed when this says
+    the version it asked for."""
+    return jsonify({"current": APP_VERSION, "job": update_job_view()})
 
 
 @app.route("/api/profiles", methods=["GET", "POST"])
@@ -3445,6 +4052,10 @@ def serve(host, port, cert_path, key_path):
     runs; it just prints how to make it good.
     """
     global SERVER_BACKEND
+
+    # NEW (updates): only a running server checks for updates — importing
+    # app.py (the tests do) must not start talking to GitHub.
+    start_update_checker()
 
     try:
         import cheroot

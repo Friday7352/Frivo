@@ -1,0 +1,182 @@
+[
+  {
+    "tag_name": "v1.5.0",
+    "draft": false,
+    "prerelease": false,
+    "html_url": "https://github.com/Friday7352/Frivo/releases/tag/v1.5.0",
+    "published_at": "2026-10-12T18:00:00Z",
+    "body": "## What's new\r\n\r\n- **Updates** install from inside Frivo\r\n- Go back to an `earlier` version\r\n\r\n\r\n### Fixes\r\n* Chip no longer flickers\r\n",
+    "assets": [
+      {
+        "name": "FrivoSetup.exe",
+        "browser_download_url": "https://github.com/Friday7352/Frivo/releases/download/v1.5.0/FrivoSetup.exe",
+        "size": 2275000,
+        "digest": "sha256:BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+      },
+      {
+        "name": "Source.zip",
+        "browser_download_url": "https://github.com/Friday7352/Frivo/releases/download/v1.5.0/Source.zip",
+        "size": 10
+      }
+    ]
+  },
+  {
+    "tag_name": "v1.4.1",
+    "draft": false,
+    "prerelease": true,
+    "html_url": "https://github.com/Friday7352/Frivo/releases/tag/v1.4.1",
+    "published_at": "2026-10-05T18:00:00Z",
+    "body": "pre",
+    "assets": [
+      {
+        "name": "FrivoSetup.exe",
+        "browser_download_url": "https://github.com/Friday7352/Frivo/releases/download/v1.4.1/FrivoSetup.exe",
+        "size": 2275000,
+        "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    ]
+  },
+  {
+    "tag_name": "v1.6.0",
+    "draft": true,
+    "prerelease": false,
+    "html_url": "https://github.com/Friday7352/Frivo/releases/tag/v1.6.0",
+    "published_at": "",
+    "body": "draft",
+    "assets": [
+      {
+        "name": "FrivoSetup.exe",
+        "browser_download_url": "https://github.com/Friday7352/Frivo/releases/download/v1.6.0/FrivoSetup.exe",
+        "size": 2275000,
+        "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    ]
+  },
+  {
+    "tag_name": "nightly",
+    "draft": false,
+    "prerelease": false,
+    "html_url": "https://github.com/Friday7352/Frivo/releases/tag/nightly",
+    "published_at": "2026-10-01T00:00:00Z",
+    "body": "",
+    "assets": [
+      {
+        "name": "FrivoSetup.exe",
+        "browser_download_url": "https://github.com/Friday7352/Frivo/releases/download/nightly/FrivoSetup.exe",
+        "size": 2275000,
+        "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    ]
+  },
+  {
+    "tag_name": "v1.4.2",
+    "draft": false,
+    "prerelease": false,
+    "html_url": "https://github.com/Friday7352/Frivo/releases/tag/v1.4.2",
+    "published_at": "2026-10-03T00:00:00Z",
+    "body": "elsewhere",
+    "assets": [
+      {
+        "name": "FrivoSetup.exe",
+        "browser_download_url": "https://github.com/someone-else/Frivo/releases/download/v1.4.2/FrivoSetup.exe",
+        "size": 2275000,
+        "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    ]
+  },
+  {
+    "tag_name": "v1.4.5",
+    "draft": false,
+    "prerelease": false,
+    "html_url": "https://example.com/not-github",
+    "published_at": "2026-10-08T00:00:00Z",
+    "body": "no digest",
+    "assets": [
+      {
+        "name": "FrivoSetup.exe",
+        "browser_download_url": "https://github.com/Friday7352/Frivo/releases/download/v1.4.5/FrivoSetup.exe",
+        "size": 2100000
+      }
+    ]
+  },
+  {
+    "tag_name": "V1.4",
+    "draft": false,
+    "prerelease": false,
+    "html_url": "https://github.com/Friday7352/Frivo/releases/tag/V1.4",
+    "published_at": "2026-09-20T00:00:00Z",
+    "body": "1.4 as two parts",
+    "assets": [
+      {
+        "name": "frivosetup.EXE",
+        "browser_download_url": "https://github.com/Friday7352/Frivo/releases/download/V1.4/frivosetup.EXE",
+        "size": 2200000,
+        "digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      }
+    ]
+  },
+  {
+    "tag_name": "v1.5.0",
+    "draft": false,
+    "prerelease": false,
+    "html_url": "https://github.com/Friday7352/Frivo/releases/tag/v1.5.0-again",
+    "published_at": "2026-10-01T00:00:00Z",
+    "body": "duplicate \u2014 must lose",
+    "assets": [
+      {
+        "name": "FrivoSetup.exe",
+        "browser_download_url": "https://github.com/Friday7352/Frivo/releases/download/v1.5.0/FrivoSetup.exe",
+        "size": 2275000,
+        "digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      }
+    ]
+  },
+  {
+    "tag_name": "v1.3.0",
+    "draft": false,
+    "prerelease": false,
+    "html_url": "https://github.com/Friday7352/Frivo/releases/tag/v1.3.0",
+    "published_at": "2026-09-16T00:00:00Z",
+    "body": "before the updater",
+    "assets": [
+      {
+        "name": "FrivoSetup.exe",
+        "browser_download_url": "https://github.com/Friday7352/Frivo/releases/download/v1.3.0/FrivoSetup.exe",
+        "size": 2275000,
+        "digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      }
+    ]
+  },
+  {
+    "tag_name": "v1.2.0",
+    "draft": false,
+    "prerelease": false,
+    "html_url": "https://github.com/Friday7352/Frivo/releases/tag/v1.2.0",
+    "published_at": "2026-08-26T00:00:00Z",
+    "body": "no installer",
+    "assets": [
+      {
+        "name": "Frivo.zip",
+        "browser_download_url": "https://github.com/Friday7352/Frivo/releases/download/v1.2.0/Frivo.zip",
+        "size": 5
+      }
+    ]
+  },
+  {
+    "tag_name": "v1.1.0",
+    "draft": false,
+    "prerelease": false,
+    "html_url": "https://github.com/Friday7352/Frivo/releases/tag/v1.1.0",
+    "published_at": "2026-08-18T00:00:00Z",
+    "body": "bad digest",
+    "assets": [
+      {
+        "name": "FrivoSetup.exe",
+        "browser_download_url": "https://github.com/Friday7352/Frivo/releases/download/v1.1.0/FrivoSetup.exe",
+        "size": 2275000,
+        "digest": "md5:1234"
+      }
+    ]
+  },
+  "not an object"
+]

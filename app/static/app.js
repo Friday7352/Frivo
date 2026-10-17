@@ -1722,6 +1722,12 @@ document.addEventListener("keydown", (e) => {
   // The profile editor sits on top of Settings, so it gets first refusal on
   // Escape — closing the sheet underneath an open dialog would be wrong.
   if (!overlay.classList.contains("is-hidden")) return;
+  // NEW (updates): so does the update dialog, even when focus has wandered
+  // out of it.
+  if (typeof updateDialogIsOpen === "function" && updateDialogIsOpen()) {
+    closeUpdateDialog();
+    return;
+  }
   if (settingsPanel.classList.contains("is-hidden")) return;
   // One level at a time: a sub-page closes back to the list, and only the
   // list closes Settings itself.
@@ -4254,6 +4260,7 @@ if (listenLiveToggle) {
 }
 
 let listening = null;
+let activeListenSession = null;
 let listenEntrySeq = 0;
 
 // The slider is 1-120; RMS in practice sits well under 0.25 even for loud
@@ -4283,10 +4290,15 @@ function updateSpeakerCount() {
   if (!listenPeopleCount || !listenLog) return;
   const ids = new Set();
   listenLog.querySelectorAll(".listen-entry[data-speaker-id]").forEach((el) => {
-    ids.add(el.dataset.speakerId);
+    if (el.dataset.speakerSession === SPEAKER_NAMES_KEY) ids.add(el.dataset.speakerId);
   });
   const n = ids.size;
   listenPeopleCount.textContent = `${n} ${n === 1 ? "person" : "people"}`;
+  const tracks = new Set();
+  listenLog.querySelectorAll(".listen-entry[data-voice-track]").forEach(el => {
+    if (el.dataset.speakerSession === SPEAKER_NAMES_KEY) tracks.add(el.dataset.voiceTrack);
+  });
+  if (tracks.size) listenPeopleCount.textContent += ` · ${tracks.size} unverified ${tracks.size === 1 ? "track" : "tracks"}`;
 }
 
 // The gate appears in two places — full-size in Setup, compact under the
@@ -4369,11 +4381,11 @@ async function loadListenDevices() {
   }
 }
 
-const SPEAKER_NAMES_KEY = "voice_console_speaker_names";
+let SPEAKER_NAMES_KEY = "voice_console_speaker_names";
 
 function speakerNames() {
   try {
-    return JSON.parse(localStorage.getItem(SPEAKER_NAMES_KEY) || "{}");
+    return JSON.parse(sessionStorage.getItem(SPEAKER_NAMES_KEY) || "{}");
   } catch (err) {
     return {};
   }
@@ -4391,15 +4403,17 @@ function renameSpeaker(id) {
   const names = speakerNames();
   if (next.trim()) names[id] = next.trim();
   else delete names[id];
-  localStorage.setItem(SPEAKER_NAMES_KEY, JSON.stringify(names));
+  sessionStorage.setItem(SPEAKER_NAMES_KEY, JSON.stringify(names));
 
   // Applies backwards through the transcript, so naming someone halfway
   // through a conversation relabels what they already said.
   const label = speakerLabel(id);
   listenLog.querySelectorAll(`.listen-speaker[data-speaker="${id}"]`).forEach((el) => {
+    if (el.closest(".listen-entry")?.dataset.speakerSession !== SPEAKER_NAMES_KEY) return;
     el.textContent = label;
   });
   listenLog.querySelectorAll(`.listen-avatar[data-speaker="${id}"]`).forEach((el) => {
+    if (el.closest(".listen-entry")?.dataset.speakerSession !== SPEAKER_NAMES_KEY) return;
     el.textContent = label.startsWith("Speaker ")
       ? String(id)
       : label.trim().charAt(0).toUpperCase();
@@ -4561,7 +4575,8 @@ function applySpeakerGrouping(entry, id) {
   while (previous && !previous.dataset.speakerId) {
     previous = previous.previousElementSibling;
   }
-  const sameAsPrevious = previous && previous.dataset.speakerId === String(id);
+  const sameAsPrevious = previous && previous.dataset.speakerId === String(id) &&
+    previous.dataset.speakerSession === entry.dataset.speakerSession;
   entry.classList.toggle("is-continuation", Boolean(sameAsPrevious));
   updateSpeakerCount();
 }
@@ -4589,7 +4604,7 @@ function applySpeakerMerges(merged) {
     }
   });
 
-  if (namesChanged) localStorage.setItem(SPEAKER_NAMES_KEY, JSON.stringify(names));
+  if (namesChanged) sessionStorage.setItem(SPEAKER_NAMES_KEY, JSON.stringify(names));
 
   // Re-render the labels and re-evaluate grouping, since neighbouring rows
   // may now belong to the same person.
@@ -4631,6 +4646,11 @@ function fillListenEntry(node, data, interim = false) {
       "Raise Voice matching if this happens often.";
   } else if (data.speaker && data.speaker.id) {
     const id = data.speaker.id;
+    if (data.speaker.name) {
+      const names = speakerNames(); names[id] = data.speaker.name;
+      sessionStorage.setItem(SPEAKER_NAMES_KEY, JSON.stringify(names));
+    }
+    node.entry.dataset.speakerSession = SPEAKER_NAMES_KEY;
     node.speaker.classList.remove("is-hidden");
     node.speaker.dataset.speaker = id;
     node.speaker.textContent = speakerLabel(id);
@@ -4649,7 +4669,9 @@ function fillListenEntry(node, data, interim = false) {
     }
     if (!node.speaker.dataset.bound) {
       node.speaker.dataset.bound = "1";
-      node.speaker.addEventListener("click", () => renameSpeaker(id));
+      node.speaker.addEventListener("click", () => {
+        if (node.entry.dataset.speakerSession === SPEAKER_NAMES_KEY) renameSpeaker(id);
+      });
     }
     const uncertain = Boolean(data.speaker.uncertain);
     node.entry.classList.toggle("is-uncertain", uncertain);
@@ -4664,6 +4686,31 @@ function fillListenEntry(node, data, interim = false) {
       node.speaker.title = `Voice match ${data.speaker.similarity}. Click to rename.`;
     }
     applySpeakerGrouping(node.entry, id);
+  }
+
+  if (data.source === "separated") {
+    node.entry.classList.add("is-uncertain");
+    node.speaker.classList.remove("is-hidden");
+    if (!data.speaker) {
+      node.speaker.textContent = data.voice_track?.label || "Unidentified voice";
+      if (data.voice_track) {
+        node.entry.dataset.voiceTrack = data.voice_track.id;
+        node.entry.dataset.speakerSession = SPEAKER_NAMES_KEY;
+        updateSpeakerCount();
+      }
+    }
+    node.speaker.textContent += data.overlapping ? " · overlap (unverified)" : " · unverified";
+    node.speaker.title = "Estimated voice from separated audio. Words and identity may be inaccurate; this label does not pass strict speaker filters.";
+  } else if (data.overlapping && !data.speaker) {
+    node.speaker.classList.remove("is-hidden");
+    node.speaker.textContent = "Overlapping voices · unidentified";
+  } else if (data.source === "unknown" && !data.speaker) {
+    node.speaker.classList.remove("is-hidden");
+    node.speaker.textContent = "Unidentified voice";
+    node.speaker.title = "Waiting for enough consistent, clear speech before assigning a speaker.";
+  } else if (data.speaker && !data.speaker.confirmed) {
+    node.speaker.textContent += " · learning";
+    node.speaker.title = "Learning this voice from clear speech during this session.";
   }
 
   // Only show the original when it differs — for same-language speech the
@@ -4698,7 +4745,14 @@ function ensureListenNode(ref) {
   return ref.node;
 }
 
-async function sendListenSegment(chunks, mimeType, ref, interim = false) {
+function sendListenSegment(chunks, mimeType, ref, interim = false) {
+  const owner = ref.owner;
+  if (!owner) return deliverListenSegment(chunks, mimeType, ref, interim);
+  owner.pending = owner.pending.then(() => deliverListenSegment(chunks, mimeType, ref, interim));
+  return owner.pending;
+}
+
+async function deliverListenSegment(chunks, mimeType, ref, interim = false) {
   const blob = new Blob(chunks, { type: mimeType });
   const ext = mimeType.includes("mp4") ? "mp4" : mimeType.includes("ogg") ? "ogg" : "webm";
 
@@ -4706,6 +4760,7 @@ async function sendListenSegment(chunks, mimeType, ref, interim = false) {
   form.append("audio", blob, `listen.${ext}`);
   form.append("target_language", listenTargetLanguage());
   if (interim) form.append("interim", "1");
+  if (ref.owner?.sessionId) form.append("listening_session", ref.owner.sessionId);
 
   try {
     const res = await fetch("/api/listen", { method: "POST", body: form });
@@ -4714,7 +4769,14 @@ async function sendListenSegment(chunks, mimeType, ref, interim = false) {
     // The node may have been finalised by the real result while this
     // interim pass was still in flight. Late partial text must never
     // overwrite a finished sentence.
-    if (interim && ref.node && ref.node.done) return;
+    if (ref.owner && ref.owner !== activeListenSession) return;
+    if (interim && (ref.done || (ref.node && ref.node.done))) return;
+    if (!interim) ref.done = true;
+    if (data.speaker_status?.state && data.speaker_status.state !== "ready") {
+      setListenStatus(`Speaker recognition: ${data.speaker_status.state.replaceAll("_", " ")}. Select Speaker setup.`);
+    } else if (data.speaker_status?.notice?.includes("failed for this clip")) {
+      setListenStatus("Voice separation could not process this clip. Showing unidentified speech; check Speaker setup.");
+    }
 
     if (!res.ok) {
       if (interim) return; // a failed partial isn't worth reporting
@@ -4732,7 +4794,18 @@ async function sendListenSegment(chunks, mimeType, ref, interim = false) {
       return;
     }
 
-    fillListenEntry(ensureListenNode(ref), data, interim);
+    if (!interim && data.segments?.length) {
+      const first = ensureListenNode(ref);
+      let anchor = first.entry;
+      data.segments.forEach((segment, index) => {
+        const node = index === 0 ? first : addListenEntry();
+        if (index) anchor.after(node.entry);
+        fillListenEntry(node, segment, false);
+        anchor = node.entry;
+      });
+    } else {
+      fillListenEntry(ensureListenNode(ref), data, interim);
+    }
   } catch (err) {
     if (interim) return;
     const node = ensureListenNode(ref);
@@ -4758,7 +4831,7 @@ function listenBeginUtterance() {
 
   // A shared handle rather than a row. The row itself is built lazily, the
   // first time there's real text to show — see ensureListenNode().
-  const ref = { node: null };
+  const ref = { node: null, owner: s, done: false };
   recorder.ref = ref;
   recorder.chunks = chunks;
 
@@ -4896,6 +4969,17 @@ async function startListening() {
     return;
   }
 
+  let session;
+  try {
+    const response = await fetch("/api/listen-session", { method: "POST" });
+    session = await response.json();
+    if (!response.ok) throw new Error(session.error || "Could not start speaker memory.");
+  } catch (err) {
+    stream.getTracks().forEach(track => track.stop());
+    setListenStatus(err.message);
+    return;
+  }
+  SPEAKER_NAMES_KEY = "voice_console_speaker_names_" + (session.speaker_session || crypto.randomUUID());
   const ctx = new (window.AudioContext || window.webkitAudioContext)();
   const source = ctx.createMediaStreamSource(stream);
   const analyser = ctx.createAnalyser();
@@ -4903,6 +4987,8 @@ async function startListening() {
   source.connect(analyser);
 
   listening = {
+    sessionId: session.listening_session,
+    pending: Promise.resolve(),
     stream,
     ctx,
     analyser,
@@ -4916,6 +5002,8 @@ async function startListening() {
     speechMs: 0,
     timer: null,
   };
+  activeListenSession = listening;
+  updateSpeakerCount();
   listening.timer = setInterval(listenPoll, LISTEN.POLL_MS);
 
   listenStartBtn.textContent = "Stop listening";
@@ -4923,7 +5011,23 @@ async function startListening() {
   listenStartBtn.classList.add("is-live");
   // Only overwrite the warning above when there was nothing to warn about.
   if (!savedDevice || deviceId === savedDevice) {
-    setListenStatus(`Listening → ${listenTargetLanguage()}`);
+    const state = session.speaker_status?.state;
+    setListenStatus(state && state !== "ready"
+      ? `Listening; speaker recognition ${state.replaceAll("_", " ")}. Select Speaker setup.`
+      : `Listening → ${listenTargetLanguage()} · session voices active`);
+  }
+}
+
+async function closeListenSession(s) {
+  await s.pending;
+  if (!s.sessionId) return;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const res = await fetch("/api/listen-session", {method: "DELETE", headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({listening_session: s.sessionId})});
+      if (res.ok) return;
+    } catch (_) { /* retry after in-flight inference */ }
+    await new Promise(resolve => setTimeout(resolve, 600));
   }
 }
 
@@ -4941,7 +5045,10 @@ function stopListening() {
   if (listenMeterFillMini) listenMeterFillMini.style.width = "0%";
   setGateState("Idle", false);
 
-  if (!s) return;
+  if (!s) return Promise.resolve();
+  const finished = s.recorder && s.recorder.state !== "inactive"
+    ? new Promise(resolve => s.recorder.addEventListener("stop", () => resolve(closeListenSession(s)), {once: true}))
+    : closeListenSession(s);
   clearInterval(s.timer);
   // Same as the dictation path: stamp the duration so a sentence in
   // progress when you hit Stop still gets transcribed instead of being
@@ -4958,6 +5065,7 @@ function stopListening() {
       /* already gone */
     }
   }, 1200);
+  return finished;
 }
 
 if (listenToggle) {
@@ -4975,9 +5083,10 @@ if (listenToggle) {
 }
 
 if (listenStartBtn) {
-  listenStartBtn.addEventListener("click", () => {
-    if (listening) stopListening();
-    else startListening();
+  listenStartBtn.addEventListener("click", async () => {
+    listenStartBtn.disabled = true;
+    try { if (listening) await stopListening(); else await startListening(); }
+    finally { listenStartBtn.disabled = false; }
   });
 }
 
@@ -5071,19 +5180,17 @@ const listenResetSpeakersBtn = $("listenResetSpeakersBtn");
 
 if (listenResetSpeakersBtn) {
   listenResetSpeakersBtn.addEventListener("click", async () => {
+    listenResetSpeakersBtn.disabled = true;
+    listenStartBtn.disabled = true;
     try {
-      const res = await fetch("/api/listen-speakers", { method: "DELETE" });
-      const data = await res.json();
-      if (res.ok) {
-        // The saved names refer to voice IDs that no longer exist, so
-        // keeping them would attach old names to new people.
-        localStorage.removeItem(SPEAKER_NAMES_KEY);
-        setListenStatus(`Forgot ${data.cleared} voice profile(s).`);
-      } else {
-        setListenStatus(data.error || "Couldn't reset voices.");
-      }
-    } catch (err) {
-      setListenStatus(`Reset failed: ${err.message}`);
+      const wasListening = Boolean(listening);
+      await stopListening();
+      sessionStorage.removeItem(SPEAKER_NAMES_KEY);
+      if (wasListening) await startListening();
+      else setListenStatus("Temporary voices cleared. Saved voices are kept.");
+    } finally {
+      listenResetSpeakersBtn.disabled = false;
+      listenStartBtn.disabled = false;
     }
   });
 }
@@ -6161,3 +6268,541 @@ if (listenThreshold) {
 }
 showGateThreshold();
 setGateState("Idle", false);
+
+
+// ============================================================
+// NEW (updates): finding, installing and going back
+// ============================================================
+// The browser side of Frivo's updates, after Clearspace's:
+//  - a quiet chip in the sidebar when a newer version is out (the server
+//    checks shortly after it starts and every six hours, unless that is off)
+//  - the update dialog: what changed, then Update now / Later / Skip this
+//    version
+//  - Settings > About Frivo: the version, "Check for updates", the
+//    automatic-check switch, and Earlier versions, which installs an older
+//    release through the same dialog
+//
+// Installing happens on the PC Frivo runs on, not in this browser. The
+// server hands the request to its updater and this page follows along via
+// /api/updates/job — including through the restart, when the server goes
+// away for a while and comes back as the new version.
+
+const updateChip = $("updateChip");
+const updateChipText = $("updateChipText");
+const updateOverlay = $("updateOverlay");
+const updateTitle = $("updateTitle");
+const updateSub = $("updateSub");
+const updateNotes = $("updateNotes");
+const updateWhere = $("updateWhere");
+const updateProgress = $("updateProgress");
+const updateProgressBar = $("updateProgressBar");
+const updateStatusEl = $("updateStatus");
+const updateSkipBtn = $("updateSkipBtn");
+const updateLaterBtn = $("updateLaterBtn");
+const updateInstallBtn = $("updateInstallBtn");
+const aboutVersionValue = $("aboutVersionValue");
+const checkUpdatesRow = $("checkUpdatesRow");
+const checkUpdatesValue = $("checkUpdatesValue");
+const updateAutoToggle = $("updateAutoToggle");
+const earlierVersionsRow = $("earlierVersionsRow");
+const earlierList = $("earlierList");
+const earlierNote = $("earlierNote");
+
+const UPDATE_REFRESH_MS = 15 * 60 * 1000;
+const UPDATE_JOB_POLL_MS = 1000;
+// The server is gone while setup replaces it. Past this, say so plainly
+// rather than spinning for ever.
+const UPDATE_RESTART_PATIENCE_MS = 4 * 60 * 1000;
+const UPDATE_ACTIVE = new Set(["queued", "starting", "checking", "downloading", "verifying", "installing"]);
+
+let updateInfo = null;            // the last /api/updates answer
+let updateDialogRelease = null;   // what the open dialog would install
+let updateDialogGoingBack = false;
+let updateJob = null;             // { id, target, kind } while an install runs
+let updateJobTimer = null;
+let updateJobLostAt = 0;          // when the server stopped answering
+let updateJobDoneAt = 0;
+let checkingForUpdates = false;
+
+function formatMegabytes(bytes) {
+  return (bytes / 1048576).toFixed(bytes >= 10 * 1048576 ? 0 : 1);
+}
+
+function formatReleaseDate(iso) {
+  if (!iso) return "";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+}
+
+// Release notes are Markdown. Without a Markdown view the readable thing is
+// to drop the markup that only means something rendered — heading marks,
+// bold and code ticks — and turn list dashes into bullets. Same as
+// Clearspace's UpdateWindow.Tidy.
+function tidyReleaseNotes(notes) {
+  const lines = [];
+  String(notes || "").replace(/\r\n/g, "\n").split("\n").forEach((raw) => {
+    let line = raw.replace(/\s+$/, "").replace(/\*\*/g, "").replace(/`/g, "");
+    const trimmed = line.replace(/^\s+/, "");
+    if (trimmed.startsWith("#")) line = trimmed.replace(/^#+/, "").trim();
+    else if (trimmed.startsWith("- ") || trimmed.startsWith("* ")) {
+      line = line.slice(0, line.length - trimmed.length) + "• " + trimmed.slice(2);
+    }
+    if (!line && (!lines.length || !lines[lines.length - 1])) return;   // no doubled blank lines
+    lines.push(line);
+  });
+  while (lines.length && !lines[lines.length - 1]) lines.pop();
+  return lines.join("\n");
+}
+
+function updateIsRunning() {
+  return Boolean(updateJob);
+}
+
+function renderUpdateChip() {
+  if (!updateChip) return;
+  if (updateJob) {
+    updateChip.classList.remove("is-hidden");
+    updateChip.classList.add("is-busy");
+    updateChipText.textContent = updateJob.kind === "rollback"
+      ? `Going back to ${updateJob.target}…`
+      : `Updating to ${updateJob.target}…`;
+    return;
+  }
+  updateChip.classList.remove("is-busy");
+  const notify = updateInfo && updateInfo.notify;
+  updateChip.classList.toggle("is-hidden", !notify);
+  if (notify) updateChipText.textContent = `Update available · ${notify.version}`;
+}
+
+function renderAboutSection() {
+  if (!updateInfo) return;
+  aboutVersionValue.textContent = updateInfo.current || "unknown";
+  if (updateAutoToggle) updateAutoToggle.checked = Boolean(updateInfo.auto_check);
+
+  let value = "—";
+  let accent = false;
+  if (checkingForUpdates) value = "Checking…";
+  else if (updateInfo.latest) { value = `${updateInfo.latest.version} available`; accent = true; }
+  else if (updateInfo.error && !updateInfo.checked_at) value = "Couldn't check";
+  else if (updateInfo.checked_at) value = "Up to date";
+  checkUpdatesValue.textContent = value;
+  checkUpdatesValue.classList.toggle("srow-value--accent", accent);
+
+  if (earlierNote && updateInfo.oldest_rollback) {
+    earlierNote.textContent =
+      "Going back keeps your settings, profiles and API keys. What was added after that version " +
+      "is gone until you update again, which you can do at any time from here. Versions before " +
+      `${updateInfo.oldest_rollback} can't update themselves, so they aren't offered.`;
+  }
+}
+
+async function loadUpdates() {
+  try {
+    const res = await fetch("/api/updates");
+    if (!res.ok) return;
+    updateInfo = await res.json();
+  } catch (err) {
+    return;   // the server is unreachable; its own errors will say so
+  }
+  // A page opened (or reloaded) while an update it did not start is
+  // running still gets to follow it.
+  const job = updateInfo.job;
+  if (job && UPDATE_ACTIVE.has(job.state) && !updateJob) {
+    followUpdateJob({ id: job.id, target: job.target, kind: job.kind || "update" });
+  }
+  renderUpdateChip();
+  renderAboutSection();
+}
+
+// ---------- the dialog ----------
+
+function setUpdateButtons({ skip, later, install, installText, laterText }) {
+  updateSkipBtn.classList.toggle("is-hidden", !skip);
+  updateLaterBtn.classList.toggle("is-hidden", !later);
+  updateInstallBtn.classList.toggle("is-hidden", !install);
+  if (installText) updateInstallBtn.textContent = installText;
+  if (laterText) updateLaterBtn.textContent = laterText;
+  updateInstallBtn.disabled = false;
+}
+
+function showUpdateStatus(text, { error = false, progress = null } = {}) {
+  updateStatusEl.classList.toggle("is-hidden", !text);
+  updateStatusEl.classList.toggle("is-error", error);
+  updateStatusEl.textContent = text || "";
+  if (progress === null) {
+    updateProgress.classList.add("is-hidden");
+    return;
+  }
+  updateProgress.classList.remove("is-hidden");
+  const indeterminate = progress === "busy";
+  updateProgress.classList.toggle("is-indeterminate", indeterminate);
+  const pct = indeterminate ? 0 : Math.max(0, Math.min(100, progress * 100));
+  updateProgressBar.style.width = indeterminate ? "" : `${pct.toFixed(1)}%`;
+  if (indeterminate) updateProgress.removeAttribute("aria-valuenow");
+  else updateProgress.setAttribute("aria-valuenow", pct.toFixed(0));
+}
+
+function openUpdateDialog(release, { goingBack = false } = {}) {
+  updateDialogRelease = release;
+  updateDialogGoingBack = goingBack;
+  const current = (updateInfo && updateInfo.current) || "this version";
+  updateTitle.textContent = updateDialogHeading(release, goingBack);
+  updateSub.textContent = goingBack
+    ? `You have ${current}. Going back keeps your settings, profiles and API keys. What was added after ` +
+      `${release.version} is gone until you update again.`
+    : `You have ${current}. Updating keeps your settings, profiles and API keys.`;
+
+  // An old release's notes describe what was new then, which reads as if it
+  // were coming — so going back shows none.
+  const notes = goingBack ? "" : tidyReleaseNotes(release.notes);
+  updateNotes.textContent = notes;
+  updateNotes.classList.toggle("is-hidden", !notes);
+
+  const support = (updateInfo && updateInfo.support) || { ok: false, reason: "" };
+  let where = "";
+  if (!support.ok) where = support.reason;
+  else if (support.mode === "elevate") where = support.reason;
+  else if (!release.verifiable) {
+    where = "GitHub publishes no fingerprint for this release's installer, so it can't be checked " +
+            "and won't be installed. Download it from the releases page instead.";
+  }
+  updateWhere.textContent = where;
+  updateWhere.classList.toggle("is-hidden", !where);
+
+  showUpdateStatus("");
+  const canInstall = support.ok && release.verifiable;
+  setUpdateButtons({
+    skip: !goingBack && canInstall,
+    later: true,
+    laterText: goingBack ? "Cancel" : "Later",
+    install: true,
+    installText: canInstall
+      ? (goingBack ? `Install ${release.version}` : "Update now")
+      : "Open releases page",
+  });
+  if (!goingBack && !canInstall) updateSkipBtn.classList.remove("is-hidden");
+
+  updateOverlay.classList.remove("is-hidden");
+  updateInstallBtn.focus();
+}
+
+function updateDialogHeading(release, goingBack) {
+  return goingBack ? `Go back to Frivo ${release.version}` : `Frivo ${release.version} is available`;
+}
+
+function closeUpdateDialog() {
+  updateOverlay.classList.add("is-hidden");
+}
+
+function updateDialogIsOpen() {
+  return !updateOverlay.classList.contains("is-hidden");
+}
+
+// Reopens the dialog on whatever is going on: the running install, or the
+// release the chip is announcing.
+function openUpdateFromChip() {
+  if (updateJob) {
+    updateOverlay.classList.remove("is-hidden");
+    return;
+  }
+  const notify = updateInfo && updateInfo.notify;
+  if (notify) openUpdateDialog(notify);
+}
+
+async function installRelease() {
+  const release = updateDialogRelease;
+  if (!release) return;
+  const support = (updateInfo && updateInfo.support) || { ok: false };
+  if (!support.ok || !release.verifiable) {
+    window.open(release.page_url || (updateInfo && updateInfo.releases_page) || "#", "_blank", "noopener");
+    return;
+  }
+
+  updateInstallBtn.disabled = true;
+  updateSkipBtn.classList.add("is-hidden");
+  updateNotes.classList.add("is-hidden");
+  showUpdateStatus("Asking the updater…", { progress: "busy" });
+  try {
+    const res = await fetch("/api/updates/install", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ version: release.version }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || "The update couldn't be started.");
+    followUpdateJob({ id: data.id, target: data.version, kind: data.kind });
+  } catch (err) {
+    showUpdateFailure(err.message);
+  }
+}
+
+function showUpdateFailure(message) {
+  if (updateDialogRelease) updateTitle.textContent = updateDialogHeading(updateDialogRelease, updateDialogGoingBack);
+  const page = (updateDialogRelease && updateDialogRelease.page_url) ||
+               (updateInfo && updateInfo.releases_page) || "";
+  showUpdateStatus(
+    `${updateDialogGoingBack ? "That version" : "The update"} couldn't be installed: ${message}` +
+      (page ? " You can also download it yourself from Frivo's releases page on GitHub." : ""),
+    { error: true }
+  );
+  setUpdateButtons({ skip: false, later: true, laterText: "Close", install: true, installText: "Try again" });
+}
+
+// ---------- following an install ----------
+
+function followUpdateJob(job) {
+  updateJob = job;
+  updateTitle.textContent = job.kind === "rollback"
+    ? `Going back to Frivo ${job.target}`
+    : `Updating to Frivo ${job.target}`;
+  updateJobLostAt = 0;
+  updateJobDoneAt = 0;
+  // The buttons that make sense while it runs: hide the dialog. The update
+  // carries on without it — it is happening on the server, not here.
+  setUpdateButtons({ skip: false, later: true, laterText: "Hide", install: false });
+  renderUpdateChip();
+  clearInterval(updateJobTimer);
+  updateJobTimer = setInterval(pollUpdateJob, UPDATE_JOB_POLL_MS);
+  pollUpdateJob();
+}
+
+function stopFollowingUpdate() {
+  clearInterval(updateJobTimer);
+  updateJobTimer = null;
+  updateJob = null;
+  renderUpdateChip();
+}
+
+function describeUpdateJob(job) {
+  const target = updateJob ? updateJob.target : job.target;
+  switch (job.state) {
+    case "queued":
+    case "starting":
+      return { text: job.mode === "elevate"
+        ? "Waiting for permission on the PC Frivo runs on…"
+        : "Starting the updater…", progress: "busy" };
+    case "checking":
+      return { text: `Looking up Frivo ${target} on GitHub…`, progress: "busy" };
+    case "downloading":
+      if (job.total > 0) {
+        return {
+          text: `Downloading… ${formatMegabytes(job.received || 0)} of ${formatMegabytes(job.total)} MB`,
+          progress: (job.received || 0) / job.total,
+        };
+      }
+      return { text: "Downloading…", progress: "busy" };
+    case "verifying":
+      return { text: "Checking the download against GitHub's fingerprint…", progress: "busy" };
+    case "installing":
+      return { text: "Installing. Frivo restarts in a moment, and this page reconnects by itself.",
+               progress: "busy" };
+    default:
+      return { text: job.message || "", progress: "busy" };
+  }
+}
+
+async function pollUpdateJob() {
+  if (!updateJob) return;
+  let data = null;
+  try {
+    const res = await fetch("/api/updates/job", { cache: "no-store" });
+    if (res.ok) data = await res.json();
+  } catch (err) {
+    data = null;
+  }
+
+  // Unreachable: setup has stopped the server. Expected during an install;
+  // only worth a different message if it goes on far too long.
+  if (!data) {
+    if (!updateJobLostAt) updateJobLostAt = Date.now();
+    const away = Date.now() - updateJobLostAt;
+    showUpdateStatus(
+      away > UPDATE_RESTART_PATIENCE_MS
+        ? "Frivo hasn't come back yet. Check the PC it runs on — its tray icon says what happened."
+        : "Frivo is restarting…",
+      { progress: "busy" }
+    );
+    return;
+  }
+  updateJobLostAt = 0;
+
+  // Landed: the server answering is the new version. Reload, because every
+  // file this page was built from has just been replaced.
+  if (data.current === updateJob.target) {
+    showUpdateStatus(`Frivo ${updateJob.target} is installed. Reloading…`, { progress: 1 });
+    clearInterval(updateJobTimer);
+    setTimeout(() => window.location.reload(), 1200);
+    return;
+  }
+
+  const job = data.job;
+  if (!job || job.id !== updateJob.id) {
+    // The server restarted and has forgotten the request, but is still the
+    // old version: wait a little for the restart to finish, then say so.
+    if (!updateJobDoneAt) updateJobDoneAt = Date.now();
+    if (Date.now() - updateJobDoneAt > 60000) {
+      stopFollowingUpdate();
+      showUpdateFailure(`Frivo is still running ${data.current}. Its tray icon on the PC it runs on says why.`);
+    }
+    return;
+  }
+
+  if (job.state === "failed") {
+    stopFollowingUpdate();
+    showUpdateFailure(job.message || "the updater stopped.");
+    loadUpdates();
+    return;
+  }
+  if (job.state === "done") {
+    // Installed, but the server answering is still the old one — it is
+    // about to be replaced. Keep polling until the new one answers.
+    if (!updateJobDoneAt) updateJobDoneAt = Date.now();
+    showUpdateStatus("Installed. Waiting for Frivo to restart…", { progress: "busy" });
+    if (Date.now() - updateJobDoneAt > 90000) {
+      stopFollowingUpdate();
+      showUpdateFailure(`Frivo ${updateJob.target} was installed, but this page is still talking to ` +
+                        `${data.current}. Restart Frivo from its tray icon.`);
+    }
+    return;
+  }
+  const view = describeUpdateJob(job);
+  showUpdateStatus(view.text, { progress: view.progress });
+}
+
+// ---------- Settings > About Frivo ----------
+
+async function checkForUpdatesNow() {
+  if (checkingForUpdates) return;
+  checkingForUpdates = true;
+  renderAboutSection();
+  try {
+    const res = await fetch("/api/updates/check", { method: "POST" });
+    if (!res.ok) throw new Error("check failed");
+    updateInfo = await res.json();
+  } catch (err) {
+    updateInfo = updateInfo || null;
+  } finally {
+    checkingForUpdates = false;
+  }
+  renderUpdateChip();
+  renderAboutSection();
+  if (!updateInfo) return;
+  if (updateInfo.latest) {
+    // Shown even when this version was skipped earlier: you asked.
+    openUpdateDialog(updateInfo.latest);
+  } else if (updateInfo.error) {
+    setStatus("Frivo couldn't reach GitHub to look for a newer version. Check the internet connection on the PC it runs on.", true);
+    checkUpdatesValue.textContent = "Couldn't check";
+  } else {
+    setStatus(`Frivo ${updateInfo.current} is the newest version.`);
+  }
+}
+
+async function saveUpdateSettings(patch, toggle) {
+  try {
+    const res = await fetch("/api/updates/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
+    });
+    if (!res.ok) throw new Error("save failed");
+    updateInfo = await res.json();
+    renderUpdateChip();
+    renderAboutSection();
+    return true;
+  } catch (err) {
+    // Put the switch back rather than showing a state the server lacks.
+    if (toggle) toggle.checked = !toggle.checked;
+    setStatus("Couldn't save that setting.", true);
+    return false;
+  }
+}
+
+function earlierRow(release) {
+  const row = document.createElement("div");
+  row.className = "srow";
+  const main = document.createElement("span");
+  main.className = "srow-main srow-main--flex";
+  const label = document.createElement("span");
+  label.className = "srow-label";
+  label.textContent = `Frivo ${release.version}`;
+  const sub = document.createElement("span");
+  sub.className = "srow-sub";
+  const date = formatReleaseDate(release.published);
+  sub.textContent = date ? `Released ${date}` : "Release date unknown";
+  main.append(label, sub);
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "btn-ghost btn-sm";
+  button.textContent = "Install";
+  button.addEventListener("click", () => openUpdateDialog(release, { goingBack: true }));
+  row.append(main, button);
+  return row;
+}
+
+function earlierMessage(text) {
+  const row = document.createElement("div");
+  row.className = "srow";
+  const main = document.createElement("span");
+  main.className = "srow-main srow-main--flex";
+  const sub = document.createElement("span");
+  sub.className = "srow-sub";
+  sub.textContent = text;
+  main.append(sub);
+  row.append(main);
+  return row;
+}
+
+async function loadEarlierVersions() {
+  earlierList.replaceChildren(earlierMessage("Loading…"));
+  try {
+    const res = await fetch("/api/updates/earlier");
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || "GitHub couldn't be reached.");
+    if (!data.releases || !data.releases.length) {
+      earlierList.replaceChildren(earlierMessage(
+        `There are no earlier versions to go back to. Versions before ${data.oldest_rollback} ` +
+        "can't update themselves, so they aren't offered."
+      ));
+      return;
+    }
+    earlierList.replaceChildren(...data.releases.map(earlierRow));
+  } catch (err) {
+    earlierList.replaceChildren(earlierMessage(`${err.message} Try again in a moment.`));
+  }
+}
+
+// ---------- wiring ----------
+
+if (updateChip) updateChip.addEventListener("click", openUpdateFromChip);
+if (checkUpdatesRow) checkUpdatesRow.addEventListener("click", checkForUpdatesNow);
+if (earlierVersionsRow) earlierVersionsRow.addEventListener("click", loadEarlierVersions);
+if (updateAutoToggle) {
+  updateAutoToggle.addEventListener("change", () => {
+    saveUpdateSettings({ auto_check: updateAutoToggle.checked }, updateAutoToggle);
+  });
+}
+
+updateSkipBtn.addEventListener("click", async () => {
+  if (updateDialogRelease) await saveUpdateSettings({ skip: updateDialogRelease.version });
+  closeUpdateDialog();
+});
+updateLaterBtn.addEventListener("click", closeUpdateDialog);
+updateInstallBtn.addEventListener("click", installRelease);
+
+if (updateOverlay) {
+  updateOverlay.addEventListener("click", (e) => {
+    if (e.target === updateOverlay) closeUpdateDialog();
+  });
+  // First refusal on Escape, before the Settings sheet underneath sees it.
+  updateOverlay.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape") return;
+    e.preventDefault();
+    e.stopPropagation();
+    closeUpdateDialog();
+  });
+}
+
+loadUpdates();
+setInterval(() => { if (!updateJob) loadUpdates(); }, UPDATE_REFRESH_MS);

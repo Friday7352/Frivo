@@ -9,8 +9,19 @@
 ; ------------------------------------------------------------------
 
 #define AppName    "Frivo"
-#define AppVersion "1.1.2"
 #define AppPublisher "Friday"
+
+; The version comes from one file at the repo root, so bumping it before a
+; release is a one-line edit rather than a hunt through three files that
+; had already drifted apart. A missing or empty VERSION stops the build
+; here, loudly, rather than shipping an installer labelled "0.0.0".
+#define VersionFile AddBackslash(SourcePath) + "..\VERSION"
+#define VersionHandle FileOpen(VersionFile)
+#define AppVersion Trim(FileRead(VersionHandle))
+#expr FileClose(VersionHandle)
+#if AppVersion == ""
+  #error VERSION at the repo root is empty. Put a version number in it.
+#endif
 
 [Setup]
 AppName={#AppName}
@@ -45,18 +56,60 @@ Source: "..\app\*";       DestDir: "{tmp}\FrivoSetupPayload\app";       Flags: i
 Source: "..\installer\*"; DestDir: "{tmp}\FrivoSetupPayload\installer"; Flags: ignoreversion recursesubdirs createallsubdirs deleteafterinstall
 Source: "FrivoHost.exe";   DestDir: "{tmp}\FrivoSetupPayload\installer"; Flags: ignoreversion deleteafterinstall
 Source: "..\README.md";   DestDir: "{tmp}\FrivoSetupPayload";           Flags: ignoreversion deleteafterinstall
+; Install.ps1 reads this for the Apps & features entry and the welcome page.
+Source: "..\VERSION";     DestDir: "{tmp}\FrivoSetupPayload";           Flags: ignoreversion deleteafterinstall
 
 [Run]
 ; hidewizard keeps Inno's internal extraction window out of sight while the
 ; Frivo-styled wizard runs. waituntilterminated also keeps the payload alive
 ; while FrivoHost.exe runs the custom Frivo wizard in its own native process.
+; CHANGED (updates): not when silent. A silent run is an in-app update,
+; started as SYSTEM with no desktop: the wizard would open where nobody can
+; see it and wait for ever. RunSilentUpdate in [Code] runs that case.
 Filename: "{tmp}\FrivoSetupPayload\installer\FrivoHost.exe"; \
   Parameters: "--script ""{tmp}\FrivoSetupPayload\installer\Install.ps1"" --data ""{userappdata}\Frivo"""; \
-  Flags: waituntilterminated hidewizard 64bit
+  Flags: waituntilterminated hidewizard 64bit; Check: not WizardSilent
 
 [Code]
 function PostMessage(hWnd: HWND; Msg, wParam, lParam: Longint): Boolean;
   external 'PostMessageW@user32.dll stdcall';
+
+{ NEW (updates): FrivoSetup.exe /VERYSILENT is how Frivo updates itself (see
+  installer\Update-Frivo.ps1). It runs Install.ps1's silent update path
+  through FrivoHost --silent, which shows nothing and never waits on a
+  message box, and hands its result back as Setup's exit code:
+    0   updated
+    10  FrivoHost could not be started
+    11  the update failed; Install.ps1 logged "FAILED: <reason>"
+  A silent run only ever updates an existing install. It is not a way to
+  install Frivo fresh without the wizard. }
+var
+  SilentExitCode: Integer;
+
+procedure RunSilentUpdate;
+var
+  ResultCode: Integer;
+  Payload: String;
+begin
+  Payload := ExpandConstant('{tmp}\FrivoSetupPayload\installer\');
+  if not Exec(Payload + 'FrivoHost.exe',
+      '--silent --action Update --script "' + Payload + 'Install.ps1" --data "' + ExpandConstant('{userappdata}\Frivo') + '"',
+      Payload, SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+    SilentExitCode := 10
+  else if ResultCode <> 0 then
+    SilentExitCode := 11;
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if (CurStep = ssPostInstall) and WizardSilent then
+    RunSilentUpdate;
+end;
+
+function GetCustomSetupExitCode: Integer;
+begin
+  Result := SilentExitCode;
+end;
 
 procedure CurPageChanged(CurPageID: Integer);
 begin
