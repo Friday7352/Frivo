@@ -27,6 +27,13 @@ $InstallDir = Split-Path -Parent $ScriptDir
 $AppName    = 'Frivo'
 
 Import-Module (Join-Path $ScriptDir 'Frivo.Setup.psm1') -Force
+# NEW (updates): for removing the updater task. Guarded: an install whose
+# files are already half gone should still uninstall.
+$script:HasUpdateModule = $false
+try {
+    Import-Module (Join-Path $ScriptDir 'Frivo.Update.psm1') -Force -ErrorAction Stop
+    $script:HasUpdateModule = $true
+} catch { }
 $DataDir = if ($DataPath) { $DataPath } else { Get-DataPath }
 $LogPath = Get-SetupLogPath
 
@@ -230,6 +237,42 @@ function Invoke-Removal {
     }
 
     $sharedInstall = Test-OtherFrivoInstall -InstallPath $InstallDir
+
+    # --- NEW (updates): the updater task and its folder ---
+    # The task is only removed when it runs this install's updater; the
+    # shared folder in ProgramData only when no other Frivo is installed.
+    if ($script:HasUpdateModule) {
+        try {
+            if (Unregister-FrivoUpdaterTask -InstallDir $InstallDir) {
+                Add-Step ('Removed the "{0}" task' -f (Get-FrivoUpdaterTaskName))
+            }
+        } catch {
+            Add-Step ('Remove the "{0}" task' -f (Get-FrivoUpdaterTaskName)) $false
+        }
+        if (-not $sharedInstall) {
+            $updateFolder = Get-FrivoUpdateFolder
+            $programDataFrivo = Split-Path -Parent $updateFolder
+            try {
+                if (Test-Path -LiteralPath $updateFolder) {
+                    $item = Get-Item -LiteralPath $updateFolder -Force
+                    if ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
+                        # Windows PowerShell's Remove-Item -Recurse follows a
+                        # link into its target. Remove the link alone.
+                        [System.IO.Directory]::Delete($updateFolder)
+                    } else {
+                        Remove-Item -LiteralPath $updateFolder -Recurse -Force -ErrorAction Stop
+                    }
+                    Add-Step 'Removed the update records'
+                }
+                if ((Test-Path -LiteralPath $programDataFrivo) -and
+                    -not (Get-ChildItem -LiteralPath $programDataFrivo -Force -ErrorAction SilentlyContinue | Select-Object -First 1)) {
+                    Remove-Item -LiteralPath $programDataFrivo -Force -ErrorAction SilentlyContinue
+                }
+            } catch {
+                Add-Step 'Remove the update records' $false
+            }
+        }
+    }
 
     # --- frivo.local address ---
     try {

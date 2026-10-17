@@ -25,6 +25,8 @@ __pycache__/
 *.py[cod]
 dist/
 build/FrivoHost.exe
+# Written by tests/test-update-ui.py for looking at, not for keeping.
+tests/screenshots/
 
 # Editor and operating-system files.
 .vscode/

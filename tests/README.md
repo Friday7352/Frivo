@@ -191,3 +191,71 @@ in the template, and Playwright renders for anything visual.
 
 The larger WinForms dry-run harness (13 scenarios against stubbed
 System.Windows.Forms) lives outside this repo.
+
+## test-update-logic.ps1
+
+    pwsh -NoProfile -File tests/test-update-logic.ps1
+
+NEW (updates). Covers the decisions the **Frivo Updater** task makes on
+its own as SYSTEM, run for real against `tests/fixtures/github-releases.json`.
+That sample was built to include every kind of release that must not be
+installed: a pre-release, a draft, a `nightly` tag, an installer hosted
+by another repository, a release with no installer, a version listed
+twice, a release with no fingerprint, and one with an `md5:` digest.
+
+It checks which releases count, and which ones a request may install. It
+refuses the installed version, anything below `oldest_rollback`, and
+anything without a fingerprint. It checks that a downloaded file has to be
+byte-for-byte the published one, that a request file can't smuggle in a
+path, that `status.json` is replaced whole, and that setup's `FAILED:` line
+is the reason the dialog shows. It also reads the files around the
+updater: setup ships it and registers the task, `Frivo.iss` never opens
+the wizard on a silent run, `FrivoHost.exe --silent` never shows a message
+box (as SYSTEM, nobody could close one), the launcher listens for the
+watcher, and uninstall removes the task.
+
+Every check was confirmed to fail on purpose. Removing `-RequireFingerprint`
+from the task fails it, and so do dropping `Check: not WizardSilent` and
+unguarding a `MessageBox.Show`.
+
+## test-updates.py
+
+    python3 tests/test-updates.py
+
+NEW (updates). Frivo's own half, through Flask's test client against the
+real `app.py` with GitHub swapped for the same fixture. It covers the chip
+and "Skip this version", the automatic-check switch (it saves itself and
+reaches config.json), Earlier versions (never below the floor), every way
+an install can be refused, `request.json`, and following an install from
+queued through the task's own status to a failure. A request nobody picks
+up gets reported instead of waited on forever.
+
+**The cross-check.** It also asks `Frivo.Update.psm1` to parse the same
+fixture and requires both lists to match release for release, comparing
+version, fingerprint, size and both URLs. The page offers releases, the task
+decides what it will install, and the two must never disagree in front of
+anyone. Letting the PowerShell side accept a pre-release makes this check
+fail.
+
+## test-update-ui.py
+
+    python3 tests/test-update-ui.py
+
+NEW (updates). The update dialog in a real browser against the real server,
+with the task replaced by a stand-in that writes `status.json` the way
+`Update-Frivo.ps1` does. It includes the part where setup stops Frivo, so
+the server answers nothing for a few seconds and then comes back as the new
+version. The run covers the chip, the tidied notes, download progress in MB,
+the restart shown as a restart rather than an error, and the page reloading
+into the new version. It also covers a failure with the task's reason and
+Try again, Settings > About, Earlier versions and its going-back wording,
+Escape, the switch surviving a reload, Skip, and no page errors. Screenshots
+go to `tests/screenshots/`, which is git-ignored.
+
+The end-to-end run of `Update-Frivo.ps1` itself was done by hand on Linux.
+A copy of the script was pointed at a local web server, with the
+Windows-only calls stubbed out, and it worked through download,
+fingerprint, "setup", registry check and cleanup. Setup failing, a tampered
+download, and a version that isn't a release each ended in the right
+state. That run isn't kept as a test because it rewrites the script to run
+it, so the real thing still needs a first run on Windows.
