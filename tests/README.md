@@ -283,3 +283,24 @@ Run against the old dictation code, it fails. The send comes 2.9s after
 speech ends even with the fast fake Evora, and pausing then carrying on
 sent the first half of the sentence on its own. That second bug is fixed
 too.
+
+## test-typing-indicator.py
+
+    python3 tests/test-typing-indicator.py
+
+Covers VRChat's typing dots while you respond. Frivo decides whether you're
+replying and adds a `typing` flag to the outbox reply FrivOSC already
+polls. FrivOSC 1.1.0 turns that flag into `/chatbox/typing`. FrivOSC's own
+`test-end-to-end.py` checks the VRChat side.
+
+Server side: the flag is only set with VRChat OSC on and the switch on. A
+`typing` that nobody refreshes expires after 4 seconds, so a page closed
+mid-sentence can't leave the dots up. The switch saves itself.
+
+In a real browser:
+- Typing puts the dots up, and a draft left sitting takes them down.
+- Clearing or sending the box takes them down.
+- Talking with Live (Evora) puts them up before any text arrives, and they
+  stay up while you keep talking.
+- With the Chatbox switch off, or the Settings switch off, the dots never
+  appear, and the Settings switch stays off after a reload.

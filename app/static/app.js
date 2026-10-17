@@ -151,6 +151,7 @@ const whisperModelNote = $("whisperModelNote");
 const oscEnabledToggle = $("oscEnabledToggle");
 const oscMuteSyncToggle = $("oscMuteSyncToggle");
 const oscUnmuteOnSendToggle = $("oscUnmuteOnSendToggle");
+const oscTypingToggle = $("oscTypingToggle");   // NEW (typing)
 const frivoscStatusValue = $("frivoscStatusValue");
 const oscToggle = $("oscToggle");
 const oscSwitch = $("oscSwitch");
@@ -1604,6 +1605,9 @@ async function loadSettings() {
   if (oscEnabledToggle) oscEnabledToggle.checked = Boolean(data.osc_enabled);
   if (oscMuteSyncToggle) oscMuteSyncToggle.checked = Boolean(data.osc_mute_sync);
   if (oscUnmuteOnSendToggle) oscUnmuteOnSendToggle.checked = Boolean(data.osc_unmute_on_send);
+  // NEW (typing): on unless switched off; an older app.py sends nothing.
+  typingIndicatorEnabled = data.osc_typing !== false;
+  if (oscTypingToggle) oscTypingToggle.checked = typingIndicatorEnabled;
   oscEnabled_setting = Boolean(data.osc_enabled);
   // "Configured" now means the feature is on and a companion is actually
   // there. There is no address left to get wrong.
@@ -1767,6 +1771,7 @@ saveSettingsBtn.addEventListener("click", async () => {
     osc_enabled: oscEnabledToggle ? oscEnabledToggle.checked : false,
     osc_mute_sync: oscMuteSyncToggle ? oscMuteSyncToggle.checked : false,
     osc_unmute_on_send: oscUnmuteOnSendToggle ? oscUnmuteOnSendToggle.checked : false,
+    osc_typing: oscTypingToggle ? oscTypingToggle.checked : true,   // NEW (typing)
   };
   if (openaiKeyInput.value.trim()) body.openai_api_key = openaiKeyInput.value.trim();
   if (elevenKeyInput.value.trim()) body.elevenlabs_api_key = elevenKeyInput.value.trim();
@@ -1961,6 +1966,7 @@ let frivoscPollRate = 0;
 // while still unmuted and it stays stopped, because nothing changed.
 let muteSyncEnabled = false;
 let unmuteOnSendEnabled = false;
+let typingIndicatorEnabled = true;   // NEW (typing)
 let lastSyncedMute = null;
 let frivoscMuted = null;
 
@@ -2021,6 +2027,7 @@ async function pollFrivoscStatus() {
     oscEnabled_setting = Boolean(data.enabled);
     muteSyncEnabled = Boolean(data.mute_sync);
     unmuteOnSendEnabled = Boolean(data.unmute_on_send);
+    typingIndicatorEnabled = data.typing_enabled !== false;   // NEW (typing)
     frivoscMuted =
       !frivoscConnected || data.muted === null || data.muted === undefined
         ? null
@@ -2077,6 +2084,9 @@ async function saveOscSwitches(patch, toggle) {
     oscEnabled_setting = Boolean(saved.osc_enabled);
     muteSyncEnabled = Boolean(saved.osc_mute_sync);
     unmuteOnSendEnabled = Boolean(saved.osc_unmute_on_send);
+    // NEW (typing)
+    typingIndicatorEnabled = saved.osc_typing !== false;
+    if (oscTypingToggle) oscTypingToggle.checked = typingIndicatorEnabled;
     oscConfigured = oscEnabled_setting && frivoscConnected;
     syncOscSwitch();
     // Reflect it in the chip straight away rather than up to 30s later.
@@ -2097,6 +2107,16 @@ if (oscEnabledToggle) {
     oscConfigured = oscEnabled_setting && frivoscConnected;
     syncOscSwitch();
     saveOscSwitches({ osc_enabled: oscEnabledToggle.checked }, oscEnabledToggle);
+  });
+}
+
+// NEW (typing): saves itself, like the switches beside it — this card also
+// lives in the FrivOSC chip's panel, where there is no Save button.
+if (oscTypingToggle) {
+  oscTypingToggle.addEventListener("change", () => {
+    typingIndicatorEnabled = oscTypingToggle.checked;
+    saveOscSwitches({ osc_typing: oscTypingToggle.checked }, oscTypingToggle);
+    syncTypingIndicator();
   });
 }
 
@@ -6873,3 +6893,80 @@ if (updateOverlay) {
 
 loadUpdates();
 setInterval(() => { if (!updateJob) loadUpdates(); }, UPDATE_REFRESH_MS);
+
+
+// ============================================================
+// NEW (typing): VRChat's typing dots while you respond
+// ============================================================
+// The person you're talking to sees "…" over your head while you are
+// putting a reply together, the way VRChat's own keyboard shows it. This
+// works out whether that is happening and tells Frivo; FrivOSC picks it up
+// on its next outbox poll (twice a second) and sends /chatbox/typing.
+//
+// "Responding" means, with the Chatbox switch on and FrivOSC connected:
+//   - Live (Evora): you are talking, or the end of what you said is still
+//     being transcribed
+//   - Accurate: recording
+//   - any mode, or typing: the message box has unsent text that changed in
+//     the last few seconds (so a draft left sitting there does not keep the
+//     dots up forever)
+// Sending clears the box, which clears the dots; the chatbox message itself
+// replaces them in VRChat.
+
+const TYPING_CHECK_MS = 250;
+// Re-said this often while true. Frivo drops it after 4s without one, so a
+// page closed mid-sentence does not leave the dots up.
+const TYPING_REFRESH_MS = 2000;
+// A box that has not changed for this long is a draft, not a reply in
+// progress.
+const TYPING_IDLE_MS = 4000;
+
+let typingSent = false;
+let typingSentAt = 0;
+let typingLastValue = "";
+let typingLastChangeAt = 0;
+
+function respondingNow() {
+  if (!typingIndicatorEnabled || !oscConfigured || !oscEnabled()) return false;
+  const now = Date.now();
+  if (messageInput.value !== typingLastValue) {
+    typingLastValue = messageInput.value;
+    typingLastChangeAt = now;
+  }
+  if (isDictating) {
+    if (activeDictationMode === "accurate") return true;
+    if (activeDictationMode === "live_local" && liveLocal &&
+        (liveLocal.speaking || liveLocal.speculative)) return true;
+  }
+  return messageInput.value.trim() !== "" && now - typingLastChangeAt < TYPING_IDLE_MS;
+}
+
+async function postTyping(on) {
+  typingSent = on;
+  typingSentAt = Date.now();
+  try {
+    await fetch("/api/frivosc/typing", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ typing: on }),
+    });
+  } catch (err) {
+    // Nothing to do: Frivo forgets an unrefreshed "typing" by itself.
+  }
+}
+
+function syncTypingIndicator() {
+  const want = respondingNow();
+  if (want !== typingSent) postTyping(want);
+  else if (want && Date.now() - typingSentAt > TYPING_REFRESH_MS) postTyping(true);
+}
+
+setInterval(syncTypingIndicator, TYPING_CHECK_MS);
+// Closing the tab mid-sentence: say so now rather than after the 4s expiry.
+window.addEventListener("pagehide", () => {
+  if (!typingSent) return;
+  try {
+    navigator.sendBeacon("/api/frivosc/typing",
+      new Blob([JSON.stringify({ typing: false })], { type: "application/json" }));
+  } catch (err) { /* the expiry covers it */ }
+});

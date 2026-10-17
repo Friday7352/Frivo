@@ -688,6 +688,10 @@ def load_config():
         # because it presses a virtual key in VRChat, which the other two
         # never do.
         "osc_unmute_on_send": False,
+        # NEW (typing): VRChat's typing dots above your head while you are
+        # responding — talking with dictation on, or with unsent text in the
+        # message box. Only ever shown with the chatbox switched on.
+        "osc_typing": True,
         # NEW (updates): look for a newer Frivo a few seconds after starting
         # and every six hours after that. Only ever shows a chip; installing
         # is always a click.
@@ -1762,6 +1766,9 @@ def settings():
         if "osc_unmute_on_send" in data:
             CFG["osc_unmute_on_send"] = bool(data.get("osc_unmute_on_send"))
 
+        if "osc_typing" in data:   # NEW (typing)
+            CFG["osc_typing"] = bool(data.get("osc_typing"))
+
         save_config(CFG)
         return jsonify({"ok": True})
 
@@ -1784,6 +1791,7 @@ def settings():
             "osc_enabled": bool(CFG.get("osc_enabled", False)),
             "osc_mute_sync": bool(CFG.get("osc_mute_sync", False)),
             "osc_unmute_on_send": bool(CFG.get("osc_unmute_on_send", False)),
+            "osc_typing": bool(CFG.get("osc_typing", True)),   # NEW (typing)
             "elevenlabs_key_set": bool(CFG["elevenlabs_api_key"]),
             "voice_id": CFG["voice_id"],
             "voice_name": CFG.get("voice_name", ""),
@@ -2543,7 +2551,14 @@ FRIVOSC_STATE = {
     "version": "",
     "hostname": "",
     "muted": None,
+    # NEW (typing): until when the browser last said you are responding.
+    "typing_until": 0.0,
 }
+
+# NEW (typing): the browser re-says "typing" every couple of seconds while
+# it is true. A page closed mid-sentence stops saying it, and the dots go
+# away after this long rather than staying up over your head.
+FRIVOSC_TYPING_HOLD = 4.0
 FRIVOSC_OUTBOX = []
 FRIVOSC_LOCK = threading.Lock()
 
@@ -2643,7 +2658,32 @@ def frivosc_outbox():
     with FRIVOSC_LOCK:
         messages = list(FRIVOSC_OUTBOX)
         FRIVOSC_OUTBOX.clear()
-    return jsonify({"messages": messages, "enabled": True})
+    # NEW (typing): carried on the reply FrivOSC already polls twice a
+    # second, so the dots need no new connection. A FrivOSC from before
+    # 1.1.0 ignores the field.
+    return jsonify({"messages": messages, "enabled": True, "typing": frivosc_typing()})
+
+
+def frivosc_typing():
+    """NEW (typing): whether the dots should be up right now."""
+    if not CFG.get("osc_enabled", False) or not CFG.get("osc_typing", True):
+        return False
+    with FRIVOSC_LOCK:
+        return time.time() < FRIVOSC_STATE["typing_until"]
+
+
+@app.route("/api/frivosc/typing", methods=["POST"])
+def frivosc_typing_route():
+    """
+    NEW (typing): the browser saying whether you are responding. Sent when
+    it changes and every couple of seconds while it is true; anything not
+    refreshed for FRIVOSC_TYPING_HOLD seconds counts as stopped.
+    """
+    data = request.get_json(silent=True) or {}
+    on = bool(data.get("typing"))
+    with FRIVOSC_LOCK:
+        FRIVOSC_STATE["typing_until"] = (time.time() + FRIVOSC_TYPING_HOLD) if on else 0.0
+    return jsonify({"ok": True, "typing": frivosc_typing()})
 
 
 @app.route("/api/frivosc/ack", methods=["POST"])
@@ -2704,7 +2744,7 @@ def frivosc_settings():
     depends on every one of them staying optional is a trap for later.
     """
     data = request.get_json(force=True) or {}
-    for key in ("osc_enabled", "osc_mute_sync", "osc_unmute_on_send"):
+    for key in ("osc_enabled", "osc_mute_sync", "osc_unmute_on_send", "osc_typing"):   # CHANGED (typing)
         if key in data:
             CFG[key] = bool(data.get(key))
     save_config(CFG)
@@ -2712,6 +2752,7 @@ def frivosc_settings():
         "osc_enabled": bool(CFG.get("osc_enabled", False)),
         "osc_mute_sync": bool(CFG.get("osc_mute_sync", False)),
         "osc_unmute_on_send": bool(CFG.get("osc_unmute_on_send", False)),
+        "osc_typing": bool(CFG.get("osc_typing", True)),   # NEW (typing)
     })
 
 
@@ -2722,6 +2763,7 @@ def frivosc_status_route():
     status["enabled"] = bool(CFG.get("osc_enabled", False))
     status["mute_sync"] = bool(CFG.get("osc_mute_sync", False))
     status["unmute_on_send"] = bool(CFG.get("osc_unmute_on_send", False))
+    status["typing_enabled"] = bool(CFG.get("osc_typing", True))   # NEW (typing)
     return jsonify(status)
 
 
