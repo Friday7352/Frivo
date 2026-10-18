@@ -215,7 +215,7 @@ function setLamp(state) {
 
 function addCredits(n) {
   sessionCredits += n;
-  sessionCreditsEl.textContent = `${sessionCredits.toLocaleString()} credits this session`;
+  sessionCreditsEl.textContent = `${sessionCredits.toLocaleString()} used this session`;   // CHANGED (1.5.0): shorter, fits under the label
   const line = document.getElementById("creditsSession");
   if (line) line.textContent = sessionCredits.toLocaleString();
 }
@@ -2599,14 +2599,18 @@ function renderVoiceTrigger() {
     voiceTriggerName.textContent = chipName(v);
     // The full name still lives in the tooltip, so nothing is lost by
     // showing the short one on the row.
-    voiceTrigger.title = v.name;
     // Same two facts as the list rows, for the same reason.
     voiceTriggerTags.textContent = [voiceLanguageLabel(v), v.gender]
       .filter(Boolean)
       .join(" · ");
+    // CHANGED (1.5.0): the chip shows only the name; the language and
+    // gender moved into the tooltip with the full name.
+    voiceTrigger.title = [v.name, voiceTriggerTags.textContent].filter(Boolean).join(" · ");
   } else if (activeVoiceName()) {
     voiceTriggerName.textContent = activeVoiceName().replace(/\s*\([^)]*\)\s*$/, "");
     voiceTriggerTags.textContent = allVoices.length ? "not in your library" : "";
+    // CHANGED (1.5.0): the tags are hidden on the chip, so say it here.
+    voiceTrigger.title = [activeVoiceName(), voiceTriggerTags.textContent].filter(Boolean).join(" · ");
   } else {
     voiceTriggerName.textContent = allVoices.length ? "Choose a voice" : "Loading voices…";
     voiceTriggerTags.textContent = "";
@@ -7943,4 +7947,262 @@ window.addEventListener("pagehide", () => {
     });
   });
   if (saveBtn) saveBtn.addEventListener("click", () => setTimeout(() => flashSaved(true), 600));
+})();
+// ---------------------------------------------------------------------------
+// NEW (1.5.0): graphics-card memory graph, in the status popover.
+//
+// Evora reports the card (how much memory is used, and how much of that is
+// Ollama, Evora and everything else); the server keeps the last ten minutes.
+// This only asks while the popover is open.
+// ---------------------------------------------------------------------------
+var GPU_POLL_MS = 2000;
+var GPU_GAP_SECONDS = 15;   // a longer gap between readings breaks the graph (Frivo wasn't running)
+var GPU_SERIES = [
+  { key: "ollama", name: "Ollama" },
+  { key: "evora", name: "Evora" },
+  { key: "other", name: "Other" },
+];
+var gpuTimer = null;
+var gpuData = null;
+var gpuGeometry = null;
+
+function gpuGb(mb) {
+  if (mb == null || isNaN(mb)) return "—";
+  return (mb / 1024).toFixed(mb >= 10240 ? 0 : 1) + " GB";
+}
+
+function gpuAgo(seconds) {
+  if (seconds < 8) return "Now";
+  if (seconds < 60) return `${Math.round(seconds)} s ago`;
+  return `${Math.round(seconds / 60)} min ago`;
+}
+
+function gpuCardName(name) {
+  return String(name || "").replace(/^NVIDIA\s+/i, "").replace(/^GeForce\s+/i, "");
+}
+
+function gpuSeriesFor(data) {
+  // Which bands the card has: Ollama only when it's on this card, Evora
+  // only when Windows said how much it uses.
+  const parts = (data.card && data.card.parts) || {};
+  return GPU_SERIES.filter((s) => {
+    if (s.key === "ollama") return data.same_card;
+    if (s.key === "evora") return !parts.estimated;
+    return true;
+  });
+}
+
+function gpuSvgEl(tag, attrs) {
+  const el = document.createElementNS("http://www.w3.org/2000/svg", tag);
+  Object.entries(attrs || {}).forEach(([k, v]) => el.setAttribute(k, v));
+  return el;
+}
+
+function drawGpuChart(data) {
+  const svg = $("gpuSvg");
+  const plot = $("gpuPlot");
+  if (!svg || !plot) return;
+  const width = Math.max(120, Math.round(svg.getBoundingClientRect().width || plot.clientWidth || 300));
+  const height = 84;
+  svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+  svg.replaceChildren();
+
+  const now = data.now || Date.now() / 1000;
+  const span = data.history_seconds || 600;
+  const points = (data.history || []).filter((p) => p.total);
+  const total = (data.card && data.card.total_mb) || Math.max(1, ...points.map((p) => p.total));
+  const series = gpuSeriesFor(data);
+  const x = (t) => Math.max(0, Math.min(width, width - ((now - t) / span) * width));
+  const y = (mb) => height - Math.max(0, Math.min(1, mb / total)) * (height - 2);
+  const valueOf = (p, key) => (key === "other" && !series.some((s) => s.key === "evora"))
+    ? (p.other || 0) + (p.evora || 0)   // Evora's share unknown: it's inside "Other"
+    : (p[key] || 0);
+
+  // Split into runs wherever readings stopped for a while.
+  const runs = [];
+  points.forEach((p, i) => {
+    if (!i || p.t - points[i - 1].t > GPU_GAP_SECONDS) runs.push([]);
+    runs[runs.length - 1].push(p);
+  });
+
+  svg.append(gpuSvgEl("line", { class: "gpu-cap", x1: 0, x2: width, y1: y(total), y2: y(total) }));
+
+  runs.forEach((run) => {
+    const xs = run.map((p) => x(p.t));
+    if (run.length === 1) { run = [run[0], run[0]]; xs.unshift(Math.max(0, xs[0] - 3)); }
+    let below = run.map(() => 0);
+    const tops = [];
+    series.forEach((s) => {
+      const above = run.map((p, i) => below[i] + valueOf(p, s.key));
+      const top = xs.map((px, i) => `${px.toFixed(1)},${y(above[i]).toFixed(1)}`);
+      const bottom = xs.map((px, i) => `${px.toFixed(1)},${y(below[i]).toFixed(1)}`).reverse();
+      svg.append(gpuSvgEl("polygon", { class: `gpu-band is-${s.key}`, points: top.concat(bottom).join(" ") }));
+      tops.push(top);
+      below = above;
+    });
+    // The surface-coloured gap between bands (not above the top one).
+    tops.slice(0, -1).forEach((top) => svg.append(gpuSvgEl("polyline", { class: "gpu-gap", points: top.join(" ") })));
+  });
+
+  svg.append(gpuSvgEl("line", { class: "gpu-base", x1: 0, x2: width, y1: height - 0.5, y2: height - 0.5 }));
+  const cross = gpuSvgEl("line", { class: "gpu-cross", x1: 0, x2: 0, y1: 0, y2: height, visibility: "hidden" });
+  svg.append(cross);
+  gpuGeometry = { width, points, x, series, valueOf, now, cross, total };
+
+  const card = data.card;
+  const parts = card.parts || {};
+  const label = series.map((s) => `${s.name} ${gpuGb(valueOf({ ...parts, ollama: parts.ollama_mb, evora: parts.evora_mb, other: parts.other_mb }, s.key))}`).join(", ");
+  svg.setAttribute("aria-label",
+    `Graphics card memory over the last 10 minutes. Now ${gpuGb(card.used_mb)} of ${gpuGb(card.total_mb)} used: ${label}.`);
+}
+
+function gpuHover(event) {
+  const g = gpuGeometry;
+  const tip = $("gpuTip");
+  const svg = $("gpuSvg");
+  if (!g || !tip || !svg || !g.points.length) return;
+  const box = svg.getBoundingClientRect();
+  const px = ((event.clientX - box.left) / box.width) * g.width;
+  let nearest = g.points[0];
+  g.points.forEach((p) => { if (Math.abs(g.x(p.t) - px) < Math.abs(g.x(nearest.t) - px)) nearest = p; });
+  const at = g.x(nearest.t);
+  g.cross.setAttribute("x1", at);
+  g.cross.setAttribute("x2", at);
+  g.cross.setAttribute("visibility", "visible");
+
+  const rows = g.series.slice().reverse().map((s) => {
+    const name = s.key === "other" && !g.series.some((x) => x.key === "evora") ? "Other + Evora" : s.name;
+    return `<div class="gpu-tip-row"><span class="gpu-swatch is-${s.key}"></span>${name}<b>${gpuGb(g.valueOf(nearest, s.key))}</b></div>`;
+  });
+  rows.push(`<div class="gpu-tip-row"><span class="gpu-swatch is-free"></span>Free<b>${gpuGb(Math.max(0, (nearest.total || g.total) - (nearest.used || 0)))}</b></div>`);
+  tip.innerHTML = `<div class="gpu-tip-when">${gpuAgo(g.now - nearest.t)}</div>${rows.join("")}`;
+  tip.classList.remove("is-hidden");
+  const left = (at / g.width) * box.width;
+  const tipWidth = tip.offsetWidth || 140;
+  tip.style.left = `${Math.max(0, Math.min(box.width - tipWidth, left - tipWidth / 2))}px`;
+}
+
+function gpuHoverEnd() {
+  const tip = $("gpuTip");
+  if (tip) tip.classList.add("is-hidden");
+  if (gpuGeometry) gpuGeometry.cross.setAttribute("visibility", "hidden");
+}
+
+function gpuLegendRow(cls, label, value, note) {
+  const li = document.createElement("li");
+  const swatch = document.createElement("span");
+  swatch.className = `gpu-swatch is-${cls}`;
+  const text = document.createElement("span");
+  text.className = "gpu-label";
+  text.textContent = label;
+  if (note) {
+    const small = document.createElement("small");
+    small.textContent = ` · ${note}`;
+    text.append(small);
+  }
+  const val = document.createElement("span");
+  val.className = "gpu-value";
+  val.textContent = value;
+  li.append(swatch, text, val);
+  return li;
+}
+
+function ollamaModelNote(models) {
+  return models.map((m) => m.name).join(", ");
+}
+
+function renderGpu(data) {
+  const box = $("gpuCard");
+  if (!box) return;
+  if (!data || !data.enabled) { box.classList.add("is-hidden"); return; }
+  box.classList.remove("is-hidden");
+
+  const card = data.card;
+  const models = data.ollama_models || [];
+  const legend = $("gpuLegend");
+  const foot = $("gpuFoot");
+  const plot = $("gpuPlot");
+  const notes = [];
+  legend.replaceChildren();
+
+  if (card) {
+    const parts = card.parts || {};
+    $("gpuName").textContent = "";
+    $("gpuUsed").textContent = `${gpuGb(card.used_mb)} / ${gpuGb(card.total_mb)}`;
+    plot.classList.remove("is-hidden");
+    drawGpuChart(data);
+    gpuSeriesFor(data).slice().reverse().forEach((s) => {
+      let value = parts[`${s.key}_mb`];
+      let label = s.name;
+      let note = "";
+      if (s.key === "ollama") note = ollamaModelNote(models);
+      if (s.key === "other" && parts.estimated) { value = (parts.other_mb || 0) + (parts.evora_mb || 0); label = "Other"; note = "includes Evora"; }
+      if (s.key === "other" && !parts.estimated) note = "desktop, games, driver";
+      legend.append(gpuLegendRow(s.key, label, gpuGb(value), note));
+    });
+    legend.append(gpuLegendRow("free", "Free", gpuGb(Math.max(0, card.total_mb - card.used_mb))));
+
+    const facts = [gpuCardName(card.name)];
+    if (card.util_pct != null) facts.push(`${card.util_pct}% busy`);
+    if (card.temp_c != null) facts.push(`${card.temp_c}°C`);
+    if (facts.length) notes.push(facts.join(" · "));
+    if (data.uses_ollama && !data.same_card && models.length) {
+      notes.push(`Ollama is on another PC: ${models.map((m) => `${m.name} ${gpuGb(m.vram_mb)}`).join(", ")}.`);
+    }
+    if (data.uses_ollama && data.ollama_problem) notes.push(data.ollama_problem);
+  } else {
+    // No card report: show what Ollama says about its own models.
+    plot.classList.add("is-hidden");
+    gpuGeometry = null;
+    $("gpuName").textContent = models.length ? "Ollama" : "";
+    $("gpuName").title = "";
+    const vram = models.reduce((sum, m) => sum + (m.vram_mb || 0), 0);
+    $("gpuUsed").textContent = models.length ? gpuGb(vram) : "";
+    models.forEach((m) => {
+      const partial = m.size_mb && m.vram_mb < m.size_mb * 0.97;
+      legend.append(gpuLegendRow("ollama", m.name, gpuGb(m.vram_mb), partial ? "part on the CPU" : ""));
+    });
+    if (data.uses_ollama && !models.length && !data.ollama_problem) notes.push("No Ollama model is loaded right now.");
+    if (data.ollama_problem) notes.push(data.ollama_problem);
+    if (data.card_problem) notes.push(data.card_problem);
+    else if (!data.uses_evora) {
+      notes.push("To graph the whole card, run Evora on the PC with the graphics card and choose it for Transcription.");
+    }
+  }
+  foot.textContent = notes.join(" ");
+}
+
+async function refreshGpu() {
+  try {
+    const res = await fetch("/api/gpu");
+    if (!res.ok) return;
+    gpuData = await res.json();
+  } catch (err) {
+    return;   // Frivo itself is unreachable; the status rows say so
+  }
+  renderGpu(gpuData);
+}
+
+(function watchGpuWhileStatusOpen() {
+  const pop = $("statusPop");
+  const svg = $("gpuSvg");
+  if (!pop) return;
+  if (svg) {
+    svg.addEventListener("pointermove", gpuHover);
+    svg.addEventListener("pointerdown", gpuHover);
+    svg.addEventListener("pointerleave", gpuHoverEnd);
+  }
+  const sync = () => {
+    const open = !pop.classList.contains("is-hidden");
+    if (open && !gpuTimer) {
+      refreshGpu();
+      gpuTimer = setInterval(refreshGpu, GPU_POLL_MS);
+    } else if (!open && gpuTimer) {
+      clearInterval(gpuTimer);
+      gpuTimer = null;
+      gpuHoverEnd();
+    }
+  };
+  new MutationObserver(sync).observe(pop, { attributes: true, attributeFilter: ["class"] });
+  sync();
 })();

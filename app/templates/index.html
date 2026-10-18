@@ -261,6 +261,22 @@
             <div id="statusPop" class="popover status-pop is-hidden" role="dialog" aria-label="Status">
               <!-- One chip per service, built by loadLocalStatus(). -->
               <div id="serviceStatus" class="service-status-list is-hidden"></div>
+              <!-- NEW (1.5.0): graphics-card memory, reported by Evora (and
+                   Ollama). Filled in by renderGpu() while this is open. -->
+              <section id="gpuCard" class="gpu-card is-hidden" aria-label="Graphics card memory">
+                <div class="gpu-head">
+                  <span class="gpu-title">Graphics card</span>
+                  <span class="gpu-name" id="gpuName"></span>
+                  <span class="gpu-used" id="gpuUsed"></span>
+                </div>
+                <div class="gpu-plot" id="gpuPlot">
+                  <svg class="gpu-svg" id="gpuSvg" role="img" aria-label="Graphics card memory over the last 10 minutes"></svg>
+                  <div class="gpu-tip is-hidden" id="gpuTip" aria-hidden="true"></div>
+                  <div class="gpu-axis" aria-hidden="true"><span>10 min ago</span><span>now</span></div>
+                </div>
+                <ul class="gpu-legend" id="gpuLegend"></ul>
+                <p class="gpu-foot" id="gpuFoot"></p>
+              </section>
               <div class="credit-block">
                 <button class="credit-card" id="creditsToggle" type="button"
                         aria-expanded="false" aria-controls="creditsPanel"
@@ -270,10 +286,10 @@
                   </span>
                   <span class="credit-name">Credits</span>
                   <span id="elevenCredits" class="credit-readout is-hidden"></span>
-                  <span class="readout" id="sessionCredits">0 credits this session</span>
+                  <span class="readout" id="sessionCredits">0 used this session</span>
                 </button>
                 <div class="credit-panel is-hidden" id="creditsPanel">
-                  <p class="credit-source">ElevenLabs credits</p>
+                  <p class="credit-source">Usage</p><!-- CHANGED (1.5.0): the card above already says ElevenLabs credits -->
                   <div class="credit-line">
                     <span class="credit-line-label">Used today</span>
                     <span class="credit-line-value" id="creditsToday">—</span>

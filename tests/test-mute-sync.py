@@ -200,6 +200,9 @@ function check(name, cond, got) {
   // NEW (1.5.0): opening Frivo while already unmuted in VRChat must not
   // switch dictation on. Only a change of mute after that does.
   console.log('\n--- opening the page while unmuted ---');
+  // CHANGED (1.5.0): mute sync back on first; the case above left it off,
+  // and with it off unmuting never starts dictation at all.
+  await toggle(true); await wait(800);
   await mute('off');
   await p.reload({ waitUntil: 'networkidle' }); await wait(2500);
   check('dictation is off when the page opens, even unmuted', !(await recording()));

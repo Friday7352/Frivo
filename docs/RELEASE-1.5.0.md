@@ -148,3 +148,16 @@ With the AI and VRChat chips (and **Use English** when a profile suggests anothe
 ## Replies say Local or OpenAI
 
 Hovering a reply shows a small **Local** (green) or **OpenAI** tag in the line underneath, so you can see at a glance where it was written. Hover the tag for the model's name.
+
+## Graphics card memory graph
+
+Click **Ready** to see how full the graphics card's memory has been over the
+last 10 minutes, split into Ollama, Evora and everything else, with how busy
+and how warm the card is. Hover over the graph to see any moment.
+
+Evora reports the card, since it runs on the PC that has it. This needs the
+latest Evora (its new `GET /gpu`). With an older Evora, or without Evora, Frivo shows
+how much of each loaded Ollama model is on the graphics card instead, and
+says why it can't show the whole card. Frivo keeps the readings in the
+background, a couple of small requests every few seconds, so the graph
+already has history when you open it.

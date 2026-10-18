@@ -2756,7 +2756,9 @@ def diagnose():
                        "dictateBtn", "micSelect", "dictationModeRadios",
                        "oscEnabledToggle", "oscMuteSyncToggle",
                        "frivoscMicValue", "serviceStatus",
-                       "updateChip", "updateOverlay"]:   # NEW (updates)
+                       "updateChip", "updateOverlay",   # NEW (updates)
+                       "aiChip", "setup/ollama",        # NEW (1.5.0): the AI chip, the guide link
+                       "gpuCard"]:                      # NEW (1.5.0): the graphics-card graph
             markers[marker] = marker in content
 
     js_path = os.path.join(BASE_DIR, "static", "app.js")
@@ -2764,9 +2766,12 @@ def diagnose():
     if os.path.exists(js_path):
         with open(js_path, "r", encoding="utf-8") as f:
             js = f.read()
-        for marker in ["reportMissingElements", "buildAudioPlayer",
+        # CHANGED (1.5.0): buildAudioPlayer became attachBubbleAudio long ago,
+        # so it always read MISSING. whereWritten is the newest addition.
+        for marker in ["reportMissingElements", "attachBubbleAudio",
                        "masterVolumeSlider", "fillLanguages", "fillOptionList",
-                       "loadUpdates"]:   # NEW (updates)
+                       "loadUpdates", "whereWritten",    # NEW (updates); NEW (1.5.0) whereWritten
+                       "renderGpu"]:                     # NEW (1.5.0): the graphics-card graph
             js_markers[marker] = marker in js
 
     try:
@@ -5018,6 +5023,178 @@ def set_ollama_tier():
     return jsonify({"ok": True, "tier": tier, "model": wanted})
 
 
+# ---------------------------------------------------------------------------
+# NEW (1.5.0): graphics-card memory graph
+#
+# Ollama and Evora usually share one graphics card, on another PC. Frivo
+# can't see that card itself, so Evora reports it (GET /gpu: the card's
+# memory, and how much of it is Ollama, Evora and everything else) and
+# Frivo keeps the last ten minutes for the graph in the status popover.
+#
+# Without Evora, Ollama's own /api/ps still says how much of each loaded
+# model is on its graphics card, so there is still something to show, just
+# not the whole card.
+#
+# Sampled in the background whenever a local service is selected — every
+# few seconds is two tiny LAN requests — so the graph already has history
+# the moment you open it. Faster while someone is looking at it.
+# ---------------------------------------------------------------------------
+
+GPU_HISTORY_SECONDS = 600
+GPU_SAMPLE_SECONDS = 5
+GPU_SAMPLE_SECONDS_VIEWED = 2
+GPU_VIEWED_FOR = 30            # seconds a look at the graph counts as "watching"
+_GPU_LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1", "evora.local", "frivo.local"}
+
+_gpu_lock = threading.Lock()
+_gpu_state = {"latest": None, "viewed": 0.0, "history": collections.deque()}
+
+
+def gpu_watch_targets():
+    """(uses Ollama, uses Evora) — only selected services are sampled."""
+    chat = resolve_provider("chat_provider", CHAT_PROVIDERS)
+    translation = resolve_provider("translation_provider", TRANSLATION_PROVIDERS)
+    transcription = resolve_provider("transcription_provider", TRANSCRIPTION_PROVIDERS)
+    return "ollama" in (chat, translation), transcription == "local_whisper"
+
+
+def same_gpu_host(first_url, second_url):
+    """Whether two service addresses are the same PC (so the same card)."""
+    a = (urlsplit(first_url).hostname or "").lower()
+    b = (urlsplit(second_url).hostname or "").lower()
+    if not a or not b:
+        return False
+    return a == b or (a in _GPU_LOCAL_HOSTS and b in _GPU_LOCAL_HOSTS)
+
+
+def read_evora_gpu():
+    """(card report, problem). The report is Evora's /gpu, or None."""
+    try:
+        response = requests.get(f"{whisper_base_url()}/gpu", timeout=(LOCAL_CONNECT_TIMEOUT, 4))
+    except Exception:
+        return None, f"Evora isn't reachable at {whisper_base_url()}."
+    if response.status_code == 404:
+        return None, "This version of Evora can't report the graphics card. Update Evora to see it."
+    try:
+        data = response.json()
+    except ValueError:
+        return None, "Evora sent something Frivo couldn't read."
+    if not data.get("ok"):
+        return None, data.get("reason") or "Evora couldn't read the graphics card."
+    return data, None
+
+
+def read_ollama_gpu():
+    """([{name, vram_mb, size_mb}], problem) for the models Ollama has loaded."""
+    try:
+        loaded = _ollama_get("/api/ps").get("models") or []
+    except Exception:
+        return [], f"Ollama isn't reachable at {ollama_base_url()}."
+    models = []
+    for model in loaded:
+        size = int(model.get("size") or 0)
+        vram = int(model.get("size_vram") or 0)
+        models.append({"name": model.get("name") or model.get("model") or "model",
+                       "vram_mb": round(vram / 1048576), "size_mb": round(size / 1048576)})
+    return models, None
+
+
+def gpu_sample():
+    """One reading of everything the graph shows."""
+    uses_ollama, uses_evora = gpu_watch_targets()
+    card, card_problem = read_evora_gpu() if uses_evora else (None, None)
+    models, ollama_problem = read_ollama_gpu() if uses_ollama else ([], None)
+    ollama_vram = sum(m["vram_mb"] for m in models)
+
+    same_card = False
+    if card:
+        parts = card.get("parts")
+        if parts and parts.get("ollama_mb"):
+            same_card = True     # Evora saw Ollama on its own card: settled
+        elif uses_ollama:
+            same_card = same_gpu_host(whisper_base_url(), ollama_base_url())
+        if not parts:
+            # Windows didn't say who uses the card. When Ollama is on it,
+            # Ollama's own figure still splits the total; Evora counts as
+            # "other" then, and the graph says so.
+            used = int(card.get("used_mb") or 0)
+            ollama = min(used, ollama_vram) if same_card else 0
+            card["parts"] = {"ollama_mb": ollama, "evora_mb": 0, "other_mb": used - ollama,
+                             "estimated": True}
+
+    return {
+        "t": time.time(),
+        "uses_ollama": uses_ollama,
+        "uses_evora": uses_evora,
+        "card": card,
+        "card_problem": card_problem,
+        "same_card": same_card,
+        "ollama_models": models,
+        "ollama_problem": ollama_problem,
+    }
+
+
+def gpu_history_point(sample):
+    """What one sample adds to the graph."""
+    card = sample.get("card")
+    if card:
+        parts = card.get("parts") or {}
+        return {"t": round(sample["t"], 1), "total": card.get("total_mb"), "used": card.get("used_mb"),
+                "ollama": parts.get("ollama_mb", 0), "evora": parts.get("evora_mb", 0),
+                "other": parts.get("other_mb", 0)}
+    if sample.get("ollama_models"):
+        return {"t": round(sample["t"], 1), "total": None, "used": None,
+                "ollama": sum(m["vram_mb"] for m in sample["ollama_models"]), "evora": 0, "other": 0}
+    return None
+
+
+def record_gpu_sample(sample):
+    point = gpu_history_point(sample)
+    with _gpu_lock:
+        _gpu_state["latest"] = sample
+        history = _gpu_state["history"]
+        if point:
+            history.append(point)
+        cutoff = sample["t"] - GPU_HISTORY_SECONDS
+        while history and history[0]["t"] < cutoff:
+            history.popleft()
+
+
+def gpu_sampler_loop():
+    while True:
+        uses_ollama, uses_evora = gpu_watch_targets()
+        if uses_ollama or uses_evora:
+            try:
+                record_gpu_sample(gpu_sample())
+            except Exception as e:
+                log_server_event(f"GPU graph: {e!r}")
+        watched = time.time() - _gpu_state["viewed"] < GPU_VIEWED_FOR
+        time.sleep(GPU_SAMPLE_SECONDS_VIEWED if watched else GPU_SAMPLE_SECONDS)
+
+
+@app.route("/api/gpu")
+def gpu_route():
+    """The latest reading and the last ten minutes, for the status popover."""
+    uses_ollama, uses_evora = gpu_watch_targets()
+    _gpu_state["viewed"] = time.time()
+    if not (uses_ollama or uses_evora):
+        return jsonify({"enabled": False})
+    latest = _gpu_state["latest"]
+    stale = (latest is None or time.time() - latest["t"] > GPU_SAMPLE_SECONDS * 2
+             or latest.get("uses_ollama") != uses_ollama or latest.get("uses_evora") != uses_evora)
+    if stale:
+        # First look, or the sampler isn't running (tests): read it now.
+        record_gpu_sample(gpu_sample())
+    with _gpu_lock:
+        latest = dict(_gpu_state["latest"])
+        history = list(_gpu_state["history"])
+    latest["enabled"] = True
+    latest["history"] = history
+    latest["history_seconds"] = GPU_HISTORY_SECONDS
+    latest["now"] = time.time()
+    return jsonify(latest)
+
+
 @app.route("/api/translate", methods=["POST"])
 def translate():
     """
@@ -5757,6 +5934,8 @@ def serve(host, port, cert_path, key_path):
     threading.Thread(target=warm_free_voices, name="free-voices-warm", daemon=True).start()
     # NEW (1.5.0): delete old reply audio now, and every six hours after.
     threading.Thread(target=audio_prune_loop, name="audio-prune", daemon=True).start()
+    # NEW (1.5.0): keep the last ten minutes of graphics-card memory for the graph.
+    threading.Thread(target=gpu_sampler_loop, name="gpu-graph", daemon=True).start()
 
     try:
         import cheroot

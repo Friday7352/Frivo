@@ -429,3 +429,7 @@ Double-click `tests/check-windows-voices.bat` on a Windows PC. It runs the real 
 ## test-ui-shell.py (2.0 interface)
 
 `python3 tests/test-ui-shell.py` drives the redesigned page in a real browser: the rail (Chat / Listening / Voices / Settings, active state, the listening dot), the drawer, the chips and their popovers, the status pill, the voice sheet's engine groups and cost tags, Settings' one-section-at-a-time navigation and search, autosave with the *Saved* mark, the Save key button, and the light theme. Two older tests were updated for the new layout: `test-listen-click.py` opens the drawer first, and `test-update-ui.py` opens Settings from the rail and the Updates page.
+
+## test-gpu-graph.py (1.5.0)
+
+`python3 tests/test-gpu-graph.py` runs Frivo against stand-in Evora and Ollama servers and checks the graphics-card graph in the status popover: it's off with no local service chosen; with Evora it reports the card and its Ollama / Evora / Other split; when Windows doesn't say who uses the card, Ollama's own figure splits it; Ollama on another PC isn't stacked onto Evora's card; an Evora too old for `/gpu`, an unreachable Evora, a PC with no NVIDIA card and a down Ollama each say what's wrong; history keeps ten minutes; and the page has the graph.

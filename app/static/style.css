@@ -2971,3 +2971,174 @@ button.srow:active { background: transparent; }
 /* NEW (1.5.0): the link to the Set up local AI guide. */
 .settings-guide-link { display: inline-block; margin-left: 4px; color: var(--accent); text-decoration: none; font-weight: 500; }
 .settings-guide-link:hover { text-decoration: underline; }
+
+/* CHANGED (1.5.0): the voice chip shows just the voice's name. Its language
+   and gender are in the chip's tooltip. */
+#voiceTrigger .voice-trigger-tags { display: none; }
+
+/* CHANGED (1.5.0): the ElevenLabs credits card in the status popover. Its
+   base styles were lost in the 2.0 redesign, so the label, the balance and
+   "this session" ran together on one line and the panel was unstyled.
+   The card: the icon on the left, "ElevenLabs credits" with "this session"
+   underneath, and the balance on the right. Click it for the panel. */
+.status-pop .credit-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-areas: "icon name value" "icon sub value";
+  align-items: center;
+  column-gap: 10px;
+  row-gap: 1px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: var(--radius);
+  background: var(--fill);
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.status-pop .credit-card:hover { background: var(--fill-strong); }
+.status-pop .credit-card[aria-expanded="true"] { border-radius: var(--radius) var(--radius) 0 0; }
+.status-pop .credit-icon { grid-area: icon; display: grid; place-items: center; color: var(--ink-dim); }
+.status-pop .credit-name { grid-area: name; font-size: var(--text-subhead); font-weight: 500; }
+.status-pop .credit-name::after { content: " · ElevenLabs"; color: var(--ink-faint); font-weight: 400; }
+.status-pop .credit-card .readout {
+  grid-area: sub;
+  margin: 0;
+  font-family: var(--font-panel);
+  font-size: var(--text-caption);
+  color: var(--ink-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.status-pop .credit-readout {
+  grid-area: value;
+  font-family: var(--font-mono);
+  font-size: var(--text-subhead);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+  white-space: nowrap;
+}
+.status-pop .credit-readout.is-low { color: var(--warn); }
+.status-pop .credit-readout.is-empty { color: var(--alert); }
+.status-pop .credit-readout.is-stale { color: var(--ink-faint); }
+
+/* The panel opened from the card: label on the left, number on the right. */
+.status-pop .credit-panel {
+  margin: 0;
+  padding: 4px 12px 12px;
+  border: 0;
+  border-radius: 0 0 var(--radius) var(--radius);
+  background: var(--fill);
+  font-size: var(--text-subhead);
+}
+.status-pop .credit-source {
+  margin: 0 0 4px;
+  padding-top: 8px;
+  border-top: 1px solid var(--rule-soft);
+  font-size: var(--text-caption);
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+.status-pop .credit-line {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  padding: 5px 0;
+}
+.status-pop .credit-line-label { color: var(--ink-dim); min-width: 0; }
+.status-pop .credit-line-value {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+  text-align: right;
+  white-space: nowrap;
+}
+.status-pop .credit-line--plan { border-top: 1px solid var(--rule-soft); margin-top: 4px; padding-top: 8px; }
+.status-pop .credit-foot { margin: 8px 0 6px; font-size: var(--text-caption); color: var(--ink-faint); }
+.status-pop .credit-foot:empty { display: none; }
+.status-pop .credit-panel .link-btn { font-size: var(--text-caption); }
+/* ---------------------------------------------------------------------------
+   NEW (1.5.0): graphics-card memory graph, in the status popover.
+   Series colours are the first three slots of a colour-blind-checked
+   categorical palette, stepped separately for each theme. Text never takes
+   the series colour; the swatch beside it carries who's who.
+--------------------------------------------------------------------------- */
+:root {
+  --gpu-ollama: #3987e5;
+  --gpu-evora:  #d95926;
+  --gpu-other:  #199e70;
+}
+html[data-theme="light"] {
+  --gpu-ollama: #2a78d6;
+  --gpu-evora:  #eb6834;
+  --gpu-other:  #1baf7a;
+}
+.status-pop .gpu-card {
+  margin: 0 0 10px;
+  padding: 10px 12px 10px;
+  border-radius: var(--radius);
+  background: var(--fill);
+}
+.gpu-head { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.gpu-title { font-size: var(--text-subhead); font-weight: 500; color: var(--ink); white-space: nowrap; }
+.gpu-name {
+  min-width: 0; flex: 1 1 auto;
+  font-size: var(--text-caption); color: var(--ink-faint);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.gpu-used {
+  margin-left: auto;
+  font-family: var(--font-mono); font-size: var(--text-caption);
+  font-variant-numeric: tabular-nums; color: var(--ink); white-space: nowrap;
+}
+.gpu-plot { position: relative; margin-top: 8px; }
+.gpu-plot.is-hidden { display: none; }
+.gpu-svg { display: block; width: 100%; height: 84px; overflow: visible; touch-action: none; }
+.gpu-svg .gpu-band { stroke: none; }
+.gpu-svg .is-ollama { fill: var(--gpu-ollama); }
+.gpu-svg .is-evora  { fill: var(--gpu-evora); }
+.gpu-svg .is-other  { fill: var(--gpu-other); }
+/* The 2px gap between stacked bands, drawn in the card's own colour. */
+.gpu-svg .gpu-gap { fill: none; stroke: var(--surface); stroke-width: 2; stroke-linejoin: round; }
+.gpu-svg .gpu-cap { fill: none; stroke: var(--rule); stroke-width: 1; stroke-dasharray: 3 3; }
+.gpu-svg .gpu-base { fill: none; stroke: var(--rule); stroke-width: 1; }
+.gpu-svg .gpu-cross { stroke: var(--ink-dim); stroke-width: 1; }
+.gpu-axis {
+  display: flex; justify-content: space-between; margin-top: 4px;
+  font-size: 11px; color: var(--ink-faint);
+}
+.gpu-tip {
+  position: absolute; top: -6px; z-index: 2; pointer-events: none;
+  min-width: 132px; padding: 7px 9px;
+  border: 1px solid var(--rule); border-radius: 8px;
+  background: var(--surface-2); box-shadow: var(--shadow-md);
+  font-size: var(--text-caption); color: var(--ink);
+  transform: translateY(-100%);
+}
+.gpu-tip.is-hidden { display: none; }
+.gpu-tip-when { color: var(--ink-faint); margin-bottom: 4px; }
+.gpu-tip-row, .gpu-legend li {
+  display: flex; align-items: center; gap: 7px;
+}
+.gpu-tip-row b, .gpu-legend .gpu-value {
+  margin-left: auto; padding-left: 10px;
+  font-family: var(--font-mono); font-weight: 400; font-variant-numeric: tabular-nums;
+  color: var(--ink); white-space: nowrap;
+}
+.gpu-swatch { flex: 0 0 auto; width: 9px; height: 9px; border-radius: 3px; }
+.gpu-swatch.is-ollama { background: var(--gpu-ollama); }
+.gpu-swatch.is-evora  { background: var(--gpu-evora); }
+.gpu-swatch.is-other  { background: var(--gpu-other); }
+.gpu-swatch.is-free   { box-shadow: inset 0 0 0 1px var(--ink-faint); }
+.gpu-legend { list-style: none; margin: 8px 0 0; padding: 0; font-size: var(--text-caption); }
+.gpu-legend li { padding: 2px 0; color: var(--ink-dim); min-width: 0; }
+.gpu-legend .gpu-label { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gpu-legend .gpu-label small { color: var(--ink-faint); font-size: inherit; }
+.gpu-foot { margin: 6px 0 0; font-size: var(--text-caption); color: var(--ink-faint); line-height: 1.45; }
+.gpu-foot:empty { display: none; }

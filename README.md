@@ -1,317 +1,332 @@
 # Frivo
 
-Frivo is a local Windows dashboard for conversational AI, voice output,
-profiles, private speech transcription through Evora, and VRChat integration
-through FrivOSC. It runs on your computer and opens in your web browser.
+**Frivo gives you a voice.** Type (or say) something, and Frivo speaks it out
+loud for you — cleaned up, translated, or answered in character by a
+personality you make.
 
-## Screenshots
+Send that voice into VRChat with the words in your chatbox, have Frivo
+listen to the people around you and translate what they say, or run the AI
+on your own graphics card so it costs nothing.
 
-### Dashboard
+Frivo runs on your Windows PC and opens in your web browser. Your phone or
+another computer on your home network can use it too.
 
-![Frivo dashboard](docs/screenshots/dashboard.png)
+![Frivo's chat screen](docs/screenshots/chat.png)
 
-### Launcher
+## What it can do
 
-![Frivo launcher](docs/screenshots/launcher.png)
+- **Speak for you, three ways.** *Clean up* says what you meant, with typos
+  and grammar fixed. *Word for word* says exactly what you typed. *Reply*
+  has a character answer it in its own personality.
+- **Characters.** Make as many characters (profiles) as you like, each with
+  its own personality, voice and language.
+- **Speak every reply.** Pick from 6 free voices that come with Frivo, the
+  voices built into Windows, or realistic ElevenLabs voices.
+- **Talk instead of typing.** Click the microphone and say your message.
+- **Speak any language.** Write in English and have it spoken in Japanese,
+  Spanish, or another language.
+- **Listen and translate.** Frivo can listen to a game, a call or the room,
+  tell different people apart, and translate what they say.
+- **Work with VRChat.** Spoken replies can go into your VRChat voice, and the
+  words show up in your chatbox, page by page, as the voice reads them.
+- **Run the AI yourself, for free.** Use OpenAI, or let a graphics card on
+  your own network write the replies with Ollama.
 
-### Settings
+## Install
+
+1. Download `FrivoSetup.exe` from the
+   [latest release](https://github.com/Friday7352/Frivo/releases/latest).
+2. Double-click it and allow the Windows permission prompt.
+3. Click through setup. The default choices are fine.
+4. Leave **Launch Frivo now** ticked and click **Finish**.
+
+Setup needs the internet. It downloads Python, the libraries Frivo uses, and
+the six free voices (about 280 MB, once — updates keep them). Frivo works on
+Windows 10 and Windows 11.
+
+![The Frivo window](docs/screenshots/launcher.png)
+
+The small Frivo window keeps Frivo running. Click **Open Frivo** to open it
+in your browser, or go to `https://frivo.local:5000`.
+
+## First run: pick a brain and a voice
+
+Frivo needs something to **write** replies and something to **speak** them.
+Open **Settings** (the gear at the bottom left) and choose:
+
+| To write replies | What you need |
+| --- | --- |
+| OpenAI (default) | An [OpenAI API key](https://platform.openai.com/api-keys), in **Accounts & keys**. Pay per use. |
+| Local AI (free) | A PC with a graphics card running Ollama. See [Local AI](#local-ai-free-replies-on-your-own-graphics-card). |
+
+| To speak replies | What you need |
+| --- | --- |
+| Free voices | Nothing. They work straight away. |
+| ElevenLabs | An [ElevenLabs API key](https://elevenlabs.io/app/settings/api-keys), in **Accounts & keys**. Uses your ElevenLabs credits. |
+| No voice | Turn off the speaker button next to the message box. Text only, costs nothing. |
+
+You pay OpenAI and ElevenLabs directly for anything you use with them.
+
+## Using Frivo
+
+![Frivo in the light theme](docs/screenshots/chat-light.png)
+
+**Top bar.** The character you are talking to. Use **+** to make a new one,
+the pencil to change its personality, and the bin to delete it. **Ready**
+on the right shows that everything is working; click it for details.
+
+**The row of chips above the message box** changes how replies come out.
+Click any of them:
+
+| Chip | What it does |
+| --- | --- |
+| **Voice** (e.g. *Alba*) | Who speaks the reply. |
+| **Language** (e.g. *English*) | What language it's spoken in. |
+| **Reply** | What Frivo does with your message: **Clean up** (says what you meant, fixed up), **Word for word** (exactly what you typed), or **Reply** (a character answers it). |
+| **Fast / Balanced / Best** | Which local AI model writes replies. Only shown when you use local AI. |
+| **50 words** | How long replies should be. |
+| **80%** | Voice volume. |
+| **Live** | VRChat is connected through FrivOSC. Only shown when VRChat is turned on. |
+
+**Buttons in the message box**, from left to right:
+
+- ⚡ **Auto-send** — sends your message as soon as you stop talking.
+- 🔊 **Speak** — reads replies aloud. Turn it off for text only.
+- 💬 **Chatbox** — shows replies in your VRChat chatbox.
+- 🎤 **Dictation** — click and talk instead of typing. It's always off when
+  Frivo opens.
+
+**Hover over a reply** to see which voice spoke it and whether it was written
+**Local**ly or by **OpenAI**.
+
+**Left side:** chat, **Listening** (hear and translate other people),
+**Voices**, light/dark theme, and **Settings**.
+
+### Status and usage
+
+Click **Ready** to see what is connected and how many ElevenLabs credits
+you have left.
+
+![Status and ElevenLabs usage](docs/screenshots/status.png)
+
+## Voices
+
+![Choosing a voice](docs/screenshots/voices.png)
+
+There are three kinds of voices:
+
+- **Free · included with Frivo** — Kristin, Cori, Alba, John, Joe and Norman.
+  Natural-sounding, run on your PC's processor (no graphics card), and use
+  very little of it.
+- **Free · built into Windows** — David, Mark, Zira and any other voices
+  installed in Windows. Instant, but more robotic.
+- **ElevenLabs** — the most realistic, with thousands to choose from. Each
+  reply uses ElevenLabs credits.
+
+Click ▶ to hear a voice before you pick it. Each character remembers its own
+voice.
+
+## Local AI: free replies on your own graphics card
+
+Frivo can use [Ollama](https://ollama.com) to write replies on a graphics card
+instead of OpenAI. It can be this PC or another PC on your home network. It
+costs nothing per message and nothing leaves your home.
+
+Frivo has a step-by-step guide built in. Open **Settings** > **Providers**,
+choose **Ollama (local)**, then click **New to this? Set it up step by
+step**. Tell it how much video memory your graphics card has and it picks
+the right models and gives you every command to copy and paste.
+
+![The local AI setup guide](docs/screenshots/setup-guide.png)
+
+Frivo uses three models, and you can switch between them any time with the
+AI chip:
+
+![Switching between AI models](docs/screenshots/ai-models.png)
+
+- **Fast** — the quickest replies.
+- **Balanced** — better writing, still quick.
+- **Best** — the best writing, a bit slower.
+
+Small local models are not as clever as ChatGPT. If grammar and punctuation
+matter, use **Balanced** or **Best**, or OpenAI.
+
+### Keep an eye on the graphics card
+
+Click **Ready** to see how full the graphics card's memory is over the last
+10 minutes, and how much of it Ollama, Evora and everything else are using.
+Hover over the graph to see any moment. This needs the latest Evora running on
+the PC with the graphics card. Without it, Frivo shows only Ollama's
+models.
+
+<img src="docs/screenshots/gpu.png" alt="Graphics card memory in the status popover" width="360">
+
+## Settings
 
 ![Frivo settings](docs/screenshots/settings.png)
 
-### New profile
+Settings are grouped down the left side. Use the search box at the top to
+find any setting by name.
 
-![Create a new Frivo profile](docs/screenshots/newProfile.png)
+**Providers** chooses where each job runs: OpenAI or Ollama for replies, and
+OpenAI or Evora for turning speech into text. **Fall back to OpenAI** makes
+Frivo use OpenAI if your local service is down, instead of showing an error.
 
-## Download and install
+## Optional companion apps
 
-1. Download `FrivoSetup.exe` from the latest GitHub release.
-2. Double-click it and approve the Windows permission prompt.
-3. Follow the Frivo setup screens. The default installation location is
-   recommended.
-4. When setup finishes, leave **Launch Frivo now** selected to open Frivo.
+### Evora — private speech-to-text
 
-The first setup may download Python and Frivo's required libraries, so an
-internet connection is needed while installing. It also downloads Frivo's six
-free voices once (about 280 MB); updates keep them. Frivo is supported on
-Windows 10 and Windows 11.
+[Evora](https://github.com/Friday7352/Evora) turns speech into text on your
+own PC instead of sending it to OpenAI, and recognises different speakers.
+It can share a graphics card with Ollama.
 
-## First-time setup
-
-Open Frivo from the desktop or Start Menu shortcut, then select **Open
-Frivo** in the small Frivo window. In the dashboard, open **Settings** and
-save your API keys.
-
-* **OpenAI API key** — required for the default chat experience.
-* **ElevenLabs API key** — required only when **Speak** is enabled.
-
-If you do not have an ElevenLabs key, pick one of the free voices instead:
-Frivo's own (Kristin, Cori, Alba, John, Joe and Norman, under **Free ·
-included with Frivo**) or a voice built into Windows. They run on your PC,
-need no key and use very little CPU. Or turn **Speak** off. Frivo can still
-return text replies with an OpenAI key. If Speak is on without an ElevenLabs
-key, Frivo shows a helpful error and does not send the message.
-
-API providers may charge for their services. You are responsible for your
-own OpenAI and ElevenLabs accounts, usage, and costs.
-
-## Local Ollama models
-
-If you prefer not to use OpenAI for chat and translation, Frivo can use a
-locally hosted Ollama model instead. Install and run Ollama, then select
-**Ollama (local)** in **Settings** > **Providers** and choose your model.
-An OpenAI API key is not required when chat and translation use Ollama.
-
-## Local transcription with Evora
-
-[Evora](https://github.com/Friday7352/Evora) is Frivo's optional private,
-local transcription service. It converts audio to text on your own computer
-or another Windows PC on your local network. Frivo can then translate that
-text with the provider you selected, such as Ollama or OpenAI.
-
-Evora is a separate application and is not included in Frivo:
-
-1. Download `EvoraSetup.exe` from the
+1. Install `EvoraSetup.exe` from the
    [latest Evora release](https://github.com/Friday7352/Evora/releases/latest).
-2. Install and start Evora. If it runs on another computer, allow private
-   network access during setup.
-3. In Frivo, open **Settings** > **Providers** > **Transcription** and enter
-   the address shown by the Evora launcher.
-4. Use `http://evora.local:9000` when both applications run on the same PC.
-   For another computer, use Evora's displayed network address, such as
-   `http://192.168.x.x:9000`.
+2. In Frivo, open **Settings** > **Providers** > **Transcription**, choose
+   **Evora** and enter the address the Evora window shows.
+   On the same PC, that's `http://evora.local:9000`.
 
-Evora can use a supported NVIDIA GPU for faster transcription and otherwise
-runs on the CPU. No cloud transcription account or API key is required.
+### FrivOSC — VRChat
 
-## Recommended audio routing: Voicemeeter
+[FrivOSC](https://github.com/Friday7352/FrivOSC) connects Frivo to VRChat.
+Replies show up in your chatbox, and muting or unmuting in VRChat can turn
+Frivo's dictation off and on.
 
-Frivo works without Voicemeeter, but Voicemeeter and its virtual audio cables
-are recommended when using Frivo's listening features or sending Frivo's
-spoken replies into VRChat.
-
-Use a dedicated virtual cable for the program or game you want Frivo to
-listen to, then select that cable as Frivo's listening input. This lets
-Frivo hear that source without also capturing your microphone, other apps,
-or the rest of your system audio.
-
-For VRChat voice output, route Frivo's spoken audio to the virtual output you
-use for VRChat, then select the matching virtual input as VRChat's microphone.
-The exact device names depend on your Voicemeeter setup. Frivo does not
-install or configure Voicemeeter for you.
-
-## Everyday use
-
-The Frivo window starts and monitors the local server. It shows the address
-for this computer and provides these controls:
-
-* **Open Frivo** opens the dashboard in your browser.
-* **Settings** controls whether Frivo stays running after the window closes,
-  starts with Windows, and opens automatically in your browser.
-* **Stop Frivo** stops the local server.
-
-The desktop and Start Menu shortcuts open the Frivo window. If Frivo is
-already running in the notification area, using a shortcut brings that window
-back.
-
-On the same computer, the dashboard is normally available at:
-
-    https://frivo.local:5000
-
-## VRChat with FrivOSC
-
-[FrivOSC](https://github.com/Friday7352/FrivOSC) is Frivo's optional VRChat
-companion. It connects Frivo to VRChat over OSC, so replies can appear in your
-chatbox and VRChat's own mute button can drive Frivo's dictation.
-
-VRChat only speaks OSC to `127.0.0.1`. It will not send to another computer and
-will not listen to one, so Frivo cannot reach it across a network no matter how
-it is configured. FrivOSC solves this by running on the PC you play VRChat on,
-where that traffic already is, and talking to Frivo over the network instead.
-FrivOSC only makes outgoing connections, so there is nothing to forward, no
-port to open on either computer, and no VRChat launch options.
-
-FrivOSC is a separate application and is not included in Frivo:
-
-1. Download `FrivOSCSetup.exe` from the
+1. Install `FrivOSCSetup.exe` from the
    [latest FrivOSC release](https://github.com/Friday7352/FrivOSC/releases/latest)
-   and install it **on the computer you play VRChat on**. If that is also the
-   computer running Frivo, install it there.
-2. During setup, enter the address you use to open Frivo, and use **Test**.
-   Leave the default when Frivo runs on the same computer; otherwise use that
-   computer's address, such as `https://192.168.1.50:5000`. This is the one
-   thing FrivOSC cannot work out for itself — it can be changed later in the
-   FrivOSC window.
-3. In VRChat, enable OSC in the Options menu.
+   **on the PC you play VRChat on**.
+2. During its setup, enter the address you use to open Frivo and click
+   **Test**.
+3. In VRChat, turn on OSC in the Options menu.
 4. In Frivo, open **Settings** > **VRChat** and turn on **VRChat OSC**.
 
-**FrivOSC** appears in Frivo's sidebar beside Evora once the feature is on.
-Click it to see whether it is connected and to reach these settings:
+Then turn on the 💬 **Chatbox** button. Long replies are split into pages of
+144 characters (VRChat's limit), and each page changes exactly when the voice
+reaches it. Anyone who can see your chatbox can read these messages.
 
-* **VRChat OSC** — the master switch for everything below.
-* **Follow VRChat mute** — unmuting in VRChat starts dictation and muting stops
-  it. The microphone button still overrides this at any time.
-* **Unmute when I send** — opens the VRChat microphone if you are muted, so a
-  spoken reply is not delivered into a closed mic. It never mutes you.
+<details>
+<summary>More about VRChat</summary>
 
-Turn on the **Chatbox** switch beside the message box when you want replies sent
-to the chatbox.
+- VRChat only talks OSC to its own PC, which is why FrivOSC has to run there.
+  FrivOSC only makes outgoing connections, so you don't need to open ports or
+  change VRChat's launch options.
+- **Follow VRChat mute**: unmuting in VRChat starts dictation, muting stops it.
+  The microphone button still works at any time.
+- **Unmute when I send**: unmutes you before a spoken reply plays, so it isn't
+  lost into a muted mic. It never mutes you.
+- The mute options need **Options > Voice > Toggle Voice** on in VRChat (the
+  default). With push-to-talk, FrivOSC tells you in its log.
 
-### Worth knowing
+</details>
 
-VRChat chatbox messages are limited to 144 characters. Frivo pages longer
-messages automatically and spaces them out to avoid VRChat's spam protection.
-When a reply is spoken, each page appears as the voice reaches it.
-Anyone who can see your VRChat chatbox can see these messages.
+### Voicemeeter — audio routing
 
-OSC is UDP, so VRChat never confirms delivery. FrivOSC reports what it sent, not
-what arrived.
+Not required, but recommended for VRChat or the Listening feature. Use a
+virtual cable to send Frivo's voice into VRChat's microphone, and another so
+Frivo hears only the game or app you choose, not your own mic. Frivo doesn't
+install or set up Voicemeeter.
 
-The microphone options press VRChat's mute key rather than setting a state,
-because VRChat exposes no way to set one. That means they depend on **Options >
-Voice > Toggle Voice** being on, which is VRChat's default. With it off, VRChat
-treats the mute key as push-to-talk and FrivOSC will say so in its log rather
-than silently doing nothing.
+## Use Frivo on your phone or another PC
 
-## Other devices on your network
+During setup you can allow other devices on your home network. The Frivo
+window then shows an address like `https://192.168.x.x:5000`. Open it on your
+phone or another computer.
 
-During setup, you can allow connections from other devices on your private
-network. The Frivo window then shows a network address such as:
+![Frivo on a phone](docs/screenshots/phone.png)
 
-    https://192.168.x.x:5000
+The first visit may show a certificate warning, because Frivo's certificate
+is only trusted on the PC it's installed on. Only allow this on a network you
+trust. If you skipped it during setup, turn it on in the Frivo window's
+**Settings**.
 
-Only enable this on a network you trust. A phone or another computer may show
-a certificate warning on its first visit because Frivo's local certificate is
-trusted only on the PC where Frivo was installed.
+## Your data
 
-If you skipped this option during setup, use the Frivo launcher Settings to
-open the firewall port later.
+Everything stays on your PC, in `%APPDATA%\Frivo\`: settings, characters,
+API keys, usage history and recent audio.
 
-## Privacy and saved data
+- API keys are saved in `config.json` as plain text. Don't share that file.
+- Spoken audio is deleted after 7 days. Change `audio_keep_days` in
+  `config.json` to keep it longer or shorter.
 
-Frivo keeps its data on your PC in:
+## Updates
 
-    %APPDATA%\Frivo\
+Frivo checks for updates every six hours. When there's a new version, an
+**Update available** chip appears at the bottom of the sidebar. Click it to
+see what's new, then **Update now**. Frivo installs it, restarts, and keeps
+your settings, characters and keys. You can also choose **Later** or **Skip
+this version**.
 
-This includes your settings, saved profiles, local usage record, generated
-audio cache, and API keys. Spoken replies in the audio cache are deleted
-after 7 days; set `audio_keep_days` in `config.json` to change that. API keys are stored in `config.json` in plain text
-for the signed-in Windows account. Do not share that file or upload it to
-GitHub.
+**Settings** > **About Frivo** has **Check for updates** and **Earlier
+versions**, which lets you go back to any release from 1.4.0 onward.
 
-This repository intentionally excludes keys, preferences, logs, certificates,
-and generated audio.
+<details>
+<summary>How updates work</summary>
 
-Frivo's free voices are installed with the program, in its `voices` folder,
-not with your data.
+Frivo downloads `FrivoSetup.exe` from this repository's GitHub releases,
+checks it against the SHA-256 fingerprint GitHub publishes, and installs it on
+the Frivo PC through a Task Scheduler task called **Frivo Updater**, so no
+permission prompt appears. If that task is missing, Windows asks for
+permission instead, and running `FrivoSetup.exe` once sets the task up again.
+
+</details>
+
+## Uninstall
+
+Open Windows **Settings** > **Apps** > **Installed apps**, find **Frivo** and
+click **Uninstall**. It asks whether to also delete your saved keys and
+settings; leave that unticked if you plan to reinstall.
+
+Running `FrivoSetup.exe` on a PC that already has Frivo offers **Update**,
+**Repair** (rebuilds Frivo, keeps your settings) and **Uninstall**.
+
+## Troubleshooting
+
+| Problem | Where to look |
+| --- | --- |
+| Setup failed | `%TEMP%\Frivo-Setup.log` |
+| An update failed | The update dialog says why. Details are in `%ProgramData%\Frivo\Updates\updater.log` |
+| Something else | The Frivo window has buttons to open the server log and the settings folder. |
+| Local AI isn't working | The troubleshooting section at the bottom of the setup guide. |
+| A free voice is missing | Run `FrivoSetup.exe` and choose **Repair**. |
 
 ## Voice credits
 
 Frivo's free voices are [Piper](https://github.com/OHF-Voice/piper1-gpl)
 voices, as published by [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx),
 which also speaks them. Kristin, Cori, John and Norman are trained on
-public-domain LibriVox recordings, and Joe on CC0 recordings. Alba is trained on
-recordings from the University of Edinburgh
+public-domain LibriVox recordings, and Joe on CC0 recordings. Alba is trained
+on recordings from the University of Edinburgh
 ([CC BY 4.0](https://datashare.ed.ac.uk/handle/10283/3270)). The pronunciation
 data is from [eSpeak NG](https://github.com/espeak-ng/espeak-ng) (GPL-3.0).
 `voices\piper\CREDITS.txt` in the install folder lists them too.
 
-## Updates
+## For developers
 
-Frivo keeps itself up to date. A few seconds after it starts, and every six
-hours after that, it looks at the releases on GitHub. When a newer version
-is out, an **Update available** chip appears at the bottom of the sidebar —
-nothing pops up. Click it to see what changed, then:
+<details>
+<summary>Building, versions and tests</summary>
 
-- **Update now** — downloads the new `FrivoSetup.exe`, checks it against the
-  SHA-256 fingerprint GitHub publishes for it, and installs it on the PC
-  Frivo runs on. Frivo restarts by itself and the page reloads into the new
-  version. Settings, profiles and API keys are kept.
-- **Later** — the chip stays.
-- **Skip this version** — the chip goes away until a newer release is out.
+**Building.** Clone the repository and run `Install.bat` to install from
+source. To make the single-file installer, run `Build-Installer.bat`; it
+installs Inno Setup if needed and writes `dist\FrivoSetup.exe`.
 
-This works from any device you use Frivo on: the install happens on the
-Frivo PC, with no permission prompt. Setup registers a small task in Task
-Scheduler, **Frivo Updater**, that does the installing. Frivo can start
-it, and it only ever installs `FrivoSetup.exe` from this repository's
-releases, after checking the fingerprint. If that task is missing, Frivo
-asks Windows for permission on the Frivo PC instead, and running
-`FrivoSetup.exe` once sets the task up again.
+**Version number.** The version lives only in `VERSION` at the root of the
+repository. Everything else — the installer, Apps & features,
+`FrivoHost.exe` and `/diagnose` — reads it at build time.
+`tests/test-version.py` checks they agree.
 
-**Settings** > **About Frivo** shows the installed version, has **Check for
-updates**, and the switch for the automatic check.
-
-### Going back to an earlier version
-
-**Settings** > **About Frivo** > **Earlier versions** lists the releases you
-can go back to and installs one the same way. Your settings are kept. Only
-versions from 1.4.0 onward are offered, because 1.4.0 is the first version
-that can update itself. Going back further would leave you with no way to
-update from inside Frivo.
-
-### Publishing an update
+**Publishing an update.**
 
 1. Change `VERSION` and run `Build-Installer.bat`.
-2. Create a GitHub release tagged with that version, such as `v1.4.1`. It
+2. Create a GitHub release tagged with that version, such as `v1.5.0`. It
    can't be a pre-release or a draft.
-3. Attach `dist\FrivoSetup.exe` to the release, keeping that exact name.
+3. Attach `dist\FrivoSetup.exe`, keeping that exact name.
 
-Installed copies offer the update within six hours, or right away through
-**Check for updates**. The release notes appear in the update dialog.
+Installed copies offer it within six hours. The release notes appear in the
+update dialog.
 
-## Uninstalling
+**Tests.** See [`tests/README.md`](tests/README.md).
 
-Open **Settings** > **Apps** > **Installed apps**, choose **Frivo**, and
-select **Uninstall**.
+**Screenshots.** The pictures in this README are of Frivo running with demo
+data, in `docs/screenshots/`.
 
-Running a newer Frivo setup also detects an existing installation and offers:
-
-- **Update** — refreshes Frivo's program files while retaining the existing
-  Python environment. Dependencies are only installed when `requirements.txt`
-  has changed.
-- **Repair** — rebuilds the program files and Python environment while keeping
-  your saved settings.
-- **Uninstall** — removes Frivo from the setup wizard.
-
-The uninstaller removes Frivo, its shortcuts, its Windows startup entry, the
-Frivo firewall rule, its local address and certificate, and the Frivo
-Updater task. It asks whether to
-also remove Frivo's saved API keys and preferences. Leave that option
-unchecked if you plan to reinstall later.
-
-## Troubleshooting
-
-If installation fails, the setup log is saved here:
-
-    %TEMP%\Frivo-Setup.log
-
-If an in-app update fails, the update dialog says why. The Frivo tray icon
-also shows the result once Frivo restarts. The details are in:
-
-    %ProgramData%\Frivo\Updates\updater.log
-
-That log also names the setup log the updater's run wrote to.
-
-The Frivo launcher also includes buttons to open its server log and settings
-folder.
-
-## Version number
-
-The version lives in one file, `VERSION`, at the root of this repository:
-
-    1.4.0
-
-Edit that line before a release and everything picks it up on the next
-build — the Apps & features entry, the setup wizard's welcome page, the
-`FrivoSetup.exe` container, `FrivoHost.exe`'s file properties, and what
-`/diagnose` reports. Nothing else stores a copy.
-
-`tests/test-version.py` checks that they all still agree.
-
-## Building from source
-
-For development, clone this repository and run `Install.bat` to use the
-source setup wizard. To create a new public single-file installer,
-double-click `Build-Installer.bat` in the project folder. It builds the
-installer and, if needed, installs Inno Setup automatically.
-
-The finished installer is written to `dist\FrivoSetup.exe`.
+</details>
