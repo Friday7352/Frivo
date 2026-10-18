@@ -626,9 +626,39 @@ function Sync-VenvDependencies {
     }
 }
 
-# CHANGED (1.5.0): the free voices are the ones built into Windows, so the
-# Kokoro install step (Sync-FreeVoiceDependencies) and the Visual C++ runtime
-# it needed (Test-VCRuntimePresent, Install-VCRuntime) have been removed.
+# CHANGED (1.5.0): the Kokoro install step (Sync-FreeVoiceDependencies) and
+# the Visual C++ runtime it needed (Test-VCRuntimePresent, Install-VCRuntime)
+# have been removed. Frivo's own voices (Piper) need neither: the speech
+# library is in requirements.txt and carries its own runtime.
+
+function Sync-FrivoVoices {
+    <#
+        NEW (1.5.0): gets Frivo's free voices by running voice_pack.py with
+        Frivo's own Python. The first install downloads them (about 215 MB);
+        an update or Repair only fetches one that's missing or damaged.
+        Never throws: if it fails, setup still finishes, and Frivo and the
+        Windows voices still work.
+    #>
+    param([string] $VenvPython, [string] $Target, [scriptblock] $Log)
+    try {
+        $script = Join-Path $Target 'voice_pack.py'
+        if (-not (Test-Path -LiteralPath $script -PathType Leaf)) { return $false }
+        & $Log 'Getting Frivo''s voices (a one-time download of about 215 MB)...'
+        $r = Invoke-Tool -FilePath $VenvPython -Arguments @($script, 'install')
+        foreach ($line in (($r.StdOut + "`n" + $r.StdErr) -split "`r?`n")) {
+            if ($line.Trim()) { Write-SetupLog ('voices: ' + $line.Trim()) }
+        }
+        if ($r.ExitCode -ne 0) {
+            & $Log 'Some of Frivo''s voices could not be downloaded. Frivo still works, and so do the Windows voices. Run setup again (Repair) to try again.'
+            return $false
+        }
+        & $Log 'Frivo''s voices are ready.'
+        return $true
+    } catch {
+        Write-SetupLog ('voices: {0}' -f $_.Exception.Message)
+        return $false
+    }
+}
 
 function New-Venv {
     param([string] $Target, $Python, [scriptblock] $Log)
@@ -842,5 +872,6 @@ Export-ModuleMember -Function `
     Test-IsAdministrator, Test-InstallPathUsable,
     Write-SetupLog, Invoke-Tool, ConvertTo-ArgumentString, Get-LastLines, Find-Python, Install-Python,
     Update-PathFromRegistry, New-Venv, Sync-VenvDependencies, Get-SetupLogPath,
+    Sync-FrivoVoices,
     Get-LocalHostname, Get-HostsFilePath, Add-FrivoHostsEntry, Remove-FrivoHostsEntry,
     Install-FrivoRootCertificate, Remove-FrivoRootCertificate, Get-LauncherShim, Get-WScriptPath

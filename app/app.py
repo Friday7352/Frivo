@@ -1914,6 +1914,8 @@ WINDOWS_VOICES_CACHE_SECONDS = 600
 
 def tts_engine(voice_id):
     voice_id = voice_id or ""
+    if voice_id.startswith("piper:"):   # NEW (1.5.0): the voices included with Frivo
+        return "piper"
     if voice_id.startswith((WINDOWS_PREFIX, ONECORE_PREFIX)):
         return "windows"
     if voice_id.startswith(RETIRED_PREFIXES):
@@ -1921,7 +1923,8 @@ def tts_engine(voice_id):
     return "elevenlabs"
 
 
-TTS_ENGINE_NAMES = {"elevenlabs": "ElevenLabs", "windows": "Windows voice (free)", "retired": "Removed voice"}
+TTS_ENGINE_NAMES = {"elevenlabs": "ElevenLabs", "piper": "Frivo voice (free)",   # CHANGED (1.5.0): piper
+                    "windows": "Windows voice (free)", "retired": "Removed voice"}
 
 
 def windows_voices_available():
@@ -2078,21 +2081,36 @@ def list_windows_voices(force=False):
     return voices
 
 
+def _newer_copies(voices):
+    """{(short name, culture): newer voice} for the voices Windows has in both kinds."""
+    return {(_short_voice_name(v["name"]).lower(), (v.get("culture") or "").lower()): v
+            for v in voices if v["kind"] == "onecore"}
+
+
+def _newer_copy_of(voice_id, voices):
+    """The onecore: id of the same voice in its newer form, or None."""
+    if not voice_id.startswith(WINDOWS_PREFIX):
+        return None
+    desktop = next((v for v in voices if v["kind"] == "sapi" and WINDOWS_PREFIX + v["id"] == voice_id), None)
+    if not desktop:
+        return None
+    match = _newer_copies(voices).get((_short_voice_name(desktop["name"]).lower(),
+                                       (desktop.get("culture") or "").lower()))
+    return (ONECORE_PREFIX + match["id"], _short_voice_name(match["name"])) if match else None
+
+
 def windows_voice_entries():
     voices = list_windows_voices()
-    # The newer copy of a voice is listed, not both. A desktop voice that
-    # has a newer copy is still listed if something is set to use it.
-    newer = {(_short_voice_name(v["name"]).lower(), (v.get("culture") or "").lower())
-             for v in voices if v["kind"] == "onecore"}
-    in_use = {CFG.get("voice_id", "")} | {p.get("voice_id", "") for p in load_profiles()}
+    # The newer copy of a voice is listed, not both. CHANGED (1.5.0): with
+    # no exception for one in use; upgrade_desktop_voices() moves those over.
+    newer = _newer_copies(voices)
     entries = []
     for v in voices:
         prefix = ONECORE_PREFIX if v["kind"] == "onecore" else WINDOWS_PREFIX
         voice_id = prefix + v["id"]
         short = _short_voice_name(v["name"])
         culture = v.get("culture") or ""
-        if (v["kind"] == "sapi" and (short.lower(), culture.lower()) in newer
-                and voice_id not in in_use):
+        if v["kind"] == "sapi" and (short.lower(), culture.lower()) in newer:
             continue
         code = culture.split("-")[0].lower()
         region = re.search(r"\(([^)]+)\)\s*$", v.get("language") or "")
@@ -2112,9 +2130,189 @@ def windows_voice_entries():
     return entries
 
 
+# ---------------------------------------------------------------------------
+# NEW (1.5.0): the free voices included with Frivo (Piper)
+#
+# Six voices that sound clearly better than Windows' own: Kristin, Cori and
+# Alba (female), John, Joe and Norman (male), in American and British
+# English. Setup downloads them once (voice_pack.py) into voices\piper next
+# to this file. Frivo only reads that folder and never downloads anything
+# itself.
+#
+# They're light by design. They run on one CPU thread, never the graphics
+# card, and a reply takes well under a tenth of that thread while it plays.
+# The speech library is sherpa-onnx (Apache 2.0, in requirements.txt). At
+# most two voices are kept loaded, about 170 MB of memory each.
+# ---------------------------------------------------------------------------
+
+import collections as _collections
+import importlib.util as _importlib_util
+
+PIPER_PREFIX = "piper:"
+PIPER_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "voices", "piper")
+PIPER_THREADS = 1
+PIPER_KEEP_LOADED = 2
+PIPER_LOCK = threading.Lock()          # the loaded voices
+PIPER_SPEAK_LOCK = threading.Lock()    # one reply at a time: one thread, never more
+PIPER_ENGINES = _collections.OrderedDict()
+PIPER_STATE = {"package_problem": None}
+
+
+def _load_voice_pack():
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "voice_pack.py")
+    if not os.path.isfile(path):
+        return None
+    try:
+        spec = _importlib_util.spec_from_file_location("frivo_voice_pack", path)
+        module = _importlib_util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+    except Exception as e:
+        log_server_event(f"Frivo voices: voice_pack.py couldn't load: {e!r}")
+        return None
+
+
+VOICE_PACK = _load_voice_pack()
+
+
+def piper_package_problem():
+    """None when the speech library can be used, else why not."""
+    with PIPER_LOCK:
+        if PIPER_STATE["package_problem"] is not None:
+            return PIPER_STATE["package_problem"] or None
+    problem = ""
+    if VOICE_PACK is None:
+        problem = "Frivo's voices are missing a file (voice_pack.py). Run Frivo's setup again (Repair)."
+    elif "sherpa_onnx" not in sys.modules and _importlib_util.find_spec("sherpa_onnx") is None:
+        problem = "Frivo's voices need its speech library. Run Frivo's setup again (Repair) to add it."
+    with PIPER_LOCK:
+        PIPER_STATE["package_problem"] = problem
+    return problem or None
+
+
+def piper_voice(voice_id):
+    if VOICE_PACK is None or not (voice_id or "").startswith(PIPER_PREFIX):
+        return None
+    return VOICE_PACK.VOICES_BY_KEY.get(voice_id[len(PIPER_PREFIX):])
+
+
+def piper_voice_ready(voice):
+    return VOICE_PACK is not None and VOICE_PACK.voice_ready(voice, PIPER_DIR)
+
+
+def piper_problem(voice_id, language):
+    problem = piper_package_problem()
+    if problem:
+        return problem
+    voice = piper_voice(voice_id)
+    if voice is None:
+        return "That voice isn't one of Frivo's voices. Pick another voice in the Voice list."
+    if not piper_voice_ready(voice):
+        return f"The {voice['name']} voice isn't installed. Run Frivo's setup again (Repair) to put it back."
+    if language != "English":
+        return (f"Frivo's voices speak English. Pick a Windows voice or an ElevenLabs voice for {language}, "
+                "or turn Speak off.")
+    return None
+
+
+def piper_engine(voice):
+    """The loaded voice, loading it (and letting the oldest go) if needed."""
+    key = voice["key"]
+    with PIPER_LOCK:
+        if key in PIPER_ENGINES:
+            PIPER_ENGINES.move_to_end(key)
+            return PIPER_ENGINES[key]
+    try:
+        import sherpa_onnx
+    except Exception as e:
+        problem = f"Frivo's voices couldn't start ({e}). Run Frivo's setup again (Repair)."
+        with PIPER_LOCK:
+            PIPER_STATE["package_problem"] = problem
+        raise RuntimeError(problem)
+    paths = VOICE_PACK.voice_paths(voice, PIPER_DIR)
+    engine = sherpa_onnx.OfflineTts(sherpa_onnx.OfflineTtsConfig(model=sherpa_onnx.OfflineTtsModelConfig(
+        num_threads=PIPER_THREADS, provider="cpu",
+        vits=sherpa_onnx.OfflineTtsVitsModelConfig(model=paths["model"], tokens=paths["tokens"],
+                                                   data_dir=paths["espeak"]))))
+    with PIPER_LOCK:
+        PIPER_ENGINES[key] = engine
+        PIPER_ENGINES.move_to_end(key)
+        while len(PIPER_ENGINES) > PIPER_KEEP_LOADED:
+            PIPER_ENGINES.popitem(last=False)
+        return engine
+
+
+def _piper_generate(voice, pages):
+    """[(samples, rate)] for each page, spoken one after another."""
+    speed = clamp_speaking_speed(CFG.get("speaking_speed", 1.0))
+    engine = piper_engine(voice)
+    out = []
+    with PIPER_SPEAK_LOCK:
+        for page in pages:
+            audio = engine.generate(page, sid=0, speed=speed)
+            if not audio.samples:
+                raise RuntimeError(f"The {voice['name']} voice didn't make any audio.")
+            out.append((list(audio.samples), audio.sample_rate))
+    return out
+
+
+def piper_speak(text, voice_id, path):
+    import sherpa_onnx
+
+    samples, rate = _piper_generate(piper_voice(voice_id), [text])[0]
+    sherpa_onnx.write_wave(path, samples, rate)
+
+
+def piper_speak_pages(pages, voice_id, path):
+    """Each chatbox page spoken on its own, joined. Returns the second each page ends."""
+    import sherpa_onnx
+
+    parts = _piper_generate(piper_voice(voice_id), pages)
+    rate = parts[0][1]
+    joined, ends, total = [], [], 0
+    for samples, _ in parts:
+        joined.extend(samples)
+        total += len(samples)
+        ends.append(total / float(rate))
+    sherpa_onnx.write_wave(path, joined, rate)
+    return ends
+
+
+def piper_voice_entries():
+    if VOICE_PACK is None or piper_package_problem():
+        return []
+    entries = []
+    for voice in VOICE_PACK.VOICES:
+        if not piper_voice_ready(voice):
+            continue
+        voice_id = PIPER_PREFIX + voice["key"]
+        entries.append({
+            "voice_id": voice_id,
+            "name": voice["name"],
+            "category": "included with Frivo",
+            "tags": ["included", "free"],
+            "gender": voice["gender"],
+            "created_at": None,
+            "languages": [{"code": "en", "name": f"English · {voice['region']}"}],
+            "language_source": "declared",
+            "preview_url": "/api/voices/preview?voice_id=" + quote(voice_id, safe=""),
+            "description": "Free voice included with Frivo. Runs on this PC with very little CPU and no graphics card.",
+        })
+    return entries
+
+
+def piper_status():
+    problem = piper_package_problem()
+    total = len(VOICE_PACK.VOICES) if VOICE_PACK else 0
+    ready = 0 if problem else sum(1 for v in VOICE_PACK.VOICES if piper_voice_ready(v))
+    return {"available": problem is None, "problem": problem or "", "count": ready, "total": total}
+
+
 def free_voice_problem(voice_id, language):
     """None when this free voice can speak right now, else a message for the person."""
     engine = tts_engine(voice_id)
+    if engine == "piper":   # NEW (1.5.0)
+        return piper_problem(voice_id, language)
     if engine == "retired":
         return "That voice was removed in Frivo 1.5.0. Pick another voice in the Voice list."
     if engine == "windows" and not windows_voices_available():
@@ -2184,7 +2382,11 @@ def windows_speak_pages(pages, voice_id, path):
 
 def free_tts_audio(text, voice_id, language):
     filename = f"{uuid.uuid4().hex}.wav"
-    windows_speak(text, voice_id, os.path.join(AUDIO_DIR, filename))
+    path = os.path.join(AUDIO_DIR, filename)
+    if tts_engine(voice_id) == "piper":   # NEW (1.5.0)
+        piper_speak(text, voice_id, path)
+    else:
+        windows_speak(text, voice_id, path)
     return filename
 
 
@@ -2194,6 +2396,10 @@ def _replacement_for_retired(voice_id):
     # Kokoro's voice names start with language and gender: "af_heart" is
     # American female, "bm_george" British male.
     gender = {"f": "female", "m": "male"}.get(key[1:2], "")
+    # CHANGED (1.5.0): Frivo's own voices first; they're the closest in sound.
+    for entry in piper_voice_entries():
+        if entry["gender"] == gender:
+            return entry["voice_id"], entry["name"]
     entries = windows_voice_entries()
     english = [e for e in entries if e["languages"] and e["languages"][0]["code"] == "en"]
     for pool in ([e for e in english if e["gender"] == gender and e["voice_id"].startswith(ONECORE_PREFIX)],
@@ -2202,6 +2408,35 @@ def _replacement_for_retired(voice_id):
             choice = sorted(pool, key=lambda e: e["name"])[0]
             return choice["voice_id"], choice["name"]
     return None
+
+
+def upgrade_desktop_voices():
+    """
+    CHANGED (1.5.0): settings and profiles on an older (desktop) Windows
+    voice that Windows also has in its newer form move to the newer one.
+    It's the same voice, and only the newer one is listed, so this stops the
+    Voice list showing it twice.
+    """
+    voices = list_windows_voices()
+    if not voices:
+        return
+    found = _newer_copy_of(CFG.get("voice_id", ""), voices)
+    if found:
+        log_server_event(f"Voices: {CFG['voice_id']} moved to its newer copy {found[0]}.")
+        CFG["voice_id"], CFG["voice_name"] = found
+        save_config(CFG)
+    profiles = load_profiles()
+    changed = False
+    for profile in profiles:
+        found = _newer_copy_of(str(profile.get("voice_id", "")), voices)
+        if found:
+            log_server_event(f"Voices: profile {profile.get('name')!r} moved to {found[0]}.")
+            profile["voice_id"] = found[0]
+            if "voice_name" in profile:
+                profile["voice_name"] = found[1]
+            changed = True
+    if changed:
+        save_profiles(profiles)
 
 
 def replace_retired_voices():
@@ -2250,7 +2485,14 @@ def warm_free_voices():
     try:
         if windows_voices_available():
             list_windows_voices(force=True)
+        # NEW (1.5.0): load the Frivo voices in use (at most two).
+        in_use = [CFG.get("voice_id", "")] + [p.get("voice_id", "") for p in load_profiles()]
+        for voice_id in dict.fromkeys(v for v in in_use if tts_engine(v) == "piper"):
+            voice = piper_voice(voice_id)
+            if voice and not piper_problem(voice_id, "English"):
+                piper_engine(voice)
         replace_retired_voices()
+        upgrade_desktop_voices()   # CHANGED (1.5.0)
         remove_retired_voice_files()
     except Exception as e:
         log_server_event(f"Free voices: start-up check failed: {e!r}")
@@ -2373,7 +2615,10 @@ def get_tts_audio_timed(text, voice_id, language, plan):
     try:
         filename = f"{uuid.uuid4().hex}.wav"
         path = os.path.join(AUDIO_DIR, filename)
-        ends = windows_speak_pages(pages, voice_id, path)   # CHANGED (1.5.0): Windows voices only
+        if engine == "piper":   # NEW (1.5.0)
+            ends = piper_speak_pages(pages, voice_id, path)
+        else:
+            ends = windows_speak_pages(pages, voice_id, path)
         return filename, ends
     except Exception as e:
         # Free voices cost nothing, so any problem here just means the reply
@@ -3160,7 +3405,13 @@ def voices():
     # CHANGED (1.5.0): the free voices are always listed, and ElevenLabs'
     # are added when there's a key. No key is no longer an error — it just
     # means the free voices are the ones on offer.
-    free = windows_voice_entries()   # CHANGED (1.5.0): Kokoro removed
+    # CHANGED (1.5.0): Kokoro removed. A voice that's in use moves to its
+    # newer copy first, so it's never listed twice.
+    try:
+        upgrade_desktop_voices()
+    except Exception as e:
+        log_server_event(f"Voices: couldn't move to the newer voices: {e!r}")
+    free = piper_voice_entries() + windows_voice_entries()   # CHANGED (1.5.0): Frivo's voices first
     if not CFG["elevenlabs_api_key"]:
         return jsonify({"voices": free, "notice": "" if free else
                         "Add your ElevenLabs key in Settings to load voices."})
@@ -3187,7 +3438,7 @@ def free_voices_status():
     voices = list_windows_voices() if available else []
     with WINDOWS_VOICES_LOCK:
         error = WINDOWS_VOICES_CACHE["error"]
-    return jsonify({"windows": {
+    return jsonify({"piper": piper_status(), "windows": {   # CHANGED (1.5.0): piper
         "available": available,
         "count": len(windows_voice_entries()) if available else 0,
         "newer": sum(1 for v in voices if v["kind"] == "onecore"),
@@ -3218,13 +3469,13 @@ def free_voice_preview():
     import hashlib
 
     voice_id = request.args.get("voice_id") or ""
-    if tts_engine(voice_id) != "windows":
+    if tts_engine(voice_id) not in ("windows", "piper"):   # CHANGED (1.5.0): piper
         return jsonify({"error": "Not a free voice."}), 400
     problem = free_voice_problem(voice_id, "English")
     if problem:
         return jsonify({"error": problem}), 503
     # CHANGED (1.5.0): the sample is in the voice's own language.
-    entry = next((e for e in windows_voice_entries() if e["voice_id"] == voice_id), None)
+    entry = next((e for e in piper_voice_entries() + windows_voice_entries() if e["voice_id"] == voice_id), None)
     code = (entry["languages"][0]["code"] if entry and entry["languages"] else "en")
     name = "preview-" + hashlib.sha1(voice_id.encode("utf-8")).hexdigest()[:16] + ".wav"
     path = os.path.join(AUDIO_DIR, name)

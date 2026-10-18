@@ -52,7 +52,9 @@ MinVersion=10.0
 ; Keep the complete setup payload together under {tmp}. It is deleted as
 ; soon as the Frivo installer window closes; only the selected Frivo folder
 ; and its per-user data remain afterwards.
-Source: "..\app\*";       DestDir: "{tmp}\FrivoSetupPayload\app";       Flags: ignoreversion recursesubdirs createallsubdirs deleteafterinstall; Excludes: "config.json,profiles.json,usage.json,launcher.json,*.log,__pycache__\*,*.pyc"
+; CHANGED (1.5.0): voices\ is excluded. Setup downloads Frivo's voices (voice_pack.py), so a
+; copy made for testing in app\voices never ends up inside FrivoSetup.exe.
+Source: "..\app\*";       DestDir: "{tmp}\FrivoSetupPayload\app";       Flags: ignoreversion recursesubdirs createallsubdirs deleteafterinstall; Excludes: "config.json,profiles.json,usage.json,launcher.json,*.log,__pycache__\*,*.pyc,\voices\*"
 Source: "..\installer\*"; DestDir: "{tmp}\FrivoSetupPayload\installer"; Flags: ignoreversion recursesubdirs createallsubdirs deleteafterinstall
 Source: "FrivoHost.exe";   DestDir: "{tmp}\FrivoSetupPayload\installer"; Flags: ignoreversion deleteafterinstall
 Source: "..\README.md";   DestDir: "{tmp}\FrivoSetupPayload";           Flags: ignoreversion deleteafterinstall

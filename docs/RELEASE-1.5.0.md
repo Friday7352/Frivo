@@ -57,18 +57,21 @@ The Microphone setting sometimes looked reset, and could really reset, until you
 - If your saved microphone isn't plugged in, the list says **Saved microphone (not connected)**. Dictation then uses the default microphone instead of failing, and the status line tells you.
 - Live (Evora) dictation uses the microphone you pick here too, so the hint now says so.
 
-## Free voices built into Windows
+## Free voices included with Frivo
 
-Frivo can now speak without ElevenLabs. Pick a free voice in the Voice list and Windows speaks it, right on the PC Frivo runs on. There's no account, no key, no download and no cost per reply, and it's light on the PC: no graphics card, and hardly any CPU. ElevenLabs works exactly as before, and it's the choice for natural-sounding AI voices.
+Frivo can now speak without ElevenLabs. Pick a free voice in the Voice list and it's spoken right on the PC Frivo runs on. There's no account, no key and no cost per reply. The free voices are deliberately light: no graphics card, and very little CPU. ElevenLabs works exactly as before, and it's the choice for natural-sounding AI voices.
 
-- The free voices are under **Free · built into Windows** in the Voice list. Each has a *free* tag.
-- Frivo now also lists the **newer voices Windows installs with each language**, which desktop programs can't normally see. On an English PC that's usually David, Zira and **Mark**. You can add more voices and languages in Windows **Settings → Time & language → Speech**.
-  - When Windows has the same voice in both its older and newer forms, only the newer one is listed. If a profile already uses the older one, it stays listed.
-- **They start straight away.** Frivo keeps one small speech helper running instead of starting Windows' speech engine again for every reply. After the first reply, the voice starts in a few hundredths of a second.
+- **Six voices of Frivo's own** under **Free · included with Frivo**: Kristin, Cori and Alba (female), and John, Joe and Norman (male), in American and British English. They sound clearly better than Windows' voices.
+  - They're light. Each runs on one CPU thread, never the graphics card. A long reply takes about a tenth of a second per second of speech to make, and short lines are ready almost at once. At most two voices are kept loaded, about 170 MB of memory each.
+  - **Setup downloads them once** (about 280 MB), like Python and Frivo's libraries, and checks each file before using it. `FrivoSetup.exe` and in-app updates stay small. Updates and Repair keep the voices and only download one again if it's missing or damaged, and uninstalling removes them. Frivo itself never downloads anything for them.
+  - If a voice couldn't be downloaded, setup still finishes and says so, and the other voices work. Run setup again and choose Repair to try again.
+  - They speak English. For other languages, pick a Windows or ElevenLabs voice.
+- **The voices built into Windows** under **Free · built into Windows**. Frivo now also lists the newer voices Windows installs with each language, which desktop programs can't normally see. On an English PC that's usually David, Zira and **Mark**. More come with each language you add in Windows **Settings → Time & language → Speech**. When Windows has the same voice in an older and a newer form, Frivo lists the newer one and moves anything using the older one over to it.
+  - They start straight away. Frivo keeps one small speech helper running instead of starting Windows' speech engine again for every reply.
 - With a free voice selected, replies need no ElevenLabs key and use no credits. The reply-length card says "free with this voice" instead of quoting credits, and the line under each reply says **free voice**.
 - **Speaking speed** works with every voice. Hovering a reply's time shows which engine spoke it.
 - Previewing a free voice plays a short line in that voice's own language.
-- If you tried an earlier 1.5.0 build with the Kokoro voices: they've been removed, because a free voice should be light and AI voices are what ElevenLabs is for. Anything that used a Kokoro voice now uses a Windows voice of the same gender, and the 206 MB Kokoro download is deleted the next time Frivo starts.
+- If you tried an earlier 1.5.0 build with the Kokoro voices: they've been removed. They needed far more CPU, and AI voices are what ElevenLabs is for. Anything that used a Kokoro voice now uses one of Frivo's voices of the same gender, and the Kokoro download is deleted the next time Frivo starts.
 
 ## A cleaner interface
 
@@ -92,7 +95,7 @@ A long spoken reply used to flip through its chatbox pages every second and a ha
 
 - Frivo splits the reply into pages. Each page after the first appears when the voice finishes the last word of the page before it. The pages look the same as before, counter included.
   - **ElevenLabs:** Frivo asks for the time each character is spoken along with the audio. It's the same voice and the same credits.
-  - **Windows voices:** Frivo speaks each page on its own and joins them, so it knows exactly where each one ends. You may hear a slightly longer pause between pages.
+  - **Frivo's and Windows' free voices:** Frivo speaks each page on its own and joins them, so it knows exactly where each one ends. You may hear a slightly longer pause between pages.
 - If you pause a reply, the next page waits, and when you play it again it carries on from where the voice is.
 - The typing dots stay up between pages, the same as before.
 - Replies sent without the voice (**Speak** off) still go as one message and page the way they always have.

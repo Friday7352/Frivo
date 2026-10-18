@@ -31,7 +31,8 @@ through FrivOSC. It runs on your computer and opens in your web browser.
 4. When setup finishes, leave **Launch Frivo now** selected to open Frivo.
 
 The first setup may download Python and Frivo's required libraries, so an
-internet connection is needed while installing. Frivo is supported on
+internet connection is needed while installing. It also downloads Frivo's six
+free voices once (about 280 MB); updates keep them. Frivo is supported on
 Windows 10 and Windows 11.
 
 ## First-time setup
@@ -43,7 +44,10 @@ save your API keys.
 * **OpenAI API key** — required for the default chat experience.
 * **ElevenLabs API key** — required only when **Speak** is enabled.
 
-If you do not have an ElevenLabs key, turn **Speak** off. Frivo can still
+If you do not have an ElevenLabs key, pick one of the free voices instead:
+Frivo's own (Kristin, Cori, Alba, John, Joe and Norman, under **Free ·
+included with Frivo**) or a voice built into Windows. They run on your PC,
+need no key and use very little CPU. Or turn **Speak** off. Frivo can still
 return text replies with an OpenAI key. If Speak is on without an ElevenLabs
 key, Frivo shows a helpful error and does not send the message.
 
@@ -196,6 +200,20 @@ GitHub.
 
 This repository intentionally excludes keys, preferences, logs, certificates,
 and generated audio.
+
+Frivo's free voices are installed with the program, in its `voices` folder,
+not with your data.
+
+## Voice credits
+
+Frivo's free voices are [Piper](https://github.com/OHF-Voice/piper1-gpl)
+voices, as published by [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx),
+which also speaks them. Kristin, Cori, John and Norman are trained on
+public-domain LibriVox recordings, and Joe on CC0 recordings. Alba is trained on
+recordings from the University of Edinburgh
+([CC BY 4.0](https://datashare.ed.ac.uk/handle/10283/3270)). The pronunciation
+data is from [eSpeak NG](https://github.com/espeak-ng/espeak-ng) (GPL-3.0).
+`voices\piper\CREDITS.txt` in the install folder lists them too.
 
 ## Updates
 

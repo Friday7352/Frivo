@@ -35,3 +35,7 @@ Thumbs.db
 Desktop.ini
 # NEW (1.5.0): output of tests/check-windows-voices.bat
 tests/windows-voice-check/
+# NEW (1.5.0): the free voices; setup downloads them (app/voice_pack.py)
+app/voices/
+# NEW (1.5.0): files set aside for deleting by hand; never committed
+_to_delete/

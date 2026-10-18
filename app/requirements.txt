@@ -7,3 +7,6 @@ openai>=1.30
 cryptography>=42.0
 # Production WSGI server.
 cheroot>=10.0
+# NEW (1.5.0): speaks the free voices included with Frivo (voice_pack.py). Its
+# Windows build carries its own runtime: no Visual C++ install, no graphics card.
+sherpa-onnx==1.13.8

@@ -399,6 +399,8 @@ function Copy-AppFiles {
     # CHANGED (1.5.0): the helper that speaks the voices built into Windows.
     # (The Kokoro voices and their requirements-voices.txt have been removed.)
     Copy-Item (Join-Path $SourceApp 'windows_speech.ps1') -Destination $Target -Force
+    # NEW (1.5.0): gets Frivo's own voices (see Sync-FrivoVoices).
+    Copy-Item (Join-Path $SourceApp 'voice_pack.py')      -Destination $Target -Force
     # Installed alongside the app so a running Frivo can say which version
     # it is — /diagnose reads it. Written rather than copied, because the
     # payload keeps VERSION one level up from the app folder and this is
@@ -795,8 +797,9 @@ function Install-Frivo {
     } else {
         $venvPython = New-Venv -Target $Target -Python $python -Log $Log
     }
-    # CHANGED (1.5.0): the free voices are Windows' own, so there's nothing
-    # extra to install for them (no Kokoro, no Visual C++ runtime).
+    # NEW (1.5.0): Frivo's free voices, into voices\piper in the install
+    # folder. Updates and Repair keep them; uninstalling removes them.
+    [void] (Sync-FrivoVoices -VenvPython $venvPython -Target $Target -Log $Log)
     & $Progress 65
 
     if ($Action -ne 'Update') {

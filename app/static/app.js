@@ -2790,11 +2790,14 @@ function voiceGroupNode(label, note, free) {
 // CHANGED (2.0): which engine speaks a voice, for grouping and the cost tag.
 function voiceEngine(v) {
   const id = v.voice_id || "";
-  // CHANGED (1.5.0): Kokoro is gone; "onecore:" is the newer Windows voices.
+  // CHANGED (1.5.0): Kokoro is gone; "onecore:" is the newer Windows voices,
+  // and "piper:" the voices included with Frivo.
+  if (id.startsWith("piper:")) return "piper";
   if (id.startsWith("windows:") || id.startsWith("onecore:")) return "windows";
   return "elevenlabs";
 }
 const VOICE_ENGINE_GROUPS = [
+  ["piper", "Free · included with Frivo", "no credits", true],   // NEW (1.5.0)
   ["windows", "Free · built into Windows", "no credits", true],
   ["elevenlabs", "ElevenLabs", "uses credits", false],
 ];
@@ -3731,22 +3734,29 @@ function refreshPromptIfOpen() {
 
 // ---------- NEW (1.5.0): free voices ----------
 //
-// CHANGED (1.5.0): the free voices are the ones built into Windows. They're
-// chosen like any other voice, from the Voice list, and there's nothing to
-// download. Kokoro, an AI voice model, has been removed; AI voices are what
-// ElevenLabs is for.
+// CHANGED (1.5.0): the free voices are Frivo's own six (Piper, installed by
+// setup) and the ones built into Windows. They're chosen like any other
+// voice, from the Voice list, and Frivo never downloads anything for them.
+// Kokoro has been removed: it was heavy, and the natural-sounding AI voices
+// are what ElevenLabs is for.
 const freeVoicesStatus = $("freeVoicesStatus");
 
 function isFreeVoiceId(id) {
-  return /^(windows|onecore):/.test(id || "");   // CHANGED (1.5.0)
+  return /^(piper|windows|onecore):/.test(id || "");   // CHANGED (1.5.0)
 }
 
 function describeFreeVoices(data) {
+  // CHANGED (1.5.0): Frivo's own voices first, then Windows'.
+  const parts = [];
+  const p = data.piper || {};
+  if (!p.available) parts.push(p.problem || "Frivo's voices aren't available.");
+  else if (p.count < p.total) parts.push(`${p.count} of Frivo's ${p.total} voices are installed. Run Frivo's setup again (Repair) to add the rest.`);
+  else parts.push(`Frivo's ${p.total} voices are installed, under "Free · included with Frivo".`);
   const w = data.windows || {};
-  if (!w.available) return "Windows voices only work when Frivo runs on Windows.";
-  if (!w.count) return w.error ? `Couldn't list the Windows voices: ${w.error}` : "No Windows voices are installed.";
-  const more = "More come with each language in Windows Settings > Time & language > Speech.";
-  return `${w.count} voice${w.count === 1 ? "" : "s"} built into Windows, under "Free · built into Windows" in the Voice list. ${more}`;
+  if (!w.available) parts.push("Windows voices only work when Frivo runs on Windows.");
+  else if (!w.count) parts.push(w.error ? `Couldn't list the Windows voices: ${w.error}` : "No Windows voices are installed.");
+  else parts.push(`${w.count} more built into Windows; Windows Settings > Time & language > Speech adds others.`);
+  return parts.join(" ");
 }
 
 async function refreshFreeVoices() {

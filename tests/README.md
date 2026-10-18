@@ -412,6 +412,12 @@ The test simulates hidden names by blanking what `enumerateDevices` returns, bec
 - anything set to a Kokoro voice moves to a Windows voice of the same gender, and the old Kokoro download is deleted;
 - previews are made once, in the voice's language, and kept.
 
+## test-frivo-voices.py (1.5.0)
+
+`python3 tests/test-frivo-voices.py` covers Frivo's own free voices (Piper). The first half tests `app/voice_pack.py` against a stand-in download server, so it runs anywhere. It checks that only shareable voices are listed with sizes and SHA-256s, that a bad download is retried, that nothing in an archive escapes the voices folder, that the pronunciation data is shared, that a damaged model is found and replaced, and that one voice failing doesn't stop the others.
+
+The second half runs the real voices through Frivo when sherpa-onnx is installed and `app/voices` holds them (`python app/voice_pack.py install` gets them). It checks that every voice loads and speaks on one thread, the speed, exact chatbox page times, that at most two voices stay loaded, the messages for another language and for a missing voice, the move off Kokoro, and previews.
+
 ## check-windows-voices.bat (1.5.0)
 
 Double-click `tests/check-windows-voices.bat` on a Windows PC. It runs the real `app/windows_speech.ps1` the way Frivo does: it lists the voices, speaks with one older and one newer voice (one page, three pages, two speeds, non-English text), and checks that a missing voice fails cleanly and that the helper exits when Frivo would close it. It also checks that the setup scripts parse. Everything is timed and written to `tests/windows-voice-check/` (ignored by git).

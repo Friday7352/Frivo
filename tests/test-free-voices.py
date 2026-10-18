@@ -146,10 +146,17 @@ check("names are short", mark["name"] == "Mark", mark["name"])
 check("language and region", mark["languages"] == [{"code": "en", "name": "English · United States"}], mark["languages"])
 check("preview address is encoded", mark["preview_url"] == "/api/voices/preview?voice_id=onecore%3AMSTTS_V110_enUS_MarkM",
       mark["preview_url"])
+# CHANGED (1.5.0): an older voice that's in use moves to its newer copy, so
+# the Voice list never shows the same voice twice.
 mod.CFG["voice_id"] = "windows:Microsoft Zira Desktop"
-mod.WINDOWS_VOICES_CACHE["at"] = 0
-check("an older voice that's in use stays listed",
-      "windows:Microsoft Zira Desktop" in [e["voice_id"] for e in mod.windows_voice_entries()])
+mod.save_profiles([{"id": "z", "name": "Z", "voice_id": "windows:Microsoft Zira Desktop", "voice_name": "Zira Desktop"},
+                   {"id": "h", "name": "H", "voice_id": "windows:Microsoft Hazel Desktop", "voice_name": "Hazel"}])
+listed = [v["voice_id"] for v in client.get("/api/voices").get_json().get("voices", [])]
+check("the default moves to the newer Zira",
+      mod.CFG["voice_id"] == "onecore:MSTTS_V110_enUS_ZiraM" and mod.CFG["voice_name"] == "Zira", mod.CFG["voice_id"])
+check("so does a profile", {p["id"]: p for p in mod.load_profiles()}["z"]["voice_id"] == "onecore:MSTTS_V110_enUS_ZiraM")
+check("one with no newer copy stays", {p["id"]: p for p in mod.load_profiles()}["h"]["voice_id"] == "windows:Microsoft Hazel Desktop")
+check("Zira is listed once", sum(1 for i in listed if "Zira" in i) == 1, listed)
 check("one helper answered all of that", len({r["pid"] for r in helper_log()}) == 1, helper_log())
 
 data = client.get("/api/voices").get_json()
