@@ -1874,279 +1874,54 @@ def get_chat_reply(history, max_words, language="English", condense=True, temper
 
 
 # ---------------------------------------------------------------------------
-# NEW (1.5.0): free voices that run on this PC
+# NEW (1.5.0): free voices, the ones built into Windows
 #
-# ElevenLabs stays exactly as it was. Alongside it, two free engines that need
-# no account, no key and no internet once set up:
+# ElevenLabs stays exactly as it was. It's the AI voice, for anyone who wants
+# one. The free voices are plain text-to-speech built into Windows: no
+# account, no key, no download, no graphics card, and very little CPU.
 #
-#   Kokoro   — a small neural voice model (Apache 2.0): natural-sounding male
-#              and female voices in American and British English, plus
-#              Spanish, French, Italian, Portuguese, Hindi, Japanese and
-#              Chinese. Runs on the CPU. Its Python package is installed by
-#              setup (requirements-voices.txt); the model itself (about
-#              200 MB) is downloaded the first time a Kokoro voice is chosen,
-#              into the data folder, and checked against a known hash.
-#   Windows  — the voices built into Windows (David, Zira, and any language
-#              packs installed). Nothing to download; more robotic.
+#   windows:<name>  the desktop voices (David, Zira, and any other SAPI voice
+#                   installed). What Frivo has always used.
+#   onecore:<id>    the newer voices Windows installs with each language
+#                   (Settings > Time & language > Speech adds more). Desktop
+#                   programs can't reach these through the usual speech API,
+#                   so Frivo didn't list them before.
 #
-# Which engine speaks is decided by the voice: ids are "kokoro:<name>" and
-# "windows:<name>", and anything else is an ElevenLabs voice id, as before.
-# So profiles, the voice picker and settings all work unchanged — choosing a
-# free voice is choosing the free engine.
+# CHANGED (1.5.0): Kokoro, an AI voice model added earlier in 1.5.0, has been
+# removed. A free voice should be light, and AI voices are what ElevenLabs is
+# for. Anything set to a Kokoro voice is moved to a Windows voice, and the
+# downloaded model is deleted (replace_retired_voices, remove_retired_voice_files).
+#
+# Both kinds are spoken by app\windows_speech.ps1, which Frivo starts once and
+# keeps running (WindowsSpeechHost). Starting PowerShell and the speech engine
+# again for every reply used to add about a second.
 # ---------------------------------------------------------------------------
 
-KOKORO_PREFIX = "kokoro:"
+import atexit
+import collections
+from urllib.parse import quote
+
 WINDOWS_PREFIX = "windows:"
-FREE_VOICES_DIR = os.path.join(DATA_DIR, "voices")
-KOKORO_DIR = os.path.join(FREE_VOICES_DIR, "kokoro")
-KOKORO_RELEASE = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/"
-# The half-precision model: the same speed and sound as the full one on a
-# CPU, at half the download. (The 8-bit one is smaller still, but about three
-# times slower on a CPU, which matters more in a conversation.)
-KOKORO_FILES = [
-    {"name": "kokoro-v1.0.fp16.onnx", "size": 177464787,
-     "sha256": "c1610a859f3bdea01107e73e50100685af38fff88f5cd8e5c56df109ec880204"},
-    {"name": "voices-v1.0.bin", "size": 28214398,
-     "sha256": "bca610b8308e8d99f32e6fe4197e7ec01679264efed0cac9140fe9c29f1fbf7d"},
-]
-KOKORO_DOWNLOAD_MB = round(sum(f["size"] for f in KOKORO_FILES) / 1_000_000)
-
-# (voice, display name, gender, language code, accent/region)
-KOKORO_VOICES = [
-    ("af_heart", "Heart", "female", "en", "American"), ("af_bella", "Bella", "female", "en", "American"),
-    ("af_nicole", "Nicole", "female", "en", "American"), ("af_sarah", "Sarah", "female", "en", "American"),
-    ("af_sky", "Sky", "female", "en", "American"), ("af_nova", "Nova", "female", "en", "American"),
-    ("af_river", "River", "female", "en", "American"), ("af_jessica", "Jessica", "female", "en", "American"),
-    ("af_kore", "Kore", "female", "en", "American"), ("af_aoede", "Aoede", "female", "en", "American"),
-    ("af_alloy", "Alloy", "female", "en", "American"),
-    ("am_michael", "Michael", "male", "en", "American"), ("am_fenrir", "Fenrir", "male", "en", "American"),
-    ("am_puck", "Puck", "male", "en", "American"), ("am_adam", "Adam", "male", "en", "American"),
-    ("am_eric", "Eric", "male", "en", "American"), ("am_liam", "Liam", "male", "en", "American"),
-    ("am_onyx", "Onyx", "male", "en", "American"), ("am_echo", "Echo", "male", "en", "American"),
-    ("bf_emma", "Emma", "female", "en", "British"), ("bf_isabella", "Isabella", "female", "en", "British"),
-    ("bf_alice", "Alice", "female", "en", "British"), ("bf_lily", "Lily", "female", "en", "British"),
-    ("bm_george", "George", "male", "en", "British"), ("bm_fable", "Fable", "male", "en", "British"),
-    ("bm_daniel", "Daniel", "male", "en", "British"), ("bm_lewis", "Lewis", "male", "en", "British"),
-    ("ef_dora", "Dora", "female", "es", "Spanish"), ("em_alex", "Alex", "male", "es", "Spanish"),
-    ("ff_siwis", "Siwis", "female", "fr", "French"),
-    ("if_sara", "Sara", "female", "it", "Italian"), ("im_nicola", "Nicola", "male", "it", "Italian"),
-    ("pf_dora", "Dora", "female", "pt", "Brazilian"), ("pm_alex", "Alex", "male", "pt", "Brazilian"),
-    ("hf_alpha", "Alpha", "female", "hi", "Hindi"), ("hf_beta", "Beta", "female", "hi", "Hindi"),
-    ("hm_omega", "Omega", "male", "hi", "Hindi"), ("hm_psi", "Psi", "male", "hi", "Hindi"),
-    ("jf_alpha", "Alpha", "female", "ja", "Japanese"), ("jf_nezumi", "Nezumi", "female", "ja", "Japanese"),
-    ("jm_kumo", "Kumo", "male", "ja", "Japanese"),
-    ("zf_xiaobei", "Xiaobei", "female", "zh", "Mandarin"), ("zf_xiaoxiao", "Xiaoxiao", "female", "zh", "Mandarin"),
-    ("zm_yunjian", "Yunjian", "male", "zh", "Mandarin"), ("zm_yunxi", "Yunxi", "male", "zh", "Mandarin"),
-]
-KOKORO_RECOMMENDED = {"af_heart", "af_bella", "am_michael", "am_fenrir", "bf_emma", "bm_george"}
-
-# Frivo's language -> the pronunciation Kokoro uses for it. Languages not
-# listed can't be spoken by Kokoro (any voice can speak any listed language,
-# with its own accent).
-KOKORO_LANGS = {
-    "English": "en-us", "Spanish": "es", "French": "fr-fr", "Italian": "it",
-    "Portuguese": "pt-br", "Hindi": "hi", "Japanese": "ja", "Chinese": "cmn",
-}
-
-FREE_VOICES_LOCK = threading.Lock()
-KOKORO_STATE = {
-    "engine": None,          # the loaded model
-    "import_error": None,    # why the package can't be used, once known
-    "downloading": False,
-    "downloaded_bytes": 0,
-    "error": "",
-}
-WINDOWS_VOICES_CACHE = {"voices": None, "at": 0.0}
+ONECORE_PREFIX = "onecore:"
+# CHANGED (1.5.0): voices from an engine Frivo no longer has.
+RETIRED_PREFIXES = ("kokoro:",)
+RETIRED_VOICE_DIRS = [os.path.join(DATA_DIR, "voices", "kokoro")]
+WINDOWS_SPEECH_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "windows_speech.ps1")
+WINDOWS_VOICES_CACHE = {"voices": None, "at": 0.0, "error": ""}
+WINDOWS_VOICES_LOCK = threading.Lock()
+WINDOWS_VOICES_CACHE_SECONDS = 600
 
 
 def tts_engine(voice_id):
     voice_id = voice_id or ""
-    if voice_id.startswith(KOKORO_PREFIX):
-        return "kokoro"
-    if voice_id.startswith(WINDOWS_PREFIX):
+    if voice_id.startswith((WINDOWS_PREFIX, ONECORE_PREFIX)):
         return "windows"
+    if voice_id.startswith(RETIRED_PREFIXES):
+        return "retired"
     return "elevenlabs"
 
 
-TTS_ENGINE_NAMES = {"elevenlabs": "ElevenLabs", "kokoro": "Kokoro (free, on this PC)", "windows": "Windows voice (free)"}
-
-
-def kokoro_package_problem():
-    """None when Kokoro's Python package can be used, else why not."""
-    with FREE_VOICES_LOCK:
-        if KOKORO_STATE["import_error"] is not None:
-            return KOKORO_STATE["import_error"] or None
-    problem = ""
-    if sys.version_info < (3, 10) or sys.version_info >= (3, 14):
-        problem = (f"Kokoro needs Python 3.10–3.13, and Frivo is running on "
-                   f"{sys.version_info.major}.{sys.version_info.minor}.")
-    else:
-        # Only looked for, not imported: importing it loads the whole ONNX
-        # runtime, which takes seconds and isn't needed to list voices. A
-        # package that's there but can't load is caught when it's first
-        # used (kokoro_engine).
-        import importlib.util
-        if "kokoro_onnx" not in sys.modules and importlib.util.find_spec("kokoro_onnx") is None:
-            problem = "Kokoro isn't installed. Run Frivo's setup again (Repair) to add it."
-    with FREE_VOICES_LOCK:
-        KOKORO_STATE["import_error"] = problem
-    return problem or None
-
-
-def kokoro_files_ready():
-    return all(
-        os.path.isfile(os.path.join(KOKORO_DIR, f["name"]))
-        and os.path.getsize(os.path.join(KOKORO_DIR, f["name"])) == f["size"]
-        for f in KOKORO_FILES
-    )
-
-
-def kokoro_status():
-    problem = kokoro_package_problem()
-    with FREE_VOICES_LOCK:
-        state = dict(KOKORO_STATE)
-    total = sum(f["size"] for f in KOKORO_FILES)
-    return {
-        "available": problem is None,
-        "problem": problem or "",
-        "downloaded": kokoro_files_ready(),
-        "downloading": state["downloading"],
-        "progress": round(100 * state["downloaded_bytes"] / total) if state["downloading"] else 0,
-        "download_mb": KOKORO_DOWNLOAD_MB,
-        "error": state["error"],
-    }
-
-
-def _download_kokoro():
-    import hashlib
-
-    try:
-        os.makedirs(KOKORO_DIR, exist_ok=True)
-        done_before = 0
-        for f in KOKORO_FILES:
-            final = os.path.join(KOKORO_DIR, f["name"])
-            if os.path.isfile(final) and os.path.getsize(final) == f["size"]:
-                done_before += f["size"]
-                with FREE_VOICES_LOCK:
-                    KOKORO_STATE["downloaded_bytes"] = done_before
-                continue
-            part = final + ".part"
-            digest = hashlib.sha256()
-            got = 0
-            with requests.get(KOKORO_RELEASE + f["name"], stream=True, timeout=60,
-                              headers={"User-Agent": f"Frivo/{APP_VERSION}"}) as resp:
-                resp.raise_for_status()
-                with open(part, "wb") as out:
-                    for chunk in resp.iter_content(chunk_size=1 << 20):
-                        if not chunk:
-                            continue
-                        out.write(chunk)
-                        digest.update(chunk)
-                        got += len(chunk)
-                        with FREE_VOICES_LOCK:
-                            KOKORO_STATE["downloaded_bytes"] = done_before + got
-            if got != f["size"] or digest.hexdigest() != f["sha256"]:
-                os.remove(part)
-                raise RuntimeError(f"{f['name']} didn't download correctly (it doesn't match the expected file).")
-            os.replace(part, final)
-            done_before += f["size"]
-        log_server_event("Free voices: Kokoro downloaded.")
-        with FREE_VOICES_LOCK:
-            KOKORO_STATE["error"] = ""
-    except Exception as e:
-        log_server_event(f"Free voices: Kokoro download failed: {e!r}")
-        with FREE_VOICES_LOCK:
-            KOKORO_STATE["error"] = f"Download failed: {e}"
-    finally:
-        with FREE_VOICES_LOCK:
-            KOKORO_STATE["downloading"] = False
-
-
-def start_kokoro_download():
-    """Starts the one-time download in the background. True if it's running."""
-    if kokoro_package_problem() or kokoro_files_ready():
-        return False
-    with FREE_VOICES_LOCK:
-        if KOKORO_STATE["downloading"]:
-            return True
-        KOKORO_STATE.update(downloading=True, downloaded_bytes=0, error="")
-    threading.Thread(target=_download_kokoro, name="kokoro-download", daemon=True).start()
-    return True
-
-
-def kokoro_engine():
-    with FREE_VOICES_LOCK:
-        if KOKORO_STATE["engine"] is not None:
-            return KOKORO_STATE["engine"]
-    try:
-        from kokoro_onnx import Kokoro
-    except Exception as e:
-        # Installed but can't load — on Windows usually the Visual C++
-        # runtime missing. Remembered, so Settings and replies say why.
-        problem = (f"Kokoro couldn't start ({e}). Installing the Microsoft Visual C++ "
-                   "Redistributable (x64) usually fixes this; then restart Frivo.")
-        with FREE_VOICES_LOCK:
-            KOKORO_STATE["import_error"] = problem
-        raise RuntimeError(problem)
-    engine = Kokoro(os.path.join(KOKORO_DIR, KOKORO_FILES[0]["name"]),
-                    os.path.join(KOKORO_DIR, KOKORO_FILES[1]["name"]))
-    with FREE_VOICES_LOCK:
-        if KOKORO_STATE["engine"] is None:
-            KOKORO_STATE["engine"] = engine
-        return KOKORO_STATE["engine"]
-
-
-KOKORO_SPEAK_LOCK = threading.Lock()
-
-
-def write_wav(path, samples, sample_rate):
-    import wave
-    import numpy as np
-
-    pcm = (np.clip(samples, -1.0, 1.0) * 32767).astype("<i2")
-    with wave.open(path, "wb") as out:
-        out.setnchannels(1)
-        out.setsampwidth(2)
-        out.setframerate(int(sample_rate))
-        out.writeframes(pcm.tobytes())
-
-
-def _kokoro_options(voice, language):
-    # CHANGED (1.5.0): shared by kokoro_speak() and kokoro_speak_pages().
-    lang = KOKORO_LANGS.get(language)
-    if language == "English" and voice.startswith("b"):
-        lang = "en-gb"
-    speed = clamp_speaking_speed(CFG.get("speaking_speed", 1.0))
-    return {"voice": voice, "speed": max(0.5, min(2.0, speed)), "lang": lang}
-
-
-def kokoro_speak(text, voice, language, path):
-    options = _kokoro_options(voice, language)   # CHANGED (1.5.0)
-    # One at a time: two at once would only make both slower on the CPU.
-    with KOKORO_SPEAK_LOCK:
-        samples, rate = kokoro_engine().create(text, **options)
-    write_wav(path, samples, rate)
-
-
-def kokoro_speak_pages(pages, voice, language, path):
-    """
-    NEW (1.5.0): speaks each chatbox page on its own and joins them into one
-    file. Returns the second each page ends, which is exactly when the voice
-    finishes that page's last word.
-    """
-    import numpy as np
-
-    options = _kokoro_options(voice, language)
-    parts, ends, total, rate = [], [], 0, None
-    with KOKORO_SPEAK_LOCK:
-        engine = kokoro_engine()
-        for page in pages:
-            samples, rate = engine.create(page, **options)
-            parts.append(samples)
-            total += len(samples)
-            ends.append(total / float(rate))
-    write_wav(path, np.concatenate(parts), rate)
-    return ends
+TTS_ENGINE_NAMES = {"elevenlabs": "ElevenLabs", "windows": "Windows voice (free)", "retired": "Removed voice"}
 
 
 def windows_voices_available():
@@ -2159,100 +1934,229 @@ def _powershell_path():
     return candidate if os.path.isfile(candidate) else shutil.which("powershell")
 
 
-def _run_powershell(script, timeout=60):
-    import base64
-
-    encoded = base64.b64encode(script.encode("utf-16-le")).decode("ascii")
-    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-    return subprocess.run(
-        [_powershell_path(), "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded],
-        capture_output=True, text=True, timeout=timeout, creationflags=flags,
-    )
-
-
 def _ps_literal(value):
     return "'" + str(value).replace("'", "''") + "'"
 
 
+class WindowsSpeechGone(RuntimeError):
+    """The helper wasn't running, or stopped. Starting it again may help."""
+
+
+class WindowsSpeechHost:
+    """
+    The one running copy of windows_speech.ps1, and how to talk to it.
+
+    One request at a time. A helper that stops is started again on the next
+    request, and one that hangs is stopped and replaced, so a voice that
+    breaks can't take the next reply down with it.
+    """
+
+    START_SECONDS = 30   # extra time allowed when the helper has to start first
+
+    def __init__(self, command=None):
+        self._command = command
+        self.proc = None
+        self.answers = None
+        self.lock = threading.Lock()
+        self.stderr = collections.deque(maxlen=20)
+
+    def command(self):
+        if self._command:
+            return list(self._command)
+        # The script is read and run as a script block rather than run as a
+        # file, so a PC whose execution policy blocks scripts still runs it.
+        return [_powershell_path(), "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command",
+                "& ([scriptblock]::Create([IO.File]::ReadAllText(%s, [Text.Encoding]::UTF8)))"
+                % _ps_literal(WINDOWS_SPEECH_SCRIPT)]
+
+    def _start(self):
+        flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        proc = subprocess.Popen(self.command(), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE, creationflags=flags)
+        answers = queue.Queue()
+
+        def read_answers():
+            for raw in iter(proc.stdout.readline, b""):
+                line = raw.decode("utf-8", errors="replace").strip()
+                if line.startswith("@@FRIVO "):
+                    answers.put(line[len("@@FRIVO "):])
+            answers.put(None)   # the helper has stopped
+
+        def read_errors():
+            for raw in iter(proc.stderr.readline, b""):
+                text = raw.decode("utf-8", errors="replace").strip()
+                if text:
+                    self.stderr.append(text)
+
+        threading.Thread(target=read_answers, name="windows-speech-out", daemon=True).start()
+        threading.Thread(target=read_errors, name="windows-speech-err", daemon=True).start()
+        self.proc, self.answers = proc, answers
+
+    def _stop(self):
+        proc, self.proc = self.proc, None
+        if proc is not None:
+            try:
+                proc.kill()
+            except OSError:
+                pass
+
+    def close(self):
+        with self.lock:
+            self._stop()
+
+    def _ask(self, request, timeout):
+        if self.proc is None or self.proc.poll() is not None:
+            self._start()
+            timeout += self.START_SECONDS
+        try:
+            # ASCII on the way in (non-English text travels as \u escapes), so
+            # the console's code page can never garble it.
+            self.proc.stdin.write((json.dumps(request, ensure_ascii=True) + "\n").encode("ascii"))
+            self.proc.stdin.flush()
+        except OSError as e:
+            self._stop()
+            raise WindowsSpeechGone(f"The Windows speech helper stopped ({e}).")
+        try:
+            line = self.answers.get(timeout=timeout)
+        except queue.Empty:
+            self._stop()
+            raise RuntimeError("The Windows voice took too long to answer.")
+        if line is None:
+            detail = " ".join(self.stderr)[-300:]
+            self._stop()
+            raise WindowsSpeechGone("The Windows speech helper stopped." + (f" {detail}" if detail else ""))
+        return json.loads(line)
+
+    def request(self, request, timeout=60):
+        """Sends one request and returns the answer. Raises if it failed."""
+        with self.lock:
+            try:
+                answer = self._ask(request, timeout)
+            except WindowsSpeechGone:
+                # Once more with a fresh helper: one that died since the last
+                # reply shouldn't cost this one.
+                answer = self._ask(request, timeout)
+        if not answer.get("ok"):
+            raise RuntimeError(answer.get("error") or "The Windows voice couldn't speak.")
+        return answer
+
+
+WINDOWS_SPEECH = WindowsSpeechHost()
+atexit.register(WINDOWS_SPEECH.close)
+
+
+def _short_voice_name(name):
+    return re.sub(r"^Microsoft\s+|\s+(Desktop|Mobile)$", "", name or "").strip()
+
+
 def list_windows_voices(force=False):
+    """
+    Every Windows voice, as {kind, id, name, gender, culture, language}.
+    Kept for ten minutes. A failed look is kept for only thirty seconds.
+    """
     if not windows_voices_available():
         return []
     now = time.time()
-    if not force and WINDOWS_VOICES_CACHE["voices"] is not None and now - WINDOWS_VOICES_CACHE["at"] < 600:
-        return WINDOWS_VOICES_CACHE["voices"]
-    script = (
-        "Add-Type -AssemblyName System.Speech;"
-        "$s = New-Object System.Speech.Synthesis.SpeechSynthesizer;"
-        "@($s.GetInstalledVoices() | Where-Object { $_.Enabled } | ForEach-Object {"
-        " $i = $_.VoiceInfo; [pscustomobject]@{ name = $i.Name; gender = [string]$i.Gender;"
-        " culture = $i.Culture.Name; language = $i.Culture.EnglishName } }) | ConvertTo-Json -Compress;"
-        "$s.Dispose()"
-    )
-    voices = []
+    with WINDOWS_VOICES_LOCK:
+        cached = WINDOWS_VOICES_CACHE["voices"]
+        if not force and cached is not None and now - WINDOWS_VOICES_CACHE["at"] < WINDOWS_VOICES_CACHE_SECONDS:
+            return cached
+    voices, error, at = [], "", now
     try:
-        result = _run_powershell(script, timeout=30)
-        data = json.loads(result.stdout.strip() or "[]")
-        voices = data if isinstance(data, list) else [data]
+        answer = WINDOWS_SPEECH.request({"op": "list"}, timeout=30)
+        voices = [v for v in (answer.get("voices") or [])
+                  if isinstance(v, dict) and v.get("id") and v.get("kind") in ("sapi", "onecore")]
+        error = answer.get("onecore_error") or ""
+        if error:
+            log_server_event(f"Windows voices: the newer voices aren't available: {error}")
     except Exception as e:
-        log_server_event(f"Free voices: couldn't list Windows voices: {e!r}")
-    voices = [v for v in voices if isinstance(v, dict) and v.get("name")]
-    WINDOWS_VOICES_CACHE.update(voices=voices, at=now)
+        log_server_event(f"Windows voices: couldn't list them: {e!r}")
+        error = str(e)
+        at = now - WINDOWS_VOICES_CACHE_SECONDS + 30
+    with WINDOWS_VOICES_LOCK:
+        WINDOWS_VOICES_CACHE.update(voices=voices, at=at, error=error)
     return voices
 
 
-def windows_speak(text, name, path):
+def windows_voice_entries():
+    voices = list_windows_voices()
+    # The newer copy of a voice is listed, not both. A desktop voice that
+    # has a newer copy is still listed if something is set to use it.
+    newer = {(_short_voice_name(v["name"]).lower(), (v.get("culture") or "").lower())
+             for v in voices if v["kind"] == "onecore"}
+    in_use = {CFG.get("voice_id", "")} | {p.get("voice_id", "") for p in load_profiles()}
+    entries = []
+    for v in voices:
+        prefix = ONECORE_PREFIX if v["kind"] == "onecore" else WINDOWS_PREFIX
+        voice_id = prefix + v["id"]
+        short = _short_voice_name(v["name"])
+        culture = v.get("culture") or ""
+        if (v["kind"] == "sapi" and (short.lower(), culture.lower()) in newer
+                and voice_id not in in_use):
+            continue
+        code = culture.split("-")[0].lower()
+        region = re.search(r"\(([^)]+)\)\s*$", v.get("language") or "")
+        lang_name = VOICE_LANGUAGE_NAMES.get(code, (v.get("language") or code.upper()).split(" (")[0])
+        entries.append({
+            "voice_id": voice_id,
+            "name": short or v["name"],
+            "category": "built into Windows",
+            "tags": ["windows", "free"],
+            "gender": (v.get("gender") or "").lower(),
+            "created_at": None,
+            "languages": [{"code": code, "name": f"{lang_name} · {region.group(1)}" if region else lang_name}] if code else [],
+            "language_source": "declared",
+            "preview_url": "/api/voices/preview?voice_id=" + quote(voice_id, safe=""),
+            "description": "Free voice built into Windows. No download, and light on the PC.",
+        })
+    return entries
+
+
+def free_voice_problem(voice_id, language):
+    """None when this free voice can speak right now, else a message for the person."""
+    engine = tts_engine(voice_id)
+    if engine == "retired":
+        return "That voice was removed in Frivo 1.5.0. Pick another voice in the Voice list."
+    if engine == "windows" and not windows_voices_available():
+        return "Windows voices only work when Frivo runs on Windows."
+    return None
+
+
+def _windows_speak_request(voice_id, pages, outs):
+    kind = "onecore" if voice_id.startswith(ONECORE_PREFIX) else "sapi"
     speed = clamp_speaking_speed(CFG.get("speaking_speed", 1.0))
-    rate = max(-10, min(10, round((speed - 1.0) * 10)))
-    job = os.path.join(AUDIO_DIR, f"{uuid.uuid4().hex}.json")
-    with open(job, "w", encoding="utf-8") as handle:
-        json.dump({"text": text, "voice": name, "rate": rate, "out": path}, handle)
-    script = (
-        "$ErrorActionPreference = 'Stop';"
-        f"$job = [IO.File]::ReadAllText({_ps_literal(job)}, [Text.Encoding]::UTF8) | ConvertFrom-Json;"
-        "Add-Type -AssemblyName System.Speech;"
-        "$s = New-Object System.Speech.Synthesis.SpeechSynthesizer;"
-        "try { $s.SelectVoice([string]$job.voice); $s.Rate = [int]$job.rate;"
-        " $s.SetOutputToWaveFile([string]$job.out); $s.Speak([string]$job.text) } finally { $s.Dispose() }"
-    )
-    try:
-        result = _run_powershell(script, timeout=120)
-    finally:
-        try:
-            os.remove(job)
-        except OSError:
-            pass
-    if result.returncode != 0 or not os.path.isfile(path) or os.path.getsize(path) == 0:
-        raise RuntimeError(f"The Windows voice couldn't speak: {(result.stderr or result.stdout or '').strip()[:300]}")
+    WINDOWS_SPEECH.request({
+        "op": "speak",
+        "kind": kind,
+        "voice": voice_id.split(":", 1)[1],
+        # The desktop voices take a rate from -10 to 10, the newer ones a
+        # multiplier like ElevenLabs'.
+        "sapi_rate": max(-10, min(10, round((speed - 1.0) * 10))),
+        "speed": round(speed, 3),
+        "pages": list(pages),
+        "outs": list(outs),
+    }, timeout=60 + 15 * len(pages))
+    for out_path in outs:
+        if not os.path.isfile(out_path) or os.path.getsize(out_path) == 0:
+            raise RuntimeError("The Windows voice didn't make any audio.")
 
 
-def windows_speak_pages(pages, name, path):
+def windows_speak(text, voice_id, path):
+    # CHANGED (1.5.0): through the running helper, and takes the whole voice id.
+    _windows_speak_request(voice_id, [text], [path])
+
+
+def windows_speak_pages(pages, voice_id, path):
     """
-    NEW (1.5.0): speaks each chatbox page to its own wave file in one
-    PowerShell run, then joins them. Returns the second each page ends.
+    CHANGED (1.5.0): speaks each chatbox page to its own wave file, then
+    joins them. Returns the second each page ends.
     """
     import wave
 
-    speed = clamp_speaking_speed(CFG.get("speaking_speed", 1.0))
-    rate = max(-10, min(10, round((speed - 1.0) * 10)))
     stem = os.path.join(AUDIO_DIR, uuid.uuid4().hex)
     outs = [f"{stem}-{i}.part.wav" for i in range(len(pages))]
-    job = stem + ".json"
-    with open(job, "w", encoding="utf-8") as handle:
-        json.dump({"pages": list(pages), "voice": name, "rate": rate, "outs": outs}, handle)
-    script = (
-        "$ErrorActionPreference = 'Stop';"
-        f"$job = [IO.File]::ReadAllText({_ps_literal(job)}, [Text.Encoding]::UTF8) | ConvertFrom-Json;"
-        "Add-Type -AssemblyName System.Speech;"
-        "$s = New-Object System.Speech.Synthesis.SpeechSynthesizer;"
-        "try { $s.SelectVoice([string]$job.voice); $s.Rate = [int]$job.rate;"
-        " for ($i = 0; $i -lt @($job.pages).Count; $i++) {"
-        " $s.SetOutputToWaveFile([string]@($job.outs)[$i]); $s.Speak([string]@($job.pages)[$i]) };"
-        " $s.SetOutputToNull() } finally { $s.Dispose() }"
-    )
     try:
-        result = _run_powershell(script, timeout=180)
-        if result.returncode != 0 or not all(os.path.isfile(o) and os.path.getsize(o) for o in outs):
-            raise RuntimeError(f"The Windows voice couldn't speak: {(result.stderr or result.stdout or '').strip()[:300]}")
+        _windows_speak_request(voice_id, pages, outs)
         frames, ends, total, params = [], [], 0, None
         for out_path in outs:
             with wave.open(out_path, "rb") as part:
@@ -2271,116 +2175,85 @@ def windows_speak_pages(pages, name, path):
             joined.writeframes(b"".join(frames))
         return ends
     finally:
-        for leftover in outs + [job]:
+        for leftover in outs:
             try:
                 os.remove(leftover)
             except OSError:
                 pass
 
 
-def kokoro_voice_entries():
-    status = kokoro_status()
-    if not status["available"]:
-        return []
-    entries = []
-    for key, name, gender, lang, region in KOKORO_VOICES:
-        entries.append({
-            "voice_id": KOKORO_PREFIX + key,
-            # CHANGED (2.0): the bare name; the accent is on the language
-            # ("English · British") and "recommended" is a tag.
-            "name": name,
-            "category": "free on this PC",
-            "tags": [region.lower(), "free"] + (["recommended"] if key in KOKORO_RECOMMENDED else []),
-            "gender": gender,
-            "created_at": None,
-            "languages": [{"code": lang, "name": (
-                f"{VOICE_LANGUAGE_NAMES.get(lang, lang.upper())} · {region}" if lang == "en"
-                else VOICE_LANGUAGE_NAMES.get(lang, lang.upper()))}],
-            "language_source": "declared",
-            "preview_url": "/api/voices/preview?voice_id=" + KOKORO_PREFIX + key,
-            "description": (
-                "Free voice made on this PC by Kokoro. "
-                + ("" if status["downloaded"] else f"The first time you use one, Frivo downloads it ({status['download_mb']} MB, once).")
-            ).strip(),
-        })
-    return entries
+def free_tts_audio(text, voice_id, language):
+    filename = f"{uuid.uuid4().hex}.wav"
+    windows_speak(text, voice_id, os.path.join(AUDIO_DIR, filename))
+    return filename
 
 
-def windows_voice_entries():
-    entries = []
-    for v in list_windows_voices():
-        code = (v.get("culture") or "").split("-")[0].lower()
-        short = re.sub(r"^Microsoft\s+|\s+Desktop$", "", v["name"]).strip()
-        entries.append({
-            "voice_id": WINDOWS_PREFIX + v["name"],
-            "name": short,
-            "category": "built into Windows",
-            "tags": ["windows", "free"],
-            "gender": (v.get("gender") or "").lower(),
-            "created_at": None,
-            "languages": [{"code": code, "name": VOICE_LANGUAGE_NAMES.get(code, v.get("language") or code.upper())}] if code else [],
-            "language_source": "declared",
-            "preview_url": "/api/voices/preview?voice_id=" + WINDOWS_PREFIX + v["name"],
-            "description": "Free voice built into Windows. Instant, but more robotic than Kokoro.",
-        })
-    return entries
-
-
-def free_voice_problem(voice_id, language):
-    """
-    None when this free voice can speak `language` right now, else a
-    message for the person. Starts the Kokoro download when that's all
-    that's missing.
-    """
-    engine = tts_engine(voice_id)
-    if engine == "kokoro":
-        problem = kokoro_package_problem()
-        if problem:
-            return problem
-        if language not in KOKORO_LANGS:
-            return (f"Kokoro voices can't speak {language}. Pick a Windows voice or an ElevenLabs voice "
-                    f"for {language}, or turn Speak off.")
-        if not kokoro_files_ready():
-            start_kokoro_download()
-            status = kokoro_status()
-            if status["error"]:
-                return f"The free voices couldn't be downloaded: {status['error']}"
-            return (f"Downloading the free voices ({status['download_mb']} MB, only this once) — "
-                    f"{status['progress']}% so far. Try again in a minute.")
-        return None
-    if engine == "windows":
-        if not windows_voices_available():
-            return "Windows voices only work when Frivo runs on Windows."
-        return None
+def _replacement_for_retired(voice_id):
+    """CHANGED (1.5.0): a Windows voice to use instead of a removed one."""
+    key = voice_id.split(":", 1)[-1]
+    # Kokoro's voice names start with language and gender: "af_heart" is
+    # American female, "bm_george" British male.
+    gender = {"f": "female", "m": "male"}.get(key[1:2], "")
+    entries = windows_voice_entries()
+    english = [e for e in entries if e["languages"] and e["languages"][0]["code"] == "en"]
+    for pool in ([e for e in english if e["gender"] == gender and e["voice_id"].startswith(ONECORE_PREFIX)],
+                 [e for e in english if e["gender"] == gender], english, entries):
+        if pool:
+            choice = sorted(pool, key=lambda e: e["name"])[0]
+            return choice["voice_id"], choice["name"]
     return None
 
 
-def free_tts_audio(text, voice_id, language):
-    filename = f"{uuid.uuid4().hex}.wav"
-    path = os.path.join(AUDIO_DIR, filename)
-    if tts_engine(voice_id) == "kokoro":
-        kokoro_speak(text, voice_id[len(KOKORO_PREFIX):], language, path)
-    else:
-        windows_speak(text, voice_id[len(WINDOWS_PREFIX):], path)
-    return filename
+def replace_retired_voices():
+    """CHANGED (1.5.0): moves settings and profiles off removed voices."""
+    if CFG.get("voice_id", "").startswith(RETIRED_PREFIXES):
+        found = _replacement_for_retired(CFG["voice_id"])
+        if found:
+            log_server_event(f"Voices: {CFG['voice_id']} was removed; now using {found[0]}.")
+            CFG["voice_id"], CFG["voice_name"] = found
+            save_config(CFG)
+    profiles = load_profiles()
+    changed = False
+    for profile in profiles:
+        if str(profile.get("voice_id", "")).startswith(RETIRED_PREFIXES):
+            found = _replacement_for_retired(profile["voice_id"])
+            if found:
+                log_server_event(f"Voices: profile {profile.get('name')!r} moved from {profile['voice_id']} to {found[0]}.")
+                profile["voice_id"] = found[0]
+                if "voice_name" in profile:
+                    profile["voice_name"] = found[1]
+                changed = True
+    if changed:
+        save_profiles(profiles)
+
+
+def remove_retired_voice_files():
+    """CHANGED (1.5.0): deletes the Kokoro model that 1.5.0 downloaded earlier."""
+    for folder in RETIRED_VOICE_DIRS:
+        if os.path.isdir(folder):
+            shutil.rmtree(folder, ignore_errors=True)
+            log_server_event(f"Voices: deleted the removed voice files in {folder}.")
+        parent = os.path.dirname(folder)
+        try:
+            if os.path.isdir(parent) and not os.listdir(parent):
+                os.rmdir(parent)
+        except OSError:
+            pass
 
 
 def warm_free_voices():
     """
-    NEW (1.5.0): loading Kokoro takes a couple of seconds, so when a free
-    voice is in use it's loaded when Frivo starts rather than on the first
-    reply.
+    CHANGED (1.5.0): starts the Windows speech helper and lists the voices
+    when Frivo starts, so the first reply with a Windows voice doesn't wait
+    for them. Then tidies up after Kokoro.
     """
     try:
-        voice_ids = [CFG.get("voice_id", "")] + [p.get("voice_id", "") for p in load_profiles()]
-        if not any(tts_engine(v) == "kokoro" for v in voice_ids):
-            return
-        if kokoro_package_problem() or not kokoro_files_ready():
-            return
-        with KOKORO_SPEAK_LOCK:
-            kokoro_engine().create("Ready.", voice="af_heart", lang="en-us")
+        if windows_voices_available():
+            list_windows_voices(force=True)
+        replace_retired_voices()
+        remove_retired_voice_files()
     except Exception as e:
-        log_server_event(f"Free voices: warm-up failed: {e!r}")
+        log_server_event(f"Free voices: start-up check failed: {e!r}")
 
 
 def _elevenlabs_payload(text):
@@ -2500,10 +2373,7 @@ def get_tts_audio_timed(text, voice_id, language, plan):
     try:
         filename = f"{uuid.uuid4().hex}.wav"
         path = os.path.join(AUDIO_DIR, filename)
-        if engine == "kokoro":
-            ends = kokoro_speak_pages(pages, voice_id[len(KOKORO_PREFIX):], language, path)
-        else:
-            ends = windows_speak_pages(pages, voice_id[len(WINDOWS_PREFIX):], path)
+        ends = windows_speak_pages(pages, voice_id, path)   # CHANGED (1.5.0): Windows voices only
         return filename, ends
     except Exception as e:
         # Free voices cost nothing, so any problem here just means the reply
@@ -3290,7 +3160,7 @@ def voices():
     # CHANGED (1.5.0): the free voices are always listed, and ElevenLabs'
     # are added when there's a key. No key is no longer an error — it just
     # means the free voices are the ones on offer.
-    free = kokoro_voice_entries() + windows_voice_entries()
+    free = windows_voice_entries()   # CHANGED (1.5.0): Kokoro removed
     if not CFG["elevenlabs_api_key"]:
         return jsonify({"voices": free, "notice": "" if free else
                         "Add your ElevenLabs key in Settings to load voices."})
@@ -3310,58 +3180,57 @@ def voices():
 
 
 # NEW (1.5.0): the free voices' state, for Settings.
+# CHANGED (1.5.0): Windows voices only; Kokoro and its download are gone.
 @app.route("/api/voices/free")
 def free_voices_status():
-    windows = list_windows_voices() if windows_voices_available() else []
-    return jsonify({
-        "kokoro": kokoro_status(),
-        "windows": {"available": windows_voices_available(), "count": len(windows)},
-    })
+    available = windows_voices_available()
+    voices = list_windows_voices() if available else []
+    with WINDOWS_VOICES_LOCK:
+        error = WINDOWS_VOICES_CACHE["error"]
+    return jsonify({"windows": {
+        "available": available,
+        "count": len(windows_voice_entries()) if available else 0,
+        "newer": sum(1 for v in voices if v["kind"] == "onecore"),
+        "error": error,
+    }})
 
 
-@app.route("/api/voices/free/download", methods=["POST"])
-def free_voices_download():
-    start_kokoro_download()
-    return jsonify({"kokoro": kokoro_status()})
-
-
-KOKORO_SAMPLE_LINES = {
-    "English": "Hi there! This is how I sound. Nice to meet you.",
-    "Spanish": "¡Hola! Así es como sueno. Encantado de conocerte.",
-    "French": "Bonjour ! Voici ma voix. Ravi de vous rencontrer.",
-    "Italian": "Ciao! Questa è la mia voce. Piacere di conoscerti.",
-    "Portuguese": "Olá! Esta é a minha voz. Prazer em conhecer você.",
-    "Hindi": "नमस्ते! मेरी आवाज़ ऐसी है। आपसे मिलकर ख़ुशी हुई।",
-    "Japanese": "こんにちは。これが私の声です。よろしくお願いします。",
-    "Chinese": "你好！这就是我的声音。很高兴认识你。",
+FREE_SAMPLE_LINES = {
+    "en": "Hi there! This is how I sound. Nice to meet you.",
+    "es": "¡Hola! Así es como sueno. Encantado de conocerte.",
+    "fr": "Bonjour ! Voici ma voix. Ravi de vous rencontrer.",
+    "it": "Ciao! Questa è la mia voce. Piacere di conoscerti.",
+    "pt": "Olá! Esta é a minha voz. Prazer em conhecer você.",
+    "de": "Hallo! So klinge ich. Schön, dich kennenzulernen.",
+    "nl": "Hallo! Zo klink ik. Leuk je te ontmoeten.",
+    "pl": "Cześć! Tak brzmi mój głos. Miło cię poznać.",
+    "ru": "Привет! Вот так звучит мой голос. Приятно познакомиться.",
+    "hi": "नमस्ते! मेरी आवाज़ ऐसी है। आपसे मिलकर ख़ुशी हुई।",
+    "ja": "こんにちは。これが私の声です。よろしくお願いします。",
+    "zh": "你好！这就是我的声音。很高兴认识你。",
+    "ko": "안녕하세요! 제 목소리는 이렇습니다. 만나서 반가워요.",
 }
-KOKORO_CODE_LANGUAGE = {"en": "English", "es": "Spanish", "fr": "French", "it": "Italian",
-                        "pt": "Portuguese", "hi": "Hindi", "ja": "Japanese", "zh": "Chinese"}
 
 
-# NEW (1.5.0): what a free voice sounds like — made on this PC once, then kept.
+# NEW (1.5.0): what a free voice sounds like. It's made on this PC once, then kept.
 @app.route("/api/voices/preview")
 def free_voice_preview():
     import hashlib
 
     voice_id = request.args.get("voice_id") or ""
-    engine = tts_engine(voice_id)
-    if engine == "elevenlabs":
+    if tts_engine(voice_id) != "windows":
         return jsonify({"error": "Not a free voice."}), 400
-    language = "English"
-    if engine == "kokoro":
-        match = next((v for v in KOKORO_VOICES if v[0] == voice_id[len(KOKORO_PREFIX):]), None)
-        if not match:
-            return jsonify({"error": "Unknown voice."}), 404
-        language = KOKORO_CODE_LANGUAGE.get(match[3], "English")
-    problem = free_voice_problem(voice_id, language)
+    problem = free_voice_problem(voice_id, "English")
     if problem:
         return jsonify({"error": problem}), 503
+    # CHANGED (1.5.0): the sample is in the voice's own language.
+    entry = next((e for e in windows_voice_entries() if e["voice_id"] == voice_id), None)
+    code = (entry["languages"][0]["code"] if entry and entry["languages"] else "en")
     name = "preview-" + hashlib.sha1(voice_id.encode("utf-8")).hexdigest()[:16] + ".wav"
     path = os.path.join(AUDIO_DIR, name)
     if not os.path.isfile(path):
         try:
-            made = free_tts_audio(KOKORO_SAMPLE_LINES.get(language, KOKORO_SAMPLE_LINES["English"]), voice_id, language)
+            made = free_tts_audio(FREE_SAMPLE_LINES.get(code, FREE_SAMPLE_LINES["en"]), voice_id, "English")
             os.replace(os.path.join(AUDIO_DIR, made), path)
         except Exception as e:
             return jsonify({"error": str(e)}), 500
@@ -5463,7 +5332,8 @@ def serve(host, port, cert_path, key_path):
     # NEW (updates): only a running server checks for updates — importing
     # app.py (the tests do) must not start talking to GitHub.
     start_update_checker()
-    # NEW (1.5.0): load the free voice model in the background if it's used.
+    # NEW (1.5.0): start the Windows speech helper in the background.
+    # CHANGED (1.5.0): and move anything off the removed Kokoro voices.
     threading.Thread(target=warm_free_voices, name="free-voices-warm", daemon=True).start()
     # NEW (1.5.0): delete old reply audio now, and every six hours after.
     threading.Thread(target=audio_prune_loop, name="audio-prune", daemon=True).start()

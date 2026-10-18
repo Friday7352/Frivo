@@ -400,27 +400,21 @@ The test simulates hidden names by blanking what `enumerateDevices` returns, bec
 
 ## test-free-voices.py (1.5.0)
 
-`python3 tests/test-free-voices.py` covers the free voices, Kokoro and Windows. Kokoro, PowerShell and the downloads are replaced, so it runs anywhere. It checks:
+`python3 tests/test-free-voices.py` covers the free voices, which are the ones built into Windows. The speech helper (`app/windows_speech.ps1`) is replaced by a stand-in that answers the same way, so it runs anywhere. It checks:
 
-- the engine is chosen from the voice id;
-- the voice list works with and without an ElevenLabs key, and when ElevenLabs is down;
-- free voices speak without a key and record no credits, and ElevenLabs is unchanged;
-- the one-time download checks the file's size and SHA-256, throws away a bad download, and works when retried;
-- a language Kokoro can't speak gets a clear message;
-- text sent to Windows voices goes through a file and is never pasted into the script;
-- the speaking speed reaches both engines;
-- previews are made once and kept;
-- the Visual C++ and wrong-Python messages are shown.
+- the engine is chosen from the voice id (`windows:`, `onecore:`, the removed `kokoro:`, or ElevenLabs);
+- the newer and older Windows voices are listed once each, and an older one that's in use stays listed;
+- the voice list works without an ElevenLabs key;
+- free voices speak without a key, record no credits, and get the speaking speed;
+- non-English text reaches the helper as plain ASCII escapes and arrives intact;
+- one helper serves every reply, and one that stops or hangs is replaced;
+- a long reply gets exact chatbox page times;
+- anything set to a Kokoro voice moves to a Windows voice of the same gender, and the old Kokoro download is deleted;
+- previews are made once, in the voice's language, and kept.
 
-To also run one real Kokoro reply end to end, set `FRIVO_KOKORO_DIR` to a folder holding `kokoro-v1.0.fp16.onnx` and `voices-v1.0.bin`.
+## check-windows-voices.bat (1.5.0)
 
-## test-free-voices-setup.ps1 (1.5.0)
-
-`pwsh -NoProfile -File tests/test-free-voices-setup.ps1` checks that setup:
-
-- installs `requirements-voices.txt` once per version of that file, retries after a failure, and never fails setup because of it;
-- installs the Visual C++ runtime only when it's missing, treating exit codes 0, 1638 and 3010 as success;
-- wires this into both install and update.
+Double-click `tests/check-windows-voices.bat` on a Windows PC. It runs the real `app/windows_speech.ps1` the way Frivo does: it lists the voices, speaks with one older and one newer voice (one page, three pages, two speeds, non-English text), and checks that a missing voice fails cleanly and that the helper exits when Frivo would close it. It also checks that the setup scripts parse. Everything is timed and written to `tests/windows-voice-check/` (ignored by git).
 
 ## test-ui-shell.py (2.0 interface)
 

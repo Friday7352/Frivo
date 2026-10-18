@@ -1,0 +1,21 @@
+Windows: Microsoft Windows NT 10.0.26200.0  PowerShell 5.1.26100.9711
+start + first answer                  296 ms  ok=True 
+   helper started and answered after 330 ms
+second answer (already running)         1 ms  ok=True 
+list voices                           248 ms  ok=True 
+   sapi     Microsoft David Desktop                       Male    en-US  id=Microsoft David Desktop
+   sapi     Microsoft Zira Desktop                        Female  en-US  id=Microsoft Zira Desktop
+   onecore  Microsoft David                               Male    en-US  id=MSTTS_V110_enUS_DavidM
+   onecore  Microsoft Zira                                Female  en-US  id=MSTTS_V110_enUS_ZiraM
+   onecore  Microsoft Mark                                Male    en-US  id=MSTTS_V110_enUS_MarkM
+sapi one page, speed 1                278 ms  ok=True 
+sapi one page, speed 1.5                7 ms  ok=True 
+sapi three pages                       43 ms  ok=True 
+sapi non-English text                  15 ms  ok=True 
+onecore one page, speed 1             110 ms  ok=True 
+onecore one page, speed 1.5             9 ms  ok=True 
+onecore three pages                    21 ms  ok=True 
+onecore non-English text                7 ms  ok=True 
+missing voice (should fail)            11 ms  ok=False That Windows voice isn't installed anymore: NoSuchVoice
+still alive after a failure             0 ms  ok=True 
+helper did not exit when stdin closed

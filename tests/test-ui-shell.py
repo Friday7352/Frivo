@@ -47,11 +47,13 @@ spec = importlib.util.spec_from_file_location("frivo_app", os.path.join(ws, "app
 mod = importlib.util.module_from_spec(spec); sys.modules["frivo_app"] = mod
 spec.loader.exec_module(mod)
 mod.CFG.update(openai_api_key="", elevenlabs_api_key="", response_style="echo",
-               voice_id="kokoro:af_heart", voice_name="Heart", temperature=0.7)
-mod.KOKORO_STATE["import_error"] = ""   # package "present"
-mod.kokoro_files_ready = lambda: True
+               voice_id="onecore:MSTTS_V110_enUS_ZiraM", voice_name="Zira", temperature=0.7)
+# CHANGED (1.5.0): Kokoro is gone; the free voices are Windows' own.
 mod.windows_voices_available = lambda: True
-mod.list_windows_voices = lambda force=False: [{"name": "Microsoft Zira Desktop", "gender": "Female", "culture": "en-US", "language": "English"}]
+_names = ["Zira", "David", "Mark", "Hazel", "George", "Susan", "Katja", "Hedda", "Helena", "Laura", "Pablo", "Julie"]
+mod.list_windows_voices = lambda force=False: [
+    {"kind": "onecore", "id": f"MSTTS_V110_enUS_{n}M", "name": f"Microsoft {n}", "gender": "Female",
+     "culture": "en-US", "language": "English (United States)"} for n in _names]
 saves = []
 real_settings = mod.app.view_functions["settings"]
 from flask import request, jsonify
@@ -106,14 +108,15 @@ const base = 'http://127.0.0.1:5093';
   check('Voices opens the voice sheet', await vis('#voicePop'));
   check('which says whose voice it is', /for Default/.test(await text('#voiceDialogFor')), await text('#voiceDialogFor'));
   const groups = await p.evaluate(() => [...document.querySelectorAll('#voiceList .voice-group')].map(g => g.firstChild.textContent.trim()));
-  check('grouped by engine: free on this PC, built into Windows', groups.includes('Free · on this PC') && groups.includes('Free · built into Windows'), groups);
+  // CHANGED (1.5.0): no Kokoro group any more; the free voices are Windows' own.
+  check('grouped by engine: built into Windows', groups.includes('Free · built into Windows') && !groups.includes('Free · on this PC'), groups);
   const costs = await p.evaluate(() => [...document.querySelectorAll('#voiceList .voice-cost')].map(c => c.textContent));
   check('every voice carries a cost tag', costs.length > 10 && costs.every(c => c === 'free' || c === 'credits'), costs.slice(0, 3));
   await p.keyboard.press('Escape'); await wait(300);
   check('Escape closes it', !(await vis('#voicePop')));
 
   console.log('--- the chips and the status pill ---');
-  check('the voice chip names the voice, without the bracketed part', (await text('#voiceTriggerName')).trim() === 'Heart', await text('#voiceTriggerName'));
+  check('the voice chip names the voice, without the bracketed part', (await text('#voiceTriggerName')).trim() === 'Zira', await text('#voiceTriggerName'));
   check('the style chip names the style', (await text('#styleChipText')) === 'Clean up', await text('#styleChipText'));
   await p.click('#lengthChip'); await wait(200);
   check('the length chip opens its popover', await vis('#lengthPop') && await vis('#lengthSlider'));

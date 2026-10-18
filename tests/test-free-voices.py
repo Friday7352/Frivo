@@ -1,32 +1,30 @@
 #!/usr/bin/env python3
-"""NEW (1.5.0): free voices that run on this PC (Kokoro, Windows voices).
+"""CHANGED (1.5.0): the free voices are the ones built into Windows.
 
-ElevenLabs must work exactly as before; alongside it, choosing a Kokoro or
-Windows voice speaks with no ElevenLabs key and costs no credits.
+Kokoro (an AI voice model) has been removed: AI voices are what ElevenLabs
+is for. The free voices are Windows' own, spoken by app\\windows_speech.ps1,
+which Frivo starts once and keeps running. Here a stand-in helper
+answers the same way, so this runs anywhere:
 
-  * the voice id decides the engine ("kokoro:", "windows:", else ElevenLabs)
-  * /api/voices lists the free voices with or without an ElevenLabs key, and
-    ElevenLabs' too when there is one; ElevenLabs failing doesn't hide them
-  * speaking with a free voice needs no ElevenLabs key and records no credits;
-    an ElevenLabs voice without a key is still refused, as before
-  * Kokoro's model is downloaded once, checked against its size and hash
-    (a bad download is thrown away), with progress reported
-  * a reply asked for before the download finishes says so and starts it
-  * a language Kokoro can't speak is refused with a clear message
-  * Windows voices: listed and spoken through PowerShell, with text that
-    can't break out of the script, and the speed passed as Windows' rate
-  * the preview of a free voice is made once and kept
-  * Kokoro installed but unable to load (no Visual C++ runtime) says so
-
-Kokoro and PowerShell are replaced; nothing is downloaded. Set
-FRIVO_KOKORO_DIR to a folder holding the real model files to also run one
-real Kokoro reply end to end.
+  * the voice id decides the engine: "windows:" and "onecore:" are free,
+    "kokoro:" is a removed voice, anything else is ElevenLabs
+  * the voices are listed through the helper; a voice Windows has in both
+    kinds is listed once (the newer kind), unless the older one is in use
+  * /api/voices lists them with or without an ElevenLabs key
+  * speaking needs no ElevenLabs key, costs no credits, passes the speed on,
+    and sends non-English text as plain ASCII escapes
+  * one helper serves every reply; one that stops is started again, and
+    one that hangs is replaced
+  * a voice the helper can't find comes back as a clear error
+  * a long reply gets exact chatbox page times from a Windows voice
+  * anything set to a Kokoro voice is moved to a Windows voice of the same
+    gender, and the downloaded Kokoro model is deleted
+  * the preview of a free voice is made once, in its own language, and kept
 
 Usage:  python3 tests/test-free-voices.py     (run from the repo root)
-Needs:  flask, openai (import only), numpy.
+Needs:  flask, openai (import only).
 """
 
-import hashlib
 import importlib.util
 import json
 import os
@@ -34,8 +32,6 @@ import shutil
 import sys
 import tempfile
 import time
-import wave
-from types import SimpleNamespace
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 APP = os.path.join(ROOT, "app")
@@ -49,6 +45,9 @@ def check(name, condition, got=None):
         failures.append(name)
 
 
+# Frivo keeps its data under %APPDATA% (or ~). Point that at a scratch folder.
+home = tempfile.mkdtemp(prefix="frivo-voices-home-")
+os.environ["APPDATA"] = home
 ws = tempfile.mkdtemp(prefix="frivo-voices-")
 shutil.copy(os.path.join(APP, "app.py"), os.path.join(ws, "app.py"))
 spec = importlib.util.spec_from_file_location("frivo_voices", os.path.join(ws, "app.py"))
@@ -56,278 +55,217 @@ mod = importlib.util.module_from_spec(spec)
 sys.modules["frivo_voices"] = mod
 spec.loader.exec_module(mod)
 client = mod.app.test_client()
+check("data folder is a scratch one", mod.DATA_DIR.startswith((home, tempfile.gettempdir())), mod.DATA_DIR)
 
-import numpy as np  # noqa: E402
+# --- a stand-in for windows_speech.ps1 ---------------------------------------
+# Same protocol: one JSON request per line in, one "@@FRIVO {...}" line out.
+# It logs every request to a file, so the test can see what Frivo sent.
+log_path = os.path.join(ws, "helper-log.jsonl")
+FAKE = r'''
+import json, os, sys, time, wave
+LOG = sys.argv[1]
+VOICES = [
+    {"kind": "sapi", "id": "Microsoft David Desktop", "name": "Microsoft David Desktop", "gender": "Male", "culture": "en-US", "language": "English (United States)"},
+    {"kind": "sapi", "id": "Microsoft Zira Desktop", "name": "Microsoft Zira Desktop", "gender": "Female", "culture": "en-US", "language": "English (United States)"},
+    {"kind": "sapi", "id": "Microsoft Hazel Desktop", "name": "Microsoft Hazel Desktop", "gender": "Female", "culture": "en-GB", "language": "English (United Kingdom)"},
+    {"kind": "onecore", "id": "MSTTS_V110_enUS_DavidM", "name": "Microsoft David", "gender": "Male", "culture": "en-US", "language": "English (United States)"},
+    {"kind": "onecore", "id": "MSTTS_V110_enUS_ZiraM", "name": "Microsoft Zira", "gender": "Female", "culture": "en-US", "language": "English (United States)"},
+    {"kind": "onecore", "id": "MSTTS_V110_enUS_MarkM", "name": "Microsoft Mark", "gender": "Male", "culture": "en-US", "language": "English (United States)"},
+    {"kind": "onecore", "id": "MSTTS_V110_deDE_KatjaM", "name": "Microsoft Katja", "gender": "Female", "culture": "de-DE", "language": "German (Germany)"},
+]
+def answer(obj):
+    sys.stdout.write("@@FRIVO " + json.dumps(obj) + "\n"); sys.stdout.flush()
+sys.stdout.write("some unrelated PowerShell output\n"); sys.stdout.flush()
+for raw in sys.stdin.buffer:
+    line = raw.decode("utf-8")
+    with open(LOG, "a", encoding="utf-8") as f:
+        f.write(json.dumps({"pid": os.getpid(), "ascii": all(ord(c) < 128 for c in line), "req": json.loads(line)}) + "\n")
+    req = json.loads(line)
+    if req["op"] == "ping":
+        answer({"ok": True})
+    elif req["op"] == "list":
+        answer({"ok": True, "voices": VOICES, "onecore_error": ""})
+    elif req["op"] == "speak":
+        if req["voice"] not in [v["id"] for v in VOICES]:
+            answer({"ok": False, "error": "That Windows voice isn't installed anymore: " + req["voice"]}); continue
+        text = " ".join(req["pages"])
+        if "please die" in text:
+            sys.exit(3)
+        if "please hang" in text:
+            time.sleep(30)
+        for page, out in zip(req["pages"], req["outs"]):
+            with wave.open(out, "wb") as w:
+                w.setnchannels(1); w.setsampwidth(2); w.setframerate(16000)
+                w.writeframes(b"\0\0" * (160 * len(page)))   # 10 ms per character
+        answer({"ok": True})
+'''
+fake_path = os.path.join(ws, "fake_helper.py")
+with open(fake_path, "w", encoding="utf-8") as f:
+    f.write(FAKE)
 
-
-# --- stand-ins ----------------------------------------------------------------
-class FakeKokoro:
-    calls = []
-
-    def __init__(self, model, voices):
-        self.model = model
-
-    def create(self, text, voice, speed=1.0, lang="en-us"):
-        FakeKokoro.calls.append({"text": text, "voice": voice, "speed": speed, "lang": lang})
-        return np.zeros(2400, dtype=np.float32), 24000
-
-
-fake_pkg = SimpleNamespace(Kokoro=FakeKokoro)
-sys.modules["kokoro_onnx"] = fake_pkg
-
-kokoro_dir = tempfile.mkdtemp(prefix="frivo-kokoro-")
-mod.KOKORO_DIR = kokoro_dir
-blobs = {"kokoro-v1.0.fp16.onnx": b"model-bytes" * 100, "voices-v1.0.bin": b"voice-bytes" * 50}
-mod.KOKORO_FILES = [{"name": n, "size": len(b), "sha256": hashlib.sha256(b).hexdigest()} for n, b in blobs.items()]
-
-served = {"tamper": False, "requests": 0}
-
-
-class FakeResponse:
-    def __init__(self, data):
-        self.data = data
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *a):
-        return False
-
-    def raise_for_status(self):
-        pass
-
-    def iter_content(self, chunk_size=1):
-        for i in range(0, len(self.data), 97):
-            yield self.data[i:i + 97]
-
-
-real_get = mod.requests.get
-
-
-def fake_get(url, stream=False, timeout=None, headers=None):
-    if url.startswith(mod.KOKORO_RELEASE):
-        served["requests"] += 1
-        data = blobs[url[len(mod.KOKORO_RELEASE):]]
-        if served["tamper"]:
-            data = data[:-1] + b"X"
-        return FakeResponse(data)
-    if "elevenlabs" in url:
-        if served.get("eleven_down"):
-            raise RuntimeError("ElevenLabs is down")
-        return SimpleNamespace(raise_for_status=lambda: None,
-                               json=lambda: {"voices": [{"voice_id": "EL1", "name": "Rachel", "category": "premade"}]})
-    return real_get(url, stream=stream, timeout=timeout, headers=headers)
-
-
-mod.requests.get = fake_get
-
-ps_runs = []
-
-
-def fake_powershell(script, timeout=60):
-    ps_runs.append(script)
-    if "GetInstalledVoices" in script:
-        return SimpleNamespace(returncode=0, stderr="", stdout=json.dumps(
-            [{"name": "Microsoft David Desktop", "gender": "Male", "culture": "en-US", "language": "English (United States)"},
-             {"name": "Microsoft Zira Desktop", "gender": "Female", "culture": "en-US", "language": "English (United States)"}]))
-    # Speak: read the job file the way PowerShell would, and make the wave.
-    path = script.split("ReadAllText('", 1)[1].split("'", 1)[0].replace("''", "'")
-    job = json.load(open(path, encoding="utf-8"))
-    ps_runs.append(job)
-    with wave.open(job["out"], "wb") as out:
-        out.setnchannels(1)
-        out.setsampwidth(2)
-        out.setframerate(16000)
-        out.writeframes(b"\0\0" * 1600)
-    return SimpleNamespace(returncode=0, stderr="", stdout="")
-
-
-mod._run_powershell = fake_powershell
+mod.WINDOWS_SPEECH = mod.WindowsSpeechHost(command=[sys.executable, fake_path, log_path])
 mod.windows_voices_available = lambda: True
 
-eleven_calls = []
-mod.requests.post = lambda url, **kw: (eleven_calls.append(url), SimpleNamespace(status_code=200, content=b"mp3", text=""))[1]
-usage = []
-mod.record_usage = lambda credits: usage.append(credits)
+
+def helper_log():
+    if not os.path.exists(log_path):
+        return []
+    with open(log_path, encoding="utf-8") as f:
+        return [json.loads(line) for line in f if line.strip()]
 
 
-def setup(voice, eleven_key="", style="mimic"):
+def setup(voice, eleven_key="", style="mimic", speed=1.0):
     mod.CFG.update(openai_api_key="", elevenlabs_api_key=eleven_key, response_style=style,
-                   voice_id=voice, speaking_speed=1.0)
-    FakeKokoro.calls.clear()
-    eleven_calls.clear()
-    usage.clear()
-    ps_runs.clear()
+                   follow_length=False, voice_id=voice, voice_name="", speaking_speed=speed)
 
 
 def say(text, language="English"):
-    res = client.post("/api/chat", json={"message": text, "language": language, "session_id": "v"})
-    return res.status_code, res.get_json()
-
-
-def wait_download():
-    for _ in range(200):
-        if not mod.kokoro_status()["downloading"]:
-            return
-        time.sleep(0.02)
+    res = client.post("/api/chat", json={"message": text, "language": language, "session_id": "v",
+                                         "max_words": 400})
+    return res.status_code, (res.get_json() or {})
 
 
 print("--- which engine ---")
-check("kokoro: ids", mod.tts_engine("kokoro:af_heart") == "kokoro")
-check("windows: ids", mod.tts_engine("windows:Microsoft Zira Desktop") == "windows")
-check("anything else is ElevenLabs, as before", mod.tts_engine("21m00Tcm4TlvDq8ikWAM") == "elevenlabs")
+check("windows: is free", mod.tts_engine("windows:Microsoft Zira Desktop") == "windows")
+check("onecore: is free", mod.tts_engine("onecore:MSTTS_V110_enUS_ZiraM") == "windows")
+check("kokoro: is a removed voice", mod.tts_engine("kokoro:af_heart") == "retired")
+check("anything else is ElevenLabs", mod.tts_engine("21m00Tcm4TlvDq8ikWAM") == "elevenlabs")
+check("Kokoro's code is gone", not any(hasattr(mod, n) for n in ("KOKORO_FILES", "kokoro_engine", "kokoro_status")))
 
-print()
-print("--- the voice list ---")
+print("--- listing ---")
+mod.CFG["voice_id"] = "21m00Tcm4TlvDq8ikWAM"
+entries = mod.windows_voice_entries()
+ids = [e["voice_id"] for e in entries]
+check("the newer voices are listed",
+      {"onecore:MSTTS_V110_enUS_DavidM", "onecore:MSTTS_V110_enUS_ZiraM", "onecore:MSTTS_V110_enUS_MarkM"} <= set(ids), ids)
+check("a desktop voice with a newer copy isn't listed twice",
+      "windows:Microsoft David Desktop" not in ids and "windows:Microsoft Zira Desktop" not in ids, ids)
+check("a desktop voice with no newer copy is listed", "windows:Microsoft Hazel Desktop" in ids, ids)
+mark = next(e for e in entries if e["voice_id"].endswith("MarkM"))
+check("names are short", mark["name"] == "Mark", mark["name"])
+check("language and region", mark["languages"] == [{"code": "en", "name": "English · United States"}], mark["languages"])
+check("preview address is encoded", mark["preview_url"] == "/api/voices/preview?voice_id=onecore%3AMSTTS_V110_enUS_MarkM",
+      mark["preview_url"])
+mod.CFG["voice_id"] = "windows:Microsoft Zira Desktop"
+mod.WINDOWS_VOICES_CACHE["at"] = 0
+check("an older voice that's in use stays listed",
+      "windows:Microsoft Zira Desktop" in [e["voice_id"] for e in mod.windows_voice_entries()])
+check("one helper answered all of that", len({r["pid"] for r in helper_log()}) == 1, helper_log())
+
+data = client.get("/api/voices").get_json()
+check("/api/voices lists them with no ElevenLabs key",
+      any(v["voice_id"].startswith("onecore:") for v in data.get("voices", [])), data)
+free = client.get("/api/voices/free").get_json()
+check("/api/voices/free reports them", free["windows"]["available"] and free["windows"]["newer"] == 4, free)
+check("the Kokoro download route is gone", client.post("/api/voices/free/download").status_code in (404, 405))
+
+print("--- speaking ---")
+open(log_path, "w").close()
+setup("onecore:MSTTS_V110_enUS_ZiraM", speed=1.2)
+status, data = say("Hello there, this is a test.")
+check("speaks with no ElevenLabs key", status == 200 and data.get("audio_url"), (status, data.get("error")))
+check("costs no credits", data.get("credits") == 0 and data.get("voice_engine") == "windows", data.get("credits"))
+check("the audio file exists",
+      os.path.isfile(os.path.join(mod.AUDIO_DIR, (data.get("audio_url") or "/x").split("/")[-1])))
+speak = [r["req"] for r in helper_log() if r["req"]["op"] == "speak"][-1]
+check("the newer kind and its id are sent", speak["kind"] == "onecore" and speak["voice"] == "MSTTS_V110_enUS_ZiraM", speak)
+check("the speed is sent both ways", speak["speed"] == 1.2 and speak["sapi_rate"] == 2, speak)
+
+setup("windows:Microsoft Hazel Desktop")
+status, data = say("Ünïcödé café, naïve.")
+last = helper_log()[-1]
+check("a desktop voice speaks", status == 200 and last["req"]["kind"] == "sapi", (status, data.get("error")))
+check("non-English text is sent as ASCII and arrives intact",
+      last["ascii"] and last["req"]["pages"] == ["Ünïcödé café, naïve."], last)
+
+setup("onecore:MSTTS_V110_enUS_GoneM")
+status, data = say("Hello.")
+check("a missing voice is a clear error", status == 500 and "isn't installed anymore" in (data.get("error") or ""), data)
+
+long_text = ("Okay so here is the thing about the backrooms world. The lights hum all the time, "
+             "and if you stand still long enough you start to hear footsteps that are not yours. "
+             "Honestly, I think that's the best part. Come by tonight and I'll show you around.")
+setup("onecore:MSTTS_V110_enUS_MarkM")
+status, data = say(long_text)
+pages = data.get("chatbox_pages") or []
+bodies = [mod._CHATBOX_COUNTER_RE.sub("", p["text"]) for p in pages]
+want = [0.0]
+for b in bodies[:-1]:
+    want.append(round(want[-1] + len(b) * 0.01, 3))
+check("a long reply gets exact page times", len(pages) > 1 and [p.get("at") for p in pages] == want,
+      ([p.get("at") for p in pages], want))
+check("page parts are cleaned up", not [n for n in os.listdir(mod.AUDIO_DIR) if ".part." in n],
+      os.listdir(mod.AUDIO_DIR))
+
+print("--- the helper ---")
+pids = {r["pid"] for r in helper_log()}
+check("every reply used the same helper", len(pids) == 1, pids)
+setup("onecore:MSTTS_V110_enUS_MarkM")
+before = {r["pid"] for r in helper_log()}
+status, data = say("please die")
+# The stand-in dies on this text, so the retry with a fresh helper dies too.
+died = {r["pid"] for r in helper_log()} - before
+check("a helper that stops is started again once for the same reply", status == 500 and len(died) == 1,
+      (status, died))
+status, data = say("Back again.")
+check("the next reply works with a new helper",
+      status == 200 and helper_log()[-1]["pid"] not in before | died, (status, data.get("error")))
+t0 = time.time()
+try:
+    mod.WINDOWS_SPEECH.request({"op": "speak", "kind": "onecore", "voice": "MSTTS_V110_enUS_MarkM", "speed": 1,
+                                "sapi_rate": 0, "pages": ["please hang"], "outs": [os.path.join(ws, "h.wav")]},
+                               timeout=1)
+    hung = False
+except RuntimeError as e:
+    hung = "too long" in str(e)
+check("a helper that hangs times out", hung and time.time() - t0 < 10, time.time() - t0)
+hung_pid = helper_log()[-1]["pid"]
+status, data = say("And again.")
+check("and is replaced", status == 200 and helper_log()[-1]["pid"] != hung_pid, (status, data.get("error")))
+mod.WINDOWS_SPEECH.close()
+check("close stops it", mod.WINDOWS_SPEECH.proc is None)
+
+print("--- Kokoro, removed ---")
 setup("kokoro:af_heart")
-body = client.get("/api/voices").get_json()
-ids = [v["voice_id"] for v in body.get("voices", [])]
-check("no ElevenLabs key: the free voices are listed, not an error", any(i.startswith("kokoro:") for i in ids)
-      and any(i.startswith("windows:") for i in ids), body)
-genders = {v["gender"] for v in body["voices"] if v["voice_id"].startswith("kokoro:")}
-check("male and female Kokoro voices", genders == {"male", "female"}, genders)
-check("each says where it runs", all(v["category"] in ("free on this PC", "built into Windows") for v in body["voices"]))
-setup("EL1", eleven_key="k")
-ids = [v["voice_id"] for v in client.get("/api/voices").get_json()["voices"]]
-check("with a key: ElevenLabs voices too", "EL1" in ids and any(i.startswith("kokoro:") for i in ids), ids[:3])
-served["eleven_down"] = True
-body = client.get("/api/voices").get_json()
-check("ElevenLabs down: the free voices still load, with a notice", body.get("voices") and "couldn't be loaded" in body.get("notice", ""), body.get("notice"))
-served["eleven_down"] = False
+status, data = say("Hello.")
+check("a Kokoro voice isn't sent to ElevenLabs", status == 400 and "removed" in (data.get("error") or ""), data)
+mod.save_profiles([{"id": "p1", "name": "DJ", "voice_id": "kokoro:bm_george", "voice_name": "George"},
+                   {"id": "p2", "name": "Eleven", "voice_id": "21m00Tcm4TlvDq8ikWAM", "voice_name": "Rachel"}])
+kokoro_dir = os.path.join(mod.DATA_DIR, "voices", "kokoro")
+os.makedirs(kokoro_dir, exist_ok=True)
+with open(os.path.join(kokoro_dir, "kokoro-v1.0.fp16.onnx"), "wb") as f:
+    f.write(b"x" * 1000)
+mod.warm_free_voices()
+check("the default voice moves to a Windows voice of the same gender",
+      mod.CFG["voice_id"] == "onecore:MSTTS_V110_enUS_ZiraM" and mod.CFG["voice_name"] == "Zira", mod.CFG["voice_id"])
+profiles = {p["id"]: p for p in mod.load_profiles()}
+check("so does a profile, male to male",
+      profiles["p1"]["voice_id"] in ("onecore:MSTTS_V110_enUS_DavidM", "onecore:MSTTS_V110_enUS_MarkM")
+      and profiles["p1"]["voice_name"] in ("David", "Mark"), profiles["p1"])
+check("other profiles are left alone", profiles["p2"]["voice_id"] == "21m00Tcm4TlvDq8ikWAM")
+check("the Kokoro model is deleted", not os.path.exists(os.path.join(mod.DATA_DIR, "voices")))
 
-print()
-print("--- the one-time download ---")
-setup("kokoro:af_heart")
-status, body = say("hello there")
-check("asked to speak before the download: says it's downloading, not a crash", status == 400 and "Downloading the free voices" in body.get("error", ""), body)
-wait_download()
-check("and the download ran and finished", mod.kokoro_files_ready() and served["requests"] == 2, (mod.kokoro_files_ready(), served["requests"]))
-check("no partial files left behind", not [f for f in os.listdir(kokoro_dir) if f.endswith(".part")])
-before = served["requests"]
-mod.start_kokoro_download()
-wait_download()
-check("already downloaded: nothing fetched again", served["requests"] == before)
-
-for f in os.listdir(kokoro_dir):
-    os.remove(os.path.join(kokoro_dir, f))
-served["tamper"] = True
-mod.start_kokoro_download()
-wait_download()
-st = mod.kokoro_status()
-check("a download that doesn't match the expected file is thrown away", not mod.kokoro_files_ready() and "didn't download correctly" in st["error"], st)
-served["tamper"] = False
-mod.start_kokoro_download()
-wait_download()
-check("and trying again works", mod.kokoro_files_ready() and mod.kokoro_status()["error"] == "")
-
-print()
-print("--- speaking with Kokoro ---")
-setup("kokoro:am_michael")
-status, body = say("hey whats up")
-check("speaks with no ElevenLabs key and no OpenAI key (Word for word)", status == 200 and body.get("audio_url", "").endswith(".wav"), body)
-check("with the voice picked", FakeKokoro.calls and FakeKokoro.calls[-1]["voice"] == "am_michael", FakeKokoro.calls)
-check("costs no credits, and none are recorded", body.get("credits") == 0 and usage == [], (body.get("credits"), usage))
-check("never calls ElevenLabs", eleven_calls == [])
-check("says which engine spoke", body.get("voice_engine") == "kokoro")
-audio = client.get(body["audio_url"])
-check("the audio is a real wave file", audio.status_code == 200 and audio.data[:4] == b"RIFF", audio.status_code)
-mod.CFG["speaking_speed"] = 1.2
-say("faster")
-check("speaking speed is passed on", abs(FakeKokoro.calls[-1]["speed"] - 1.2) < 1e-6, FakeKokoro.calls[-1])
-setup("kokoro:bf_emma")
-say("cheerio")
-check("British voices speak British English", FakeKokoro.calls[-1]["lang"] == "en-gb", FakeKokoro.calls[-1])
-
-setup("kokoro:af_heart", style="mimic")
-mod.CFG["openai_api_key"] = "sk"
-mod.create_chat_completion = lambda client_, **kw: SimpleNamespace(choices=[SimpleNamespace(
-    message=SimpleNamespace(content="Hola amigo\n---EN---\nHello friend"), finish_reason="stop")])
-status, body = say("hello friend", language="Spanish")
-check("other languages Kokoro knows use their pronunciation", status == 200 and FakeKokoro.calls[-1]["lang"] == "es", FakeKokoro.calls)
-status, body = say("hallo", language="German")
-check("a language Kokoro can't speak is refused clearly", status == 400 and "can't speak German" in body.get("error", ""), body)
-
-print()
-print("--- ElevenLabs, unchanged ---")
-setup("EL1")
-status, body = say("hi")
-check("an ElevenLabs voice without a key is still refused", status == 400 and "ElevenLabs key" in body.get("error", ""), body)
-setup("EL1", eleven_key="k")
-status, body = say("hi there")
-check("with a key it speaks through ElevenLabs", status == 200 and eleven_calls and body["audio_url"].endswith(".mp3"), body)
-check("and its credits are counted as before", usage == [len("hi there")], usage)
-
-print()
-print("--- Windows voices ---")
-setup("windows:Microsoft Zira Desktop")
-mod.CFG["speaking_speed"] = 0.8
-tricky = "it's \"quoted\"; $(Remove-Item C:\\) `n and 'more'"
-status, body = say(tricky)
-job = next((r for r in ps_runs if isinstance(r, dict)), {})
-check("speaks with no key", status == 200 and body.get("audio_url", "").endswith(".wav"), body)
-check("the text reaches Windows exactly, through a file — never pasted into the script",
-      job.get("text") == tricky and not any(isinstance(r, str) and "Remove-Item" in r for r in ps_runs), job)
-check("with the voice picked", job.get("voice") == "Microsoft Zira Desktop", job)
-check("speed 80% is Windows rate -2", job.get("rate") == -2, job)
-check("no credits", body.get("credits") == 0 and usage == [])
-leftover = [f for f in os.listdir(mod.AUDIO_DIR) if f.endswith(".json")]
-check("the job file is cleaned up", leftover == [], leftover)
-
-print()
 print("--- previews ---")
-setup("kokoro:af_heart")
-first = client.get("/api/voices/preview?voice_id=kokoro:if_sara")
-n = len(FakeKokoro.calls)
-again = client.get("/api/voices/preview?voice_id=kokoro:if_sara")
-check("a free voice's preview plays", first.status_code == 200 and first.data[:4] == b"RIFF", first.status_code)
-check("in its own language", FakeKokoro.calls and FakeKokoro.calls[0]["lang"] == "it", FakeKokoro.calls[:1])
-check("and is made only once", len(FakeKokoro.calls) == n, (n, len(FakeKokoro.calls)))
-check("an unknown voice isn't", client.get("/api/voices/preview?voice_id=kokoro:nobody").status_code == 404)
+open(log_path, "w").close()
+for _ in range(2):
+    res = client.get("/api/voices/preview?voice_id=onecore%3AMSTTS_V110_deDE_KatjaM")
+check("a preview plays", res.status_code == 200)
+speaks = [r["req"] for r in helper_log() if r["req"]["op"] == "speak"]
+check("it's made once and kept", len(speaks) == 1, len(speaks))
+check("in the voice's own language", speaks and speaks[0]["pages"] == [mod.FREE_SAMPLE_LINES["de"]], speaks)
+check("an ElevenLabs voice has no free preview",
+      client.get("/api/voices/preview?voice_id=21m00Tcm4TlvDq8ikWAM").status_code == 400)
 
-print()
-print("--- installed but can't load (no Visual C++ runtime) ---")
-sys.modules["kokoro_onnx"] = SimpleNamespace()          # "from kokoro_onnx import Kokoro" fails
-mod.KOKORO_STATE.update(engine=None, import_error=None)
-setup("kokoro:af_heart")
-status, body = say("hi")
-check("the reply says what's wrong and how to fix it", status == 500 and "Visual C++" in body.get("error", ""), body)
-check("and Settings says so too", "Visual C++" in client.get("/api/voices/free").get_json()["kokoro"]["problem"])
-sys.modules["kokoro_onnx"] = fake_pkg
-mod.KOKORO_STATE.update(engine=None, import_error=None)
-
-print()
-print("--- no package / wrong Python ---")
-mod.KOKORO_STATE["import_error"] = "Kokoro needs Python 3.10–3.13, and Frivo is running on 3.9."
-body = client.get("/api/voices").get_json()
-check("Kokoro unavailable: its voices aren't offered", not any(v["voice_id"].startswith("kokoro:") for v in body["voices"]))
-check("Windows voices still are", any(v["voice_id"].startswith("windows:") for v in body["voices"]))
-check("and Settings says why", "3.10" in client.get("/api/voices/free").get_json()["kokoro"]["problem"])
-setup("kokoro:af_heart")
-status, body = say("hi")
-check("a reply with a Kokoro voice says why too", status == 400 and "3.10" in body.get("error", ""), body)
-mod.KOKORO_STATE["import_error"] = None
-
-# --- optional: the real thing ---------------------------------------------------
-real_dir = os.environ.get("FRIVO_KOKORO_DIR")
-if real_dir:
-    print()
-    print("--- real Kokoro ---")
-    del sys.modules["kokoro_onnx"]
-    import importlib
-    spec2 = importlib.util.spec_from_file_location("frivo_real", os.path.join(ws, "app.py"))
-    real = importlib.util.module_from_spec(spec2)
-    sys.modules["frivo_real"] = real
-    spec2.loader.exec_module(real)
-    real.KOKORO_DIR = real_dir
-    real.CFG.update(openai_api_key="", elevenlabs_api_key="", response_style="mimic", voice_id="kokoro:af_heart")
-    started = time.time()
-    res = real.app.test_client().post("/api/chat", json={"message": "This voice is made on this computer, for free."})
-    body = res.get_json()
-    check("a real reply, spoken by Kokoro", res.status_code == 200 and body.get("audio_url"), body)
-    print("        (%.1fs including loading the model)" % (time.time() - started))
+print("--- not on Windows ---")
+mod.windows_voices_available = lambda: False
+setup("onecore:MSTTS_V110_enUS_ZiraM")
+status, data = say("Hello.")
+check("says Windows voices need Windows", status == 400 and "Windows" in (data.get("error") or ""), data)
+check("and lists none", mod.list_windows_voices(force=True) == [])
+mod.WINDOWS_SPEECH.close()
 
 print()
 if failures:
-    print("%d free-voice check(s) failed." % len(failures))
+    print(f"{len(failures)} failed: " + ", ".join(failures))
     sys.exit(1)
 print("All free-voice checks passed.")

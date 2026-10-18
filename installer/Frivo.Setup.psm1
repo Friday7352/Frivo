@@ -626,78 +626,9 @@ function Sync-VenvDependencies {
     }
 }
 
-# NEW (1.5.0) ---------------------------------------------------------
-# The free voices (Kokoro) need the Microsoft Visual C++ runtime, which most
-# PCs have but a fresh Windows may not. Both steps are best effort: the free
-# voices are optional, so nothing here may fail setup.
-
-function Test-VCRuntimePresent {
-    param([string] $SystemDirectory)
-    if (-not $SystemDirectory) {
-        if (-not $env:SystemRoot) { return $true }   # not Windows (the tests)
-        $SystemDirectory = Join-Path $env:SystemRoot 'System32'
-    }
-    return (Test-Path -LiteralPath (Join-Path $SystemDirectory 'msvcp140.dll')) -and
-           (Test-Path -LiteralPath (Join-Path $SystemDirectory 'msvcp140_1.dll'))
-}
-
-function Install-VCRuntime {
-    param([scriptblock] $Log)
-    if (Test-VCRuntimePresent) { return $true }
-    & $Log 'Installing the Microsoft Visual C++ runtime for the free voices...'
-    $exe = Join-Path ([System.IO.Path]::GetTempPath()) 'frivo-vc_redist.x64.exe'
-    try {
-        $previous = $ProgressPreference
-        $ProgressPreference = 'SilentlyContinue'
-        Invoke-WebRequest -Uri 'https://aka.ms/vs/17/release/vc_redist.x64.exe' -OutFile $exe `
-            -UseBasicParsing -UserAgent 'Frivo-Setup' -TimeoutSec 180
-        $ProgressPreference = $previous
-        $r = Invoke-Tool -FilePath $exe -Arguments @('/install', '/quiet', '/norestart')
-        # 1638: a newer one is already installed. 3010: installed, restart pending.
-        $ok = @(0, 1638, 3010) -contains $r.ExitCode
-        Write-SetupLog ('free voices: VC++ runtime installer exit {0}' -f $r.ExitCode)
-        return $ok
-    } catch {
-        Write-SetupLog ('free voices: VC++ runtime not installed: {0}' -f $_.Exception.Message)
-        return $false
-    } finally {
-        Remove-Item -LiteralPath $exe -Force -ErrorAction SilentlyContinue
-    }
-}
-
-function Sync-FreeVoiceDependencies {
-    <#
-        Installs requirements-voices.txt into the venv. Done once per version
-        of that file (a marker in the venv remembers it), and retried on the
-        next setup or update if it didn't work. Never throws.
-    #>
-    param([string] $VenvPython, [string] $Target, [scriptblock] $Log)
-    try {
-        $req = Join-Path $Target 'requirements-voices.txt'
-        if (-not (Test-Path -LiteralPath $req -PathType Leaf)) { return $false }
-        $hash = (Get-FileHash -LiteralPath $req -Algorithm SHA256).Hash
-        $marker = Join-Path (Split-Path -Parent (Split-Path -Parent $VenvPython)) 'frivo-voices.ok'
-        if ((Test-Path -LiteralPath $marker -PathType Leaf) -and
-            ([System.IO.File]::ReadAllText($marker).Trim() -eq $hash)) {
-            return $true
-        }
-        & $Log 'Installing the free voices...'
-        [void] (Install-VCRuntime -Log $Log)
-        $r = Invoke-Tool -FilePath $VenvPython -Arguments @(
-            '-m', 'pip', 'install', '--no-input', '--disable-pip-version-check', '-r', $req
-        )
-        if ($r.ExitCode -ne 0) {
-            Write-SetupLog ('free voices: pip failed: ' + (Get-LastLines ($r.StdErr + "`r`n" + $r.StdOut) 8))
-            & $Log 'The free voices could not be installed. ElevenLabs and Windows voices still work.'
-            return $false
-        }
-        [System.IO.File]::WriteAllText($marker, $hash)
-        return $true
-    } catch {
-        Write-SetupLog ('free voices: {0}' -f $_.Exception.Message)
-        return $false
-    }
-}
+# CHANGED (1.5.0): the free voices are the ones built into Windows, so the
+# Kokoro install step (Sync-FreeVoiceDependencies) and the Visual C++ runtime
+# it needed (Test-VCRuntimePresent, Install-VCRuntime) have been removed.
 
 function New-Venv {
     param([string] $Target, $Python, [scriptblock] $Log)
@@ -911,6 +842,5 @@ Export-ModuleMember -Function `
     Test-IsAdministrator, Test-InstallPathUsable,
     Write-SetupLog, Invoke-Tool, ConvertTo-ArgumentString, Get-LastLines, Find-Python, Install-Python,
     Update-PathFromRegistry, New-Venv, Sync-VenvDependencies, Get-SetupLogPath,
-    Test-VCRuntimePresent, Install-VCRuntime, Sync-FreeVoiceDependencies,
     Get-LocalHostname, Get-HostsFilePath, Add-FrivoHostsEntry, Remove-FrivoHostsEntry,
     Install-FrivoRootCertificate, Remove-FrivoRootCertificate, Get-LauncherShim, Get-WScriptPath

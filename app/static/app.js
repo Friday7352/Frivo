@@ -1448,7 +1448,7 @@ function addTurn(who, text, opts = {}) {
     const target = opts.targetWords ? ` / ${opts.targetWords} target` : "";
     // "0 credits" reads like a failure. Saying it wasn't spoken says the
     // same thing about the bill and also explains why there's no player.
-    // CHANGED (1.5.0): a free voice (Kokoro, Windows) costs nothing, so the
+    // CHANGED (1.5.0): a free voice (built into Windows) costs nothing, so the
     // line says so instead of quoting what ElevenLabs would have charged.
     const freeVoice = opts.voiceEngine && opts.voiceEngine !== "elevenlabs";
     const spent = opts.spoke === false ? "not spoken"
@@ -2790,12 +2790,11 @@ function voiceGroupNode(label, note, free) {
 // CHANGED (2.0): which engine speaks a voice, for grouping and the cost tag.
 function voiceEngine(v) {
   const id = v.voice_id || "";
-  if (id.startsWith("kokoro:")) return "kokoro";
-  if (id.startsWith("windows:")) return "windows";
+  // CHANGED (1.5.0): Kokoro is gone; "onecore:" is the newer Windows voices.
+  if (id.startsWith("windows:") || id.startsWith("onecore:")) return "windows";
   return "elevenlabs";
 }
 const VOICE_ENGINE_GROUPS = [
-  ["kokoro", "Free · on this PC", "no credits", true],
   ["windows", "Free · built into Windows", "no credits", true],
   ["elevenlabs", "ElevenLabs", "uses credits", false],
 ];
@@ -3247,12 +3246,6 @@ function playVoicePreview(v) {
   audio.play().catch((err) => {
     voicePreviewId = "";
     renderVoiceList();
-    // NEW (1.5.0): a free voice's preview is made on this PC, which needs
-    // the model downloaded first.
-    if (isFreeVoiceId(v.voice_id)) {
-      ensureFreeVoicesReady(v.voice_id);
-      return;
-    }
     setStatus(`Couldn't play that preview: ${err.message}`, true);
   });
   voicePreviewAudio = audio;
@@ -3289,9 +3282,6 @@ async function chooseVoice(v) {
     setStatus(
       profileId ? `${profileName} now speaks as ${v.name}.` : `Default voice is now ${v.name}.`
     );
-    // NEW (1.5.0): a Kokoro voice needs its model; fetch it now, not on the
-    // first reply.
-    if (isFreeVoiceId(v.voice_id)) ensureFreeVoicesReady(v.voice_id);
   } catch (err) {
     applyVoiceLocally(profileId, previous.id, previous.name);
     setStatus(`Voice not saved: ${err.message}`, true);
@@ -3739,31 +3729,24 @@ function refreshPromptIfOpen() {
 }
 
 
-// ---------- NEW (1.5.0): free voices (Kokoro, Windows) ----------
+// ---------- NEW (1.5.0): free voices ----------
 //
-// A free voice is chosen like any other, from the Voice list. Kokoro's model
-// is downloaded once, the first time it's needed: picking a Kokoro voice,
-// previewing one, or the Download button in Settings. Progress shows on the
-// status line and in Settings.
+// CHANGED (1.5.0): the free voices are the ones built into Windows. They're
+// chosen like any other voice, from the Voice list, and there's nothing to
+// download. Kokoro, an AI voice model, has been removed; AI voices are what
+// ElevenLabs is for.
 const freeVoicesStatus = $("freeVoicesStatus");
-const freeVoicesDownloadBtn = $("freeVoicesDownloadBtn");
-let freeVoicesPoll = null;
 
 function isFreeVoiceId(id) {
-  return /^(kokoro|windows):/.test(id || "");
+  return /^(windows|onecore):/.test(id || "");   // CHANGED (1.5.0)
 }
 
 function describeFreeVoices(data) {
-  const k = data.kokoro || {};
-  const lines = [];
-  if (!k.available) lines.push(`Kokoro: ${k.problem || "not available."}`);
-  else if (k.downloading) lines.push(`Kokoro: downloading… ${k.progress}% of ${k.download_mb} MB (only this once).`);
-  else if (k.downloaded) lines.push("Kokoro: ready — natural male and female voices, under \"free on this PC\" in the Voice list.");
-  else if (k.error) lines.push(`Kokoro: ${k.error}`);
-  else lines.push(`Kokoro: natural male and female voices. Downloads once (${k.download_mb} MB) the first time you pick one.`);
   const w = data.windows || {};
-  if (w.available) lines.push(`Windows: ${w.count} voice${w.count === 1 ? "" : "s"} installed, under "built into Windows".`);
-  return lines.join(" ");
+  if (!w.available) return "Windows voices only work when Frivo runs on Windows.";
+  if (!w.count) return w.error ? `Couldn't list the Windows voices: ${w.error}` : "No Windows voices are installed.";
+  const more = "More come with each language in Windows Settings > Time & language > Speech.";
+  return `${w.count} voice${w.count === 1 ? "" : "s"} built into Windows, under "Free · built into Windows" in the Voice list. ${more}`;
 }
 
 async function refreshFreeVoices() {
@@ -3771,57 +3754,11 @@ async function refreshFreeVoices() {
   try {
     const data = await (await fetch("/api/voices/free")).json();
     freeVoicesStatus.textContent = describeFreeVoices(data);
-    const k = data.kokoro || {};
-    if (freeVoicesDownloadBtn) {
-      // style, not the hidden attribute: the button's own CSS sets display.
-      freeVoicesDownloadBtn.style.display = k.available && !k.downloaded && !k.downloading ? "" : "none";
-      freeVoicesDownloadBtn.textContent = k.error ? "Try again" : "Download";
-    }
     return data;
   } catch (err) {
     freeVoicesStatus.textContent = "Couldn't check the free voices.";
     return null;
   }
-}
-
-async function ensureFreeVoicesReady(voiceId) {
-  if (!/^kokoro:/.test(voiceId || "")) return;
-  let data = await refreshFreeVoices();
-  if (!data) return;
-  const k = data.kokoro || {};
-  if (!k.available) {
-    setStatus(`Kokoro voices can't be used here: ${k.problem}`, true);
-    return;
-  }
-  if (k.downloaded) return;
-  if (!k.downloading) {
-    try { await fetch("/api/voices/free/download", { method: "POST" }); } catch (err) { /* polled below */ }
-  }
-  watchFreeVoicesDownload();
-}
-
-function watchFreeVoicesDownload() {
-  if (freeVoicesPoll) return;
-  const tick = async () => {
-    const data = await refreshFreeVoices();
-    const k = (data && data.kokoro) || {};
-    if (k.downloading) {
-      setStatus(`Downloading the free voices… ${k.progress}% of ${k.download_mb} MB (only this once).`);
-      freeVoicesPoll = setTimeout(tick, 1000);
-      return;
-    }
-    freeVoicesPoll = null;
-    if (k.downloaded) setStatus("Free voices are ready.");
-    else if (k.error) setStatus(`Free voices: ${k.error}`, true);
-  };
-  tick();
-}
-
-if (freeVoicesDownloadBtn) {
-  freeVoicesDownloadBtn.addEventListener("click", async () => {
-    try { await fetch("/api/voices/free/download", { method: "POST" }); } catch (err) { /* polled below */ }
-    watchFreeVoicesDownload();
-  });
 }
 
 
@@ -5944,8 +5881,6 @@ async function send() {
       // Nothing is coming, so the dots would sit there for good.
       removeTypingBubble();
       setStatus(data.error, true);
-      // NEW (1.5.0): the free voice's model is on its way; show its progress.
-      if (/^Downloading the free voices/.test(data.error || "")) watchFreeVoicesDownload();
       setLamp("ready");
       return;
     }

@@ -64,6 +64,9 @@ def fake_completion(client_, *, max_tokens, provider="openai", temperature=None,
 
 mod.create_chat_completion = fake_completion
 mod.get_tts_audio = lambda text, voice_id, language="English": "x.mp3"  # CHANGED (1.5.0): takes the language
+# NEW (1.5.0): a reply too long for one chatbox page is spoken through the
+# timed path, so that's replaced too.
+mod.get_tts_audio_timed = lambda text, voice_id, language, plan: ("x.mp3", None)
 mod.record_usage = lambda credits: None
 mod.CFG["elevenlabs_api_key"] = "el"
 

@@ -17,8 +17,8 @@ page sends each page when the voice reaches it. This checks:
     whatever is left, and the Chatbox switch off stops it
   * exact timing: each page after the first is timed to the moment the
     voice finishes the last word of the page before. That comes from
-    ElevenLabs' per-character timings, or from speaking Kokoro and Windows
-    voices one page at a time. A refused ElevenLabs request falls back
+    ElevenLabs' per-character timings, or from speaking Windows voices one
+    page at a time. A refused ElevenLabs request falls back
     without being billed twice, and a free voice that fails falls back to
     the estimate
   * pruning deletes old reply audio and leftover job files, and keeps
@@ -210,40 +210,36 @@ def timed_side(mod):
         raised = True
     check("ElevenLabs accepted but unreadable: no second (billed) request", raised and len(calls) == 1, calls)
 
-    # Kokoro: a fake engine that makes 100 samples per character at 24 kHz.
-    class FakeKokoro:
-        def create(self, text, voice, speed, lang):
-            return np.zeros(len(text) * 100, dtype="float32"), 24000
-    mod.kokoro_engine = lambda: FakeKokoro()
-    name, ends = mod.get_tts_audio_timed(LONG, mod.KOKORO_PREFIX + "af_heart", "English", plan)
-    sums = np.cumsum([len(b) * 100 for b in bodies]) / 24000
+    # CHANGED (1.5.0): Windows voices, through a stand-in for the speech
+    # helper that writes each page's wave (10 ms per character). Kokoro has
+    # been removed.
+    fake = os.path.join(cache, "fake_helper.py")
+    with open(fake, "w", encoding="utf-8") as f:
+        f.write(
+            "import json, sys, wave\n"
+            "for raw in sys.stdin.buffer:\n"
+            "    req = json.loads(raw)\n"
+            "    if req.get('voice') == 'Broken':\n"
+            "        print('@@FRIVO ' + json.dumps({'ok': False, 'error': 'boom'}), flush=True); continue\n"
+            "    for page, out in zip(req.get('pages', []), req.get('outs', [])):\n"
+            "        w = wave.open(out, 'wb'); w.setnchannels(1); w.setsampwidth(2); w.setframerate(16000)\n"
+            "        w.writeframes(b'\\0\\0' * (160 * len(page))); w.close()\n"
+            "    print('@@FRIVO ' + json.dumps({'ok': True}), flush=True)\n")
+    mod.WINDOWS_SPEECH = mod.WindowsSpeechHost(command=[sys.executable, fake])
+    name, ends = mod.get_tts_audio_timed(LONG, mod.ONECORE_PREFIX + "MSTTS_V110_enUS_ZiraM", "English", plan)
+    sums = np.cumsum([len(b) * 160 for b in bodies]) / 16000
     with wave.open(os.path.join(cache, name), "rb") as w:
         frames = w.getnframes()
-    check("Kokoro: each page ends where its clip ends",
-          ends is not None and np.allclose(ends, sums), (ends, list(sums)))
-    check("Kokoro: one file with every page in it", frames == sum(len(b) * 100 for b in bodies), frames)
-
-    # Windows: the fake PowerShell writes each page's wave (10 ms per character).
-    def fake_ps(script, timeout=60):
-        path = script.split("ReadAllText('", 1)[1].split("'", 1)[0].replace("''", "'")
-        job = json.load(open(path, encoding="utf-8"))
-        for page, out in zip(job["pages"], job["outs"]):
-            with wave.open(out, "wb") as w:
-                w.setnchannels(1); w.setsampwidth(2); w.setframerate(16000)
-                w.writeframes(b"\0\0" * (160 * len(page)))
-        return SimpleNamespace(returncode=0, stderr="", stdout="")
-    mod._run_powershell = fake_ps
-    name, ends = mod.get_tts_audio_timed(LONG, mod.WINDOWS_PREFIX + "Microsoft Zira Desktop", "English", plan)
-    sums = np.cumsum([len(b) * 160 for b in bodies]) / 16000
     check("Windows: each page ends where its clip ends",
           ends is not None and np.allclose(ends, sums), (ends, list(sums)))
-    left = [n for n in os.listdir(cache) if ".part." in n or n.endswith(".json")]
-    check("Windows: page parts and the job are cleaned up", left == [], left)
+    check("Windows: one file with every page in it", frames == sum(len(b) * 160 for b in bodies), frames)
+    left = [n for n in os.listdir(cache) if ".part." in n]
+    check("Windows: page parts are cleaned up", left == [], left)
 
-    mod._run_powershell = lambda script, timeout=60: SimpleNamespace(returncode=1, stderr="boom", stdout="")
     mod.free_tts_audio = lambda text, voice_id, language: "fallback.wav"
-    name, ends = mod.get_tts_audio_timed(LONG, mod.WINDOWS_PREFIX + "Microsoft Zira Desktop", "English", plan)
+    name, ends = mod.get_tts_audio_timed(LONG, mod.ONECORE_PREFIX + "Broken", "English", plan)
     check("a free voice that fails falls back to the estimate", (name, ends) == ("fallback.wav", None))
+    mod.WINDOWS_SPEECH.close()
 
     # Through /api/chat, with ElevenLabs.
     mod.requests.post = post(timed_ok)
