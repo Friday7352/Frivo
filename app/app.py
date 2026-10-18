@@ -709,6 +709,9 @@ def load_config():
         # NEW (updates): "Skip this version". The chip stays away until a
         # release newer than this one comes out.
         "update_skipped": "",
+        # NEW (1.5.0): spoken replies older than this are deleted from
+        # audio_cache. 0 keeps them all.
+        "audio_keep_days": 7,
     }
     if os.path.exists(CONFIG_PATH):
         try:
@@ -3629,6 +3632,187 @@ def osc_chatbox():
     return jsonify({"ok": True, "id": message_id, "delivery": "queued"})
 
 
+# ---------- Chatbox pages that follow the voice ----------
+# NEW (1.5.0): FrivOSC pages a long message on a fixed 1.6-second timer,
+# which is far quicker than anyone talks. A full page is about eight
+# seconds of speech, so the chatbox raced ahead and the last page was up
+# while the voice was still reading the first. A spoken reply is now paged
+# here instead, and the page sends each one when the voice gets to it.
+#
+# FrivOSC doesn't need to change for this. A page is never longer than
+# 144 characters, counter included, and FrivOSC passes on a message that
+# fits exactly as it is, so every FrivOSC shows these pages as sent.
+
+CHATBOX_LIMIT = 144
+
+# Extra speaking time for a pause, as a number of characters' worth. Voices
+# stop at the end of a sentence and slow down for a comma. Without this, a
+# page full of short sentences was due before the voice got there.
+CHATBOX_PAUSE_WEIGHTS = {".": 8, "!": 8, "?": 8, ",": 3, ";": 4, ":": 4}
+_CHATBOX_COUNTER_RE = re.compile(r" \(\d+/\d+\)$")
+
+
+# Copied unchanged from FrivOSC's chatbox_pages(), so a page Frivo makes
+# here is one FrivOSC would have made itself.
+def chatbox_pages(text, limit=CHATBOX_LIMIT):
+    """
+    Splits text into chatbox-sized pages, breaking at sentence ends where it
+    can and word boundaries otherwise, so a page never ends mid-word.
+
+    When there's more than one page each gets a " (1/3)" counter — without
+    it a reader has no way to know the message they're looking at was the
+    middle of something, since VRChat only ever shows the most recent one.
+    """
+    text = " ".join((text or "").split())
+    if not text:
+        return []
+    if len(text) <= limit:
+        return [text]
+
+    def pack(budget):
+        pages, current = [], ""
+        # Two alternatives, not one: the first keeps end punctuation with
+        # the sentence it closes, and the second catches a run of .!? that
+        # isn't preceded by anything — a leading "!!!", or an ellipsis of
+        # its own between two sentences. Without it the regex simply skips
+        # over those characters and they vanish from the message.
+        for sentence in re.findall(r"[^.!?]+[.!?]*|[.!?]+", text) or [text]:
+            sentence = sentence.strip()
+            while len(sentence) > budget:
+                # One sentence longer than a whole page: break at the last
+                # space that fits, or hard-cut if there isn't one.
+                cut = sentence.rfind(" ", 0, budget + 1)
+                if cut <= 0:
+                    cut = budget
+                if current:
+                    pages.append(current)
+                    current = ""
+                pages.append(sentence[:cut].strip())
+                sentence = sentence[cut:].strip()
+            if not sentence:
+                continue
+            if not current:
+                current = sentence
+            elif len(current) + 1 + len(sentence) <= budget:
+                current = f"{current} {sentence}"
+            else:
+                pages.append(current)
+                current = sentence
+        if current:
+            pages.append(current)
+        return pages
+
+    pages = pack(limit)
+    if len(pages) <= 1:
+        return pages
+
+    # Re-pack with room for the counter. Its width depends on the number of
+    # pages, which depends on the packing — so pack, measure, pack again.
+    # One pass is enough in practice; the loop guards the case where making
+    # room for the suffix pushes the text into another page.
+    #
+    # The repacked list is adopted *before* the settled check, not after —
+    # keeping the wider packing once the count happened to match is what
+    # let a page come out at 150 characters with the counter attached.
+    for _ in range(3):
+        suffix = len(f" ({len(pages)}/{len(pages)})")
+        repacked = pack(limit - suffix)
+        settled = len(repacked) == len(pages)
+        pages = repacked
+        if settled:
+            break
+    total = len(pages)
+    return [f"{p} ({i}/{total})" for i, p in enumerate(pages, 1)]
+
+
+def _spoken_weight(text):
+    return len(text) + sum(CHATBOX_PAUSE_WEIGHTS.get(ch, 0) for ch in text)
+
+
+def chatbox_page_plan(text):
+    """
+    NEW (1.5.0): the reply as chatbox pages. Each page has a `start`, which
+    is how far through the speech (0 to 1) the voice is when it reaches that
+    page. The browser knows how long the audio really is and turns that
+    into seconds.
+
+    It's an estimate from the text: characters, plus a little for each
+    pause. It's fixed at both ends (page 1 at the start, and nothing after
+    the audio ends), so it can't drift by more than about a page.
+    """
+    pages = chatbox_pages(text)
+    if len(pages) <= 1:
+        return [{"text": p, "start": 0.0} for p in pages]
+    weights = [_spoken_weight(_CHATBOX_COUNTER_RE.sub("", p)) for p in pages]
+    total = float(sum(weights)) or 1.0
+    plan, done = [], 0
+    for page, weight in zip(pages, weights):
+        plan.append({"text": page, "start": round(done / total, 4)})
+        done += weight
+    return plan
+
+
+# ---------- Audio cache pruning ----------
+# NEW (1.5.0): every spoken reply used to stay in audio_cache forever.
+# Replies older than `audio_keep_days` are now deleted when Frivo starts
+# and every six hours after that. Voice previews (preview-*.wav) are kept:
+# there's one per voice, they're reused, and making one takes a while.
+
+AUDIO_PRUNE_INTERVAL_SECONDS = 6 * 3600
+# Windows-voice job files are deleted as soon as they're used. One that's
+# left over is from a crash, so a day is plenty to keep it.
+AUDIO_LEFTOVER_SECONDS = 24 * 3600
+_AUDIO_REPLY_RE = re.compile(r"^[0-9a-f]{32}\.(mp3|wav)$")
+_AUDIO_JOB_RE = re.compile(r"^[0-9a-f]{32}\.json$")
+
+
+def prune_audio_cache(now=None):
+    """Deletes old reply audio. Returns (files removed, bytes freed)."""
+    try:
+        keep_days = float(CFG.get("audio_keep_days", 7))
+    except (TypeError, ValueError):
+        keep_days = 7.0
+    if keep_days <= 0:
+        return 0, 0   # 0 means keep everything
+    now = time.time() if now is None else now
+    removed = freed = 0
+    try:
+        names = os.listdir(AUDIO_DIR)
+    except OSError:
+        return 0, 0
+    for name in names:
+        # Only names Frivo itself makes. Anything else in the folder is
+        # left alone, whatever its age.
+        if _AUDIO_REPLY_RE.match(name):
+            cutoff = now - keep_days * 86400
+        elif _AUDIO_JOB_RE.match(name):
+            cutoff = now - AUDIO_LEFTOVER_SECONDS
+        else:
+            continue
+        path = os.path.join(AUDIO_DIR, name)
+        try:
+            info = os.stat(path)
+            if info.st_mtime >= cutoff:
+                continue
+            os.remove(path)
+            removed += 1
+            freed += info.st_size
+        except OSError:
+            continue
+    if removed:
+        log_server_event(f"Audio cache: deleted {removed} old file(s), {freed / 1048576:.1f} MB.")
+    return removed, freed
+
+
+def audio_prune_loop():
+    while True:
+        try:
+            prune_audio_cache()
+        except Exception as e:
+            log_server_event(f"Audio cache: pruning failed: {e!r}")
+        time.sleep(AUDIO_PRUNE_INTERVAL_SECONDS)
+
+
 # ---------- Updates ----------
 # NEW (updates): Frivo updates itself the way Clearspace does — it reads the
 # releases on GitHub, offers a newer one, and installs it in one click; an
@@ -4728,6 +4912,10 @@ def chat():
             "follow_length": follow_length,  # NEW (1.5.0)
             "voice_engine": voice_engine,  # NEW (1.5.0)
             "voice_engine_name": TTS_ENGINE_NAMES[voice_engine],
+            # NEW (1.5.0): the reply as chatbox pages, each timed to where
+            # the voice reaches it. Pages are only sent one at a time while
+            # the reply is spoken. Text-only replies still go as one message.
+            "chatbox_pages": chatbox_page_plan(spoken),
             # Measured text and audio generation times for the UI.
             "text_seconds": round(text_seconds, 2),
             "audio_seconds": round(audio_seconds, 2),
@@ -5092,6 +5280,8 @@ def serve(host, port, cert_path, key_path):
     start_update_checker()
     # NEW (1.5.0): load the free voice model in the background if it's used.
     threading.Thread(target=warm_free_voices, name="free-voices-warm", daemon=True).start()
+    # NEW (1.5.0): delete old reply audio now, and every six hours after.
+    threading.Thread(target=audio_prune_loop, name="audio-prune", daemon=True).start()
 
     try:
         import cheroot

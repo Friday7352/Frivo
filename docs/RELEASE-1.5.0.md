@@ -84,3 +84,21 @@ The whole page has been redone. Everything still does what it did; it's laid out
 - **Settings** is one page at a time: Accounts & keys, Voices, Replies, Dictation, Listening, VRChat, Providers, Updates. Every row is a label, a one-line hint and its control. **Settings save themselves** as you change them and say *Saved*; only the API keys keep a Save button, which appears once you've typed one. A **search box** finds any setting by its words, across every page.
 - **On a phone** the rail becomes a bar along the bottom, the chips scroll sideways, and the message box stays pinned.
 - **FrivOSC is one click away while it's connected.** A chip appears above the message box (it reads *Live* or *Muted* for your VRChat mic, with a green or red dot) and opens the four switches — VRChat OSC, Follow VRChat mute, Unmute when I send, Show typing dots. They're the same switches as Settings → VRChat, save themselves, and the chip disappears when FrivOSC isn't connected.
+
+## Chatbox pages keep up with the voice
+
+A long spoken reply used to flip through its chatbox pages every second and a half or so, far faster than the voice could say them. The last page was up while the voice was still on the first. Now each page appears as the voice gets to it.
+
+- Frivo splits the reply into pages and sends each one just before the voice reaches it. The pages are the same as before, counter included.
+- If you pause a reply, the next page waits, and when you play it again it carries on from where the voice is.
+- The typing dots stay up between pages, the same as before.
+- Replies sent without the voice (**Speak** off) still go as one message and page the way they always have.
+- When each page shows is worked out from the text, so it can be off by a second or so on a long page. It never runs more than a page ahead or behind.
+- No new FrivOSC is needed: each page fits in one chatbox message, and FrivOSC passes those on exactly as they are.
+
+## Old reply audio is deleted
+
+Every spoken reply was saved in Frivo's audio folder and never removed. Replies older than 7 days are now deleted when Frivo starts and every six hours after that.
+
+- Voice previews are kept, because there's one per voice and they're reused.
+- To keep replies longer, set `audio_keep_days` in `config.json` (`0` keeps them all).

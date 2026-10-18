@@ -156,6 +156,7 @@ to the chatbox.
 
 VRChat chatbox messages are limited to 144 characters. Frivo pages longer
 messages automatically and spaces them out to avoid VRChat's spam protection.
+When a reply is spoken, each page appears as the voice reaches it.
 Anyone who can see your VRChat chatbox can see these messages.
 
 OSC is UDP, so VRChat never confirms delivery. FrivOSC reports what it sent, not
@@ -188,7 +189,8 @@ Frivo keeps its data on your PC in:
     %APPDATA%\Frivo\
 
 This includes your settings, saved profiles, local usage record, generated
-audio cache, and API keys. API keys are stored in `config.json` in plain text
+audio cache, and API keys. Spoken replies in the audio cache are deleted
+after 7 days; set `audio_keep_days` in `config.json` to change that. API keys are stored in `config.json` in plain text
 for the signed-in Windows account. Do not share that file or upload it to
 GitHub.
 

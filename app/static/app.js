@@ -1061,7 +1061,7 @@ function pauseOtherPlayers(except) {
   });
 }
 
-function attachBubbleAudio(wrap, url, onStart) {
+function attachBubbleAudio(wrap, url, onStart, onPlayback) {   // CHANGED (1.5.0): onPlayback
   wrap.classList.add("has-audio", "is-loading");
   wrap.setAttribute("role", "button");
   wrap.setAttribute("tabindex", "0");
@@ -1072,6 +1072,18 @@ function attachBubbleAudio(wrap, url, onStart) {
     if (started) return;
     started = true;
     if (typeof onStart === "function") onStart();
+  }
+
+  // NEW (1.5.0): says when the voice starts, stops and where it is, so the
+  // chatbox pages can keep up with it. A follower that throws never stops
+  // the audio.
+  function report(playing, offset, dur) {
+    if (typeof onPlayback !== "function") return;
+    try {
+      onPlayback(playing, offset, dur);
+    } catch (e) {
+      console.warn("Chatbox pages:", e);
+    }
   }
 
   // Sits on the bubble's bottom edge and fills as it plays. Absolutely
@@ -1158,6 +1170,7 @@ function attachBubbleAudio(wrap, url, onStart) {
       setPlayingUI(false);
       updateUI();
       if (state.rafId) cancelAnimationFrame(state.rafId);
+      report(false, state.buffer.duration, state.buffer.duration);   // NEW (1.5.0): played to the end
     };
 
     source.start(0, state.offset);
@@ -1170,6 +1183,7 @@ function attachBubbleAudio(wrap, url, onStart) {
     // point, so anything keyed to "when the voice starts" is accurate
     // rather than optimistic.
     fireStart();
+    report(true, state.offset, state.buffer.duration);   // NEW (1.5.0)
   }
 
   function pause() {
@@ -1177,6 +1191,7 @@ function attachBubbleAudio(wrap, url, onStart) {
     state.offset = currentTime();
     stopSource();
     state.isPlaying = false;
+    report(false, state.offset, duration());   // NEW (1.5.0)
     setPlayingUI(false);
     if (state.rafId) cancelAnimationFrame(state.rafId);
     updateUI();
@@ -1232,6 +1247,11 @@ function attachBubbleAudio(wrap, url, onStart) {
       audio.addEventListener("pause", () => setPlayingUI(false));
       audio.addEventListener("ended", () => setPlayingUI(false));
       audio.addEventListener("play", () => pauseOtherPlayers(wrap));
+      // NEW (1.5.0): the chatbox pages follow this player too.
+      const audioLength = () => (Number.isFinite(audio.duration) ? audio.duration : 0);
+      audio.addEventListener("playing", () => report(true, audio.currentTime, audioLength()));
+      audio.addEventListener("pause", () => report(false, audio.currentTime, audioLength()));
+      audio.addEventListener("ended", () => report(false, audioLength(), audioLength()));
       // Clicking the bubble drives the fallback element too, so the
       // interaction is the same whichever path a clip took.
       wrap._toggle = () => (audio.paused ? audio.play() : audio.pause());
@@ -1484,7 +1504,7 @@ function addTurn(who, text, opts = {}) {
   // player row underneath was a second object saying the same thing, and it
   // was the only part of a message that didn't look like a message.
   if (opts.audioUrl) {
-    attachBubbleAudio(body, opts.audioUrl, opts.onAudioStart);
+    attachBubbleAudio(body, opts.audioUrl, opts.onAudioStart, opts.onPlayback);   // CHANGED (1.5.0)
   }
 
   if (opts.condensed) {
@@ -2215,7 +2235,9 @@ function requestVrchatUnmute() {
   });
 }
 
-function sendToChatbox(text, { speaking = false } = {}) {
+// CHANGED (1.5.0): keepTyping leaves the dots up after sending, for a page
+// that has more pages after it.
+function sendToChatbox(text, { speaking = false, keepTyping = false } = {}) {
   // NEW (1.5.0): every way out of here ends the reply's typing dots.
   if (!text) { endReplyTyping(); return; }
   if (!oscConfigured) {
@@ -2247,7 +2269,104 @@ function sendToChatbox(text, { speaking = false } = {}) {
     // NEW (1.5.0): the dots drop once the message is queued for VRChat,
     // not before — queued first, so the same FrivOSC poll that clears the
     // dots also delivers the text that replaces them.
-    .finally(endReplyTyping);
+    .finally(() => {
+      if (!keepTyping) endReplyTyping();   // CHANGED (1.5.0)
+    });
+}
+
+// NEW (1.5.0): chatbox pages that follow the voice.
+//
+// FrivOSC changes pages on a fixed timer, which ran well ahead of anyone
+// talking. A spoken reply now comes back already split into pages
+// (chatbox_pages). Each page says how far through the speech it starts,
+// and this sends each one when the voice gets there. Pausing holds the next
+// page, and playing again carries on from wherever the voice is.
+//
+// Each page goes a little early on purpose. FrivOSC collects twice a
+// second, so a page sent right on time could show up half a second late.
+const CHATBOX_PAGE_LEAD_SECONDS = 0.4;
+
+function makeChatboxFollower(pages) {
+  let next = 0;          // the first page not sent yet
+  let timer = null;
+  let clockAt = 0;       // performance.now() when playback last started
+  let clockOffset = 0;   // where in the audio it started, in seconds
+  let duration = 0;
+  let finished = false;
+
+  const dueAt = (i) => Math.max(0, pages[i].start * duration - CHATBOX_PAGE_LEAD_SECONDS);
+  const position = () => clockOffset + (performance.now() - clockAt) / 1000;
+
+  function stop() {
+    clearTimeout(timer);
+    timer = null;
+  }
+
+  function finish() {
+    stop();
+    if (finished) return;
+    finished = true;
+    endReplyTyping();
+  }
+
+  function sendDue(at) {
+    if (next >= pages.length) return;
+    // Only the latest page that's due. If several are (playing again after
+    // skipping ahead), the earlier ones are already behind the voice.
+    let i = next;
+    while (i + 1 < pages.length && dueAt(i + 1) <= at) i++;
+    if (dueAt(i) > at) return;
+    next = i + 1;
+    const last = next >= pages.length;
+    // The dots stay up between pages, as they did when FrivOSC paged the
+    // reply, and each page restarts their 30-second limit.
+    if (!last) beginReplyTyping();
+    sendToChatbox(pages[i].text, { speaking: true, keepTyping: !last });
+    if (last) {
+      // The dots come down once sendToChatbox has queued the last page, not
+      // before, the same as a one-page reply.
+      finished = true;
+      stop();
+    } else if (!oscConfigured) {
+      // Not connected: sendToChatbox has said so once. No need to repeat it
+      // for every page.
+      finish();
+    }
+  }
+
+  function schedule() {
+    stop();
+    if (finished || next >= pages.length) return;
+    const wait = Math.max(0, dueAt(next) - position());
+    // setTimeout rather than animation frames. Frames stop while the tab
+    // is in the background, which is where it is while you're in VRChat. A
+    // tab that's playing audio isn't throttled.
+    timer = setTimeout(() => {
+      timer = null;
+      if (!oscEnabled()) { finish(); return; }
+      sendDue(position());
+      schedule();
+    }, wait * 1000);
+  }
+
+  return {
+    update(playing, offset, dur) {
+      if (finished) return;
+      if (dur > 0) duration = dur;
+      if (!oscEnabled()) { finish(); return; }
+      if (!playing) {
+        stop();
+        // Played to the end: whatever isn't showing yet goes now, so the
+        // chatbox finishes on the reply's last page.
+        if (duration && offset >= duration - 0.05) sendDue(Infinity);
+        return;
+      }
+      clockAt = performance.now();
+      clockOffset = offset;
+      sendDue(offset);
+      schedule();
+    },
+  };
 }
 
 oscToggle.addEventListener("change", () => {
@@ -5827,6 +5946,13 @@ async function send() {
     const active = allProfiles.find((p) => p.id === currentProfileId);
     const speaker = active ? active.name : "Voice";
 
+    // NEW (1.5.0): a spoken reply too long for one chatbox page goes a page
+    // at a time, each one as the voice reaches it. An app.py from before
+    // this sends no pages and gets the old behaviour.
+    const follower = data.audio_url && Array.isArray(data.chatbox_pages) && data.chatbox_pages.length > 1
+      ? makeChatboxFollower(data.chatbox_pages)
+      : null;
+
     addTurn(speaker, data.reply, {
       audioUrl: data.audio_url,
       wordCount: data.word_count,
@@ -5847,9 +5973,11 @@ async function send() {
       // Send the spoken reply to OSC when audio playback begins. Checking the
       // current toggle here honors changes made while the reply was generated.
       onAudioStart: () => {
-        if (oscEnabled()) sendToChatbox(data.reply, { speaking: true });
-        else endReplyTyping();
+        if (!oscEnabled()) endReplyTyping();
+        else if (!follower) sendToChatbox(data.reply, { speaking: true });   // CHANGED (1.5.0)
       },
+      // NEW (1.5.0): the follower sends page 1 when the voice starts.
+      onPlayback: follower ? (playing, offset, dur) => follower.update(playing, offset, dur) : null,
     });
     replyAudioComing = Boolean(data.audio_url);
 
