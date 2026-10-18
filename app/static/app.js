@@ -1955,7 +1955,57 @@ function syncOscSwitch() {
       ? "Waiting for FrivOSC on your VRChat PC"
       : "Turn on VRChat OSC in Settings to use this";
   oscSwitch.classList.toggle("is-unset", !oscConfigured);
+  syncOscQuick();
 }
+
+// NEW (1.5.0): the FrivOSC chip above the message box. Only there while
+// FrivOSC is connected — that is when its switches are worth reaching for —
+// and it reads the same state the Settings → VRChat switches do.
+function syncOscQuick() {
+  const wrap = document.getElementById("oscChipWrap");
+  if (!wrap) return;
+  wrap.classList.toggle("is-hidden", !frivoscConnected);
+  if (!frivoscConnected) {
+    const pop = document.getElementById("oscPop");
+    const btn = document.getElementById("oscChip");
+    if (pop) pop.classList.add("is-hidden");
+    if (btn) btn.setAttribute("aria-expanded", "false");
+    return;
+  }
+  const set = (id, on) => { const el = document.getElementById(id); if (el) el.checked = Boolean(on); };
+  set("oscQuickEnabled", oscEnabled_setting);
+  set("oscQuickMuteSync", muteSyncEnabled);
+  set("oscQuickUnmute", unmuteOnSendEnabled);
+  set("oscQuickTyping", typingIndicatorEnabled);
+  const mic = frivoscMuted === null ? "Mic unknown" : frivoscMuted ? "Muted in VRChat" : "Live in VRChat";
+  const micEl = document.getElementById("oscPopMic");
+  if (micEl) micEl.textContent = mic;
+  const dot = document.getElementById("oscChipDot");
+  if (dot) {
+    dot.classList.toggle("is-live", oscEnabled_setting && frivoscMuted === false);
+    dot.classList.toggle("is-muted", oscEnabled_setting && frivoscMuted === true);
+    dot.classList.toggle("is-off", !oscEnabled_setting);
+  }
+  const text = document.getElementById("oscChipText");
+  if (text) text.textContent = !oscEnabled_setting ? "VRChat off" : frivoscMuted === null ? "VRChat" : frivoscMuted ? "Muted" : "Live";
+}
+
+// Each quick switch drives the Settings switch it mirrors, so the one set of
+// handlers (state, save, revert) stays the only set.
+[
+  ["oscQuickEnabled", "oscEnabledToggle"],
+  ["oscQuickMuteSync", "oscMuteSyncToggle"],
+  ["oscQuickUnmute", "oscUnmuteOnSendToggle"],
+  ["oscQuickTyping", "oscTypingToggle"],
+].forEach(([quickId, mainId]) => {
+  const quick = document.getElementById(quickId);
+  const main = document.getElementById(mainId);
+  if (!quick || !main) return;
+  quick.addEventListener("change", () => {
+    main.checked = quick.checked;
+    main.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+});
 
 // ---------- FrivOSC status ----------
 // Frivo speaks no OSC of its own. FrivOSC runs on the VRChat PC and reports
@@ -2106,6 +2156,7 @@ async function saveOscSwitches(patch, toggle) {
     // Put the switch back rather than leaving it showing a state the
     // server does not have.
     if (toggle) toggle.checked = !toggle.checked;
+    pollFrivoscStatus();   // NEW (1.5.0): put the chip's switches back too
     setStatus("Couldn't save that setting.", true);
     return false;
   }
@@ -7434,6 +7485,7 @@ window.addEventListener("pagehide", () => {
   const popovers = [
     ["lengthChip", "lengthPop"],
     ["volumeChip", "volumePop"],
+    ["oscChip", "oscPop"],
     ["statusPillBtn", "statusPop"],
   ].map(([b, p]) => ({ btn: $(b), pop: $(p) })).filter((x) => x.btn && x.pop);
 

@@ -2316,6 +2316,17 @@ html[data-theme="light"] .rail-theme .rail-sun { display: block; }
 }
 .popover--narrow { width: 260px; }
 .chip-wrap { position: relative; }
+.chip-wrap.is-hidden { display: none !important; }
+
+/* FrivOSC chip (1.5.0): a dot says whether your VRChat mic is live. */
+.chip-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--ink-faint); }
+.chip-dot.is-live { background: var(--signal); }
+.chip-dot.is-muted { background: var(--accent); }
+.chip-dot.is-off { background: var(--ink-faint); opacity: 0.6; }
+.popover--osc { width: 300px; padding: 10px 14px 6px; }
+.osc-pop-head { display: flex; align-items: center; justify-content: space-between; padding: 2px 0 6px; }
+.osc-pop-mic { font-size: var(--text-caption); color: var(--ink-dim); }
+.popover--osc .srow { padding: 9px 0; min-height: 0; }
 /* The chips sit above the message box, so their popovers open upwards. */
 .session-strip .popover { top: auto; bottom: calc(100% + 8px); }
 @keyframes pop-in {

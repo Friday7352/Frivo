@@ -420,6 +420,40 @@
                   </div>
                 </div>
               </div>
+
+              <!-- NEW (1.5.0): FrivOSC, one click away while it is connected.
+                   The same four switches as Settings → VRChat; flipping one
+                   here flips (and saves) that one, and the other way round. -->
+              <div class="chip-wrap is-hidden" id="oscChipWrap">
+                <button id="oscChip" class="chip" type="button" aria-haspopup="dialog"
+                        aria-expanded="false" aria-controls="oscPop" title="FrivOSC — VRChat">
+                  <svg class="icon-14" aria-hidden="true"><use href="#i-osc"/></svg>
+                  <span id="oscChipText">VRChat</span>
+                  <span class="chip-dot" id="oscChipDot" aria-hidden="true"></span>
+                </button>
+                <div id="oscPop" class="popover popover--osc is-hidden" role="dialog" aria-label="FrivOSC">
+                  <div class="osc-pop-head">
+                    <span class="eyebrow">FrivOSC</span>
+                    <span class="osc-pop-mic" id="oscPopMic">Mic unknown</span>
+                  </div>
+                  <label class="srow srow--tight">
+                    <span class="srow-main srow-main--flex"><span class="srow-label">VRChat OSC</span></span>
+                    <span class="switch"><input type="checkbox" id="oscQuickEnabled"><span class="switch-track" aria-hidden="true"></span></span>
+                  </label>
+                  <label class="srow srow--tight">
+                    <span class="srow-main srow-main--flex"><span class="srow-label">Follow VRChat mute</span></span>
+                    <span class="switch"><input type="checkbox" id="oscQuickMuteSync"><span class="switch-track" aria-hidden="true"></span></span>
+                  </label>
+                  <label class="srow srow--tight">
+                    <span class="srow-main srow-main--flex"><span class="srow-label">Unmute when I send</span></span>
+                    <span class="switch"><input type="checkbox" id="oscQuickUnmute"><span class="switch-track" aria-hidden="true"></span></span>
+                  </label>
+                  <label class="srow srow--tight">
+                    <span class="srow-main srow-main--flex"><span class="srow-label">Show typing dots</span></span>
+                    <span class="switch"><input type="checkbox" id="oscQuickTyping"><span class="switch-track" aria-hidden="true"></span></span>
+                  </label>
+                </div>
+              </div>
             </div>
 
             <!-- The message box: one row. -->

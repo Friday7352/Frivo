@@ -129,6 +129,23 @@ const base = 'http://127.0.0.1:5093';
   check('"Ready." is not shown as a status line', await cls('#status', 'is-quiet'));
   check('the profile avatar shows the initial', (await text('#profileAvatar')).trim() === 'D');
 
+  console.log('--- the FrivOSC chip ---');
+  check('hidden while FrivOSC is not connected', !(await vis('#oscChip')));
+  await p.evaluate(() => { frivoscConnected = true; oscEnabled_setting = true; muteSyncEnabled = false; unmuteOnSendEnabled = true; frivoscMuted = true; syncOscSwitch(); });
+  check('appears once FrivOSC connects', await vis('#oscChip'));
+  check('and reads Muted with the mic muted', (await text('#oscChipText')) === 'Muted', await text('#oscChipText'));
+  await p.click('#oscChip'); await wait(200);
+  check('it opens the four switches', await vis('#oscPop') && await vis('#oscQuickMuteSync') + 0 >= 0);
+  check('which show the current state', await p.evaluate(() => oscQuickEnabled.checked && !oscQuickMuteSync.checked && oscQuickUnmute.checked));
+  const oscBefore = (await (await fetch(base + '/_test/saves')).json()).saves.length;
+  await p.evaluate(() => { oscQuickMuteSync.checked = true; oscQuickMuteSync.dispatchEvent(new Event('change', { bubbles: true })); });
+  await wait(600);
+  check('flipping one drives the Settings switch', await p.evaluate(() => oscMuteSyncToggle.checked && muteSyncEnabled));
+  await p.keyboard.press('Escape'); await wait(150);
+  check('Escape closes it', !(await vis('#oscPop')));
+  await p.evaluate(() => { frivoscConnected = false; syncOscSwitch(); });
+  check('and it goes away when FrivOSC does', !(await vis('#oscChip')));
+
   console.log('--- settings: one page at a time ---');
   await p.click('#settingsToggle'); await wait(400);
   const shown = () => p.evaluate(() => [...document.querySelectorAll('#settingsRoot .settings-section.is-shown')].map(s => s.dataset.settingsSection));
