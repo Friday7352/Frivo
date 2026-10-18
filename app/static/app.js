@@ -193,6 +193,9 @@ const profileModalCancel = $("profileModalCancel");
 
 function setStatus(text, isError = false) {
   statusEl.textContent = text;
+  // CHANGED (2.0): "Ready." is not news; the line only shows when it says
+  // something.
+  statusEl.classList.toggle("is-quiet", !text || /^Ready\.?$/.test(text.trim()));
   // The line is a fixed single row that can't wrap, so a long message is
   // ellipsised — the full text stays available on hover rather than being
   // allowed to reflow the page.
@@ -203,6 +206,9 @@ function setStatus(text, isError = false) {
 function setLamp(state) {
   readyLamp.classList.toggle("is-lit", state === "ready");
   readyLamp.classList.toggle("is-busy", state === "busy");
+  // CHANGED (2.0): the lamp lives in the status pill, which says it in a word.
+  const pillText = $("statusPillText");
+  if (pillText) pillText.textContent = state === "busy" ? "Working…" : "Ready";
 }
 
 function addCredits(n) {
@@ -965,6 +971,8 @@ function updateFaderReadout() {
   const chars = Math.round(words * currentCharsPerWord());
   const seconds = Math.round((chars / 1000) * 60);
   lengthValue.textContent = `${words} words`;
+  const big = $("lengthValueBig");  // CHANGED (2.0): the chip and its popover both say it
+  if (big) big.textContent = `${words} words`;
   lengthEcho.textContent = words;
   creditEcho.textContent = chars.toLocaleString();
   secondsEcho.textContent = seconds;
@@ -1733,6 +1741,9 @@ function setSettingsOpen(open) {
   if (open && typeof collapseAllServicePanels === "function") collapseAllServicePanels();
   settingsPanel.classList.toggle("is-hidden", !open);
   settingsToggle.classList.toggle("is-active", open);
+  // CHANGED (2.0): the rail says where you are.
+  const railChat = $("railChat");
+  if (railChat) railChat.classList.toggle("is-active", !open);
   // Always reopens at the top level. Coming back to whichever sub-page you
   // were on last time is the kind of state that feels broken rather than
   // helpful — you asked for Settings, not for the page you left.
@@ -1771,7 +1782,11 @@ document.addEventListener("keydown", (e) => {
   setSettingsOpen(false);
 });
 
-saveSettingsBtn.addEventListener("click", async () => {
+// CHANGED (2.0): settings save themselves as you change them (see
+// autosaveSettings, at the end of this file). The button only remains for
+// the API keys, which are typed and then sent on purpose. Both paths come
+// through here; `close` and `quiet` are what differ.
+async function saveAllSettings({ close = false, quiet = false } = {}) {
   const body = {
     // Written back as-is. The picker owns this value now; sending it
     // unchanged keeps /api/settings from clearing it.
@@ -1811,24 +1826,31 @@ saveSettingsBtn.addEventListener("click", async () => {
     body: JSON.stringify(body),
   });
 
+  const hadKey = Boolean(body.openai_api_key || body.elevenlabs_api_key);
   if (res.ok) {
     openaiKeyInput.value = "";
     elevenKeyInput.value = "";
-    setStatus("Settings saved.");
+    if (!quiet) setStatus("Settings saved.");
     await loadSettings();
     // Providers may have just changed, so the indicator is stale.
     loadLocalStatus();
     // A key may have just been pasted in, which is the difference between
     // an empty picker and a full one — and between a balance and no
     // balance to show.
-    await loadVoices();
-    loadCredits({ force: true });
+    if (hadKey || !quiet) {
+      await loadVoices();
+      loadCredits({ force: true });
+    }
     refreshPromptIfOpen();
-    setSettingsOpen(false);
-  } else {
-    setStatus("Settings didn't save. Try again.", true);
+    if (typeof syncSessionStrip === "function") syncSessionStrip();
+    if (close) setSettingsOpen(false);
+    return true;
   }
-});
+  if (!quiet) setStatus("Settings didn't save. Try again.", true);
+  return false;
+}
+
+saveSettingsBtn.addEventListener("click", () => saveAllSettings({ close: false }));
 
 
 const OSC_ENABLED_KEY = "voice_console_osc_enabled";
@@ -2365,12 +2387,14 @@ function renderVoiceTrigger() {
   const id = activeVoiceId();
   // NEW (1.5.0): "credits" or "free" under the length fader follows the voice.
   updateFaderReadout();
+  // CHANGED (2.0): the chip shows the bare name; the full one is in the tooltip.
+  const chipName = (v) => voiceShortName(v).replace(/\s*\([^)]*\)\s*$/, "");
   const v = voiceById(id);
 
   // Falls back to the stored name so the row still reads correctly before
   // the list has loaded, or when there's no ElevenLabs key to load it with.
   if (v) {
-    voiceTriggerName.textContent = voiceShortName(v);
+    voiceTriggerName.textContent = chipName(v);
     // The full name still lives in the tooltip, so nothing is lost by
     // showing the short one on the row.
     voiceTrigger.title = v.name;
@@ -2379,7 +2403,7 @@ function renderVoiceTrigger() {
       .filter(Boolean)
       .join(" · ");
   } else if (activeVoiceName()) {
-    voiceTriggerName.textContent = activeVoiceName();
+    voiceTriggerName.textContent = activeVoiceName().replace(/\s*\([^)]*\)\s*$/, "");
     voiceTriggerTags.textContent = allVoices.length ? "not in your library" : "";
   } else {
     voiceTriggerName.textContent = allVoices.length ? "Choose a voice" : "Loading voices…";
@@ -2613,11 +2637,57 @@ function showVoiceTip(row, v) {
   tip.style.top = `${Math.max(margin, Math.min(rowRect.bottom + 6, window.innerHeight - tipRect.height - margin))}px`;
 }
 
-function voiceGroupNode(label) {
+function voiceGroupNode(label, note, free) {
   const el = document.createElement("div");
   el.className = "voice-group";
   el.textContent = label;
+  // CHANGED (2.0): an engine group says what it costs.
+  if (note) {
+    const n = document.createElement("span");
+    n.className = "voice-group-note" + (free ? " is-free" : "");
+    n.textContent = note;
+    el.appendChild(n);
+  }
   return el;
+}
+
+// CHANGED (2.0): which engine speaks a voice, for grouping and the cost tag.
+function voiceEngine(v) {
+  const id = v.voice_id || "";
+  if (id.startsWith("kokoro:")) return "kokoro";
+  if (id.startsWith("windows:")) return "windows";
+  return "elevenlabs";
+}
+const VOICE_ENGINE_GROUPS = [
+  ["kokoro", "Free · on this PC", "no credits", true],
+  ["windows", "Free · built into Windows", "no credits", true],
+  ["elevenlabs", "ElevenLabs", "uses credits", false],
+];
+function groupByEngine(list) {
+  return VOICE_ENGINE_GROUPS
+    .map(([engine, label, note, free]) => [label, list.filter((v) => voiceEngine(v) === engine).sort(byVoiceName), note, free])
+    .filter(([, l]) => l.length);
+}
+
+// CHANGED (2.0): the voices you switch between, as chips at the top of the sheet.
+function renderVoiceRecent() {
+  const host = $("voiceRecent");
+  if (!host) return;
+  host.innerHTML = "";
+  const seen = new Set();
+  const ids = [...voiceRecents(), ...voiceFavorites()].filter((id) => !seen.has(id) && seen.add(id)).slice(0, 6);
+  ids.forEach((id) => {
+    const v = voiceById(id);
+    if (!v) return;
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "chip";
+    b.classList.toggle("is-current", id === activeVoiceId());
+    b.textContent = voiceShortName(v);
+    b.title = v.name;
+    b.addEventListener("click", () => chooseVoice(v));
+    host.appendChild(b);
+  });
 }
 
 const VOICE_MARK_COLORS = [
@@ -2691,6 +2761,17 @@ function voiceRowNode(v) {
   pick.addEventListener("click", () => chooseVoice(v));
 
   row.append(mark, pick);
+
+  // CHANGED (2.0): what a reply with this voice costs.
+  const cost = document.createElement("span");
+  cost.className = "voice-cost";
+  if (voiceEngine(v) === "elevenlabs") {
+    cost.textContent = "credits";
+  } else {
+    cost.classList.add("is-free");
+    cost.textContent = "free";
+  }
+  row.appendChild(cost);
 
   if (v.preview_url) {
     const play = document.createElement("button");
@@ -2861,7 +2942,8 @@ function voiceSections(matches) {
   }
 
   if (voiceSortMode === "name") {
-    return [["", [...matches].sort(byVoiceName)]];
+    // CHANGED (2.0): by name, within engine groups.
+    return groupByEngine(matches);
   }
 
   if (voiceSortMode === "category") {
@@ -2894,12 +2976,11 @@ function voiceSections(matches) {
     .filter((v) => !favs.has(v.voice_id) && recents.includes(v.voice_id))
     .sort((a, b) => recents.indexOf(a.voice_id) - recents.indexOf(b.voice_id));
   const pinned = new Set([...fav, ...used].map((v) => v.voice_id));
-  const rest = matches.filter((v) => !pinned.has(v.voice_id)).sort(byVoiceName);
-  return [
-    ["Favorites", fav],
-    ["Recently used", used],
-    [fav.length || used.length ? "All voices" : "", rest],
-  ];
+  const rest = matches.filter((v) => !pinned.has(v.voice_id));
+  // CHANGED (2.0): favorites first, then everything else grouped by engine
+  // — free on this PC, built into Windows, ElevenLabs — so what costs
+  // credits and what doesn't is the first thing the list says.
+  return [["Favorites", fav], ...groupByEngine(rest)];
 }
 
 function sortVoicesFlat(matches) {
@@ -2967,9 +3048,9 @@ function renderVoiceList() {
 
   const sections = voiceSections(matches);
 
-  sections.forEach(([label, list]) => {
+  sections.forEach(([label, list, note, free]) => {
     if (!list.length) return;
-    if (label) voiceList.appendChild(voiceGroupNode(label));
+    if (label) voiceList.appendChild(voiceGroupNode(label, note, free));
     list.forEach((v) => {
       const row = voiceRowNode(v);
       voiceList.appendChild(row);
@@ -3103,6 +3184,10 @@ function positionVoicePop() {}
 
 function openVoicePop() {
   voicePop.classList.remove("is-hidden");
+  // CHANGED (2.0): the sheet says whose voice this is.
+  const forEl = $("voiceDialogFor");
+  if (forEl) forEl.textContent = `for ${activeProfile() ? activeProfile().name : "Default"}`;
+  renderVoiceRecent();
   voiceTrigger.setAttribute("aria-expanded", "true");
   // Every visit starts from a clean slate rather than resuming last time's
   // search, which is almost never what you want on reopening.
@@ -3264,6 +3349,7 @@ function syncProfileButtons() {
   const has = !!currentProfileId;
   editProfileBtn.disabled = !has;
   deleteProfileBtn.disabled = !has;
+  if (typeof syncSessionStrip === "function") syncSessionStrip();  // CHANGED (2.0)
 }
 
 profileSelect.addEventListener("change", () => {
@@ -3291,14 +3377,14 @@ function openModal(profile) {
   // matters, though — otherwise the editor looks like it lost a field.
   if (profile) {
     profileVoiceNote.textContent = profile.voice_name
-      ? `Speaks as ${profile.voice_name}. Change it from the Voice row while this profile is selected.`
-      : "Set its voice from the Voice row while this profile is selected.";
+      ? `Speaks as ${profile.voice_name}. Change it from the voice chip above the message box while this profile is selected.`
+      : "Set its voice from the voice chip above the message box while this profile is selected.";
   } else {
     const current = voiceById(activeVoiceId());
     const name = current ? current.name : activeVoiceName();
     profileVoiceNote.textContent = name
-      ? `Starts on the voice you have selected now (${name}), and can be changed any time from the Voice row.`
-      : "Pick a voice from the Voice row first — a profile needs one.";
+      ? `Starts on the voice you have selected now (${name}), and can be changed any time from the voice chip above the message box.`
+      : "Pick a voice from the chip above the message box first — a profile needs one.";
   }
   const startStyle = profile ? (profile.response_style || "echo") : getRadioValue(responseStyleRadios, "echo");
   // NEW (1.5.0): a profile saved before "Follow reply length" existed keeps
@@ -3417,7 +3503,7 @@ profileModalSave.addEventListener("click", async () => {
     return;
   }
   if (!voiceId) {
-    setStatus("Pick a voice in the Voice row first — a profile needs one.", true);
+    setStatus("Pick a voice from the chip above the message box first — a profile needs one.", true);
     return;
   }
 
@@ -4703,6 +4789,8 @@ function setListenStatus(text) {
 const listenLamp = $("listenLamp");
 function setListenLamp(live) {
   if (listenLamp) listenLamp.classList.toggle("is-lit", Boolean(live));
+  // CHANGED (2.0): the rail shows a dot while listening runs with the drawer closed.
+  if (listenToggle) listenToggle.classList.toggle("is-live", Boolean(live));
 }
 
 // How many distinct voices the panel has separated so far. Counted from
@@ -5517,7 +5605,7 @@ if (listenStartBtn) {
 // Docking is remembered, because it's a workspace preference rather than a
 // per-session choice — if you like the chat window pinned, you like it
 // pinned every time.
-const listenDockBtn = $("listenDockBtn");
+const listenDockBtn = document.getElementById("listenDockBtn");  // CHANGED (2.0): gone; the drawer has no dock
 const LISTEN_DOCK_KEY = "voice_console_listen_docked";
 
 function applyListenDock(docked) {
@@ -5947,8 +6035,9 @@ const LISTEN_OPEN_KEY = "voice_console_listen_open";
 
 if (listenPanel) {
   const savedOpen = localStorage.getItem(LISTEN_OPEN_KEY);
-  const wideEnoughForColumn = window.matchMedia("(min-width: 1280px)").matches;
-  const listenOpen = savedOpen === null ? wideEnoughForColumn : savedOpen === "1";
+  // CHANGED (2.0): a drawer, closed until you open it — a third of the
+  // screen saying "Nothing heard yet" was the old layout's biggest cost.
+  const listenOpen = savedOpen === "1";
   listenPanel.classList.toggle("is-hidden", !listenOpen);
   if (listenToggle) listenToggle.classList.toggle("is-active", listenOpen);
 }
@@ -6827,6 +6916,14 @@ function renderUpdateChip() {
 function renderAboutSection() {
   if (!updateInfo) return;
   aboutVersionValue.textContent = updateInfo.current || "unknown";
+  // CHANGED (2.0)
+  const pv = $("statusPillVersion");
+  if (pv) {
+    pv.textContent = updateInfo.current || "";
+    pv.classList.toggle("is-unknown", !updateInfo.current || updateInfo.current === "unknown");
+  }
+  const nv = $("settingsNavVersion");
+  if (nv) nv.textContent = updateInfo.current || "";
   if (updateAutoToggle) updateAutoToggle.checked = Boolean(updateInfo.auto_check);
 
   let value = "—";
@@ -7348,3 +7445,241 @@ window.addEventListener("pagehide", () => {
       new Blob([JSON.stringify({ typing: false })], { type: "application/json" }));
   } catch (err) { /* the expiry covers it */ }
 });
+
+
+// ============================================================
+// NEW (2.0): the shell — rail, popovers, session strip, settings nav
+// ============================================================
+//
+// Everything above still owns its feature; this is only the new chrome
+// around it: the rail buttons call what the old menu called, the chips
+// above the message box open the controls the sidebar used to hold, the
+// settings list shows one section at a time, and settings save themselves.
+
+(function shell() {
+  const railChat = $("railChat");
+  const railVoices = $("railVoices");
+  const listenCloseBtn = $("listenCloseBtn");
+  const messageInputEl = $("messageInput");
+
+  if (railChat) {
+    railChat.addEventListener("click", () => {
+      if (!settingsPanel.classList.contains("is-hidden")) setSettingsOpen(false);
+      if (messageInputEl) messageInputEl.focus();
+    });
+  }
+  if (railVoices && voiceTrigger) railVoices.addEventListener("click", () => voiceTrigger.click());
+  if (listenCloseBtn && listenToggle) listenCloseBtn.addEventListener("click", () => listenToggle.click());
+
+  // ---- popovers: one open at a time, closed by a click elsewhere or Escape ----
+  const popovers = [
+    ["lengthChip", "lengthPop"],
+    ["volumeChip", "volumePop"],
+    ["statusPillBtn", "statusPop"],
+  ].map(([b, p]) => ({ btn: $(b), pop: $(p) })).filter((x) => x.btn && x.pop);
+
+  function closePopovers(except) {
+    popovers.forEach(({ btn, pop }) => {
+      if (pop === except) return;
+      pop.classList.add("is-hidden");
+      btn.setAttribute("aria-expanded", "false");
+    });
+  }
+  popovers.forEach(({ btn, pop }) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const opening = pop.classList.contains("is-hidden");
+      closePopovers(opening ? pop : null);
+      pop.classList.toggle("is-hidden", !opening);
+      btn.setAttribute("aria-expanded", opening ? "true" : "false");
+      if (opening && pop.id === "lengthPop" && typeof refreshPromptIfOpen === "function") refreshPromptIfOpen();
+    });
+    pop.addEventListener("click", (e) => e.stopPropagation());
+  });
+  document.addEventListener("click", (e) => {
+    // A select's popover is on <body>; clicking inside it must not close the chip's popover.
+    if (e.target.closest(".pretty-select-pop")) return;
+    closePopovers(null);
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") closePopovers(null);
+  });
+
+  // ---- the session strip ----
+  const avatar = $("profileAvatar");
+  const styleChip = $("styleChip");
+  const styleChipText = $("styleChipText");
+  const STYLE_NAMES = { reply: "Reply", echo: "Clean up", mimic: "Word for word", flair: "Clean up" };
+
+  window.syncSessionStrip = function syncSessionStrip() {
+    const active = typeof activeProfile === "function" ? activeProfile() : null;
+    if (avatar) {
+      const name = active ? active.name : "Default";
+      avatar.textContent = (name.trim()[0] || "D").toUpperCase();
+    }
+    if (styleChipText) {
+      const style = active
+        ? (active.response_style || "echo")
+        : (typeof responseStyleRadios !== "undefined" ? getRadioValue(responseStyleRadios, "echo") : "echo");
+      styleChipText.textContent = STYLE_NAMES[style] || style;
+      if (styleChip) {
+        styleChip.title = active
+          ? `${active.name} replies with ${STYLE_NAMES[style] || style}. Click to edit the profile.`
+          : `Replies use ${STYLE_NAMES[style] || style}. Click to change it in Settings.`;
+      }
+    }
+  };
+  if (styleChip) {
+    styleChip.addEventListener("click", () => {
+      const active = typeof activeProfile === "function" ? activeProfile() : null;
+      if (active && typeof openModal === "function") {
+        openModal(active);
+      } else {
+        setSettingsOpen(true);
+        showSettingsSection("replies");
+      }
+    });
+  }
+  if (typeof responseStyleRadios !== "undefined" && responseStyleRadios) {
+    responseStyleRadios.addEventListener("change", () => window.syncSessionStrip());
+  }
+  window.syncSessionStrip();
+
+  // ---- settings: one section at a time ----
+  const nav = $("settingsNav");
+  const stack = $("settingsRoot");
+  const sections = stack ? [...stack.querySelectorAll("[data-settings-section]")] : [];
+  const search = $("settingsSearch");
+  const noMatch = $("settingsNoMatch");
+  let currentSection = "replies";
+
+  window.showSettingsSection = function showSettingsSection(name) {
+    currentSection = name;
+    if (search && search.value) {
+      search.value = "";
+      applySearch("");
+    }
+    if (typeof closeSettingsPage === "function") closeSettingsPage();
+    sections.forEach((sec) => sec.classList.toggle("is-shown", sec.dataset.settingsSection === name));
+    if (nav) {
+      nav.querySelectorAll(".settings-nav-btn").forEach((b) => b.classList.toggle("is-active", b.dataset.settingsSection === name));
+    }
+    if (settingsScroll) settingsScroll.scrollTop = 0;
+  };
+  if (nav) {
+    nav.addEventListener("click", (e) => {
+      const b = e.target.closest("[data-settings-section]");
+      if (b) showSettingsSection(b.dataset.settingsSection);
+    });
+  }
+
+  // A key row's page lives under Accounts; a drill-in from any row keeps
+  // its section lit.
+  const pageToSection = {
+    openai: "accounts", eleven: "accounts", "reply-length": "replies", model: "replies",
+    "max-tokens": "replies", "translation-provider": "listening", "translation-model": "listening",
+    ollama: "providers", whisper: "providers", "earlier-versions": "about",
+  };
+  if (stack) {
+    stack.addEventListener("click", (e) => {
+      const row = e.target.closest("[data-settings-page]");
+      if (!row) return;
+      const sec = pageToSection[row.dataset.settingsPage];
+      if (sec && nav) nav.querySelectorAll(".settings-nav-btn").forEach((b) => b.classList.toggle("is-active", b.dataset.settingsSection === sec));
+    });
+  }
+
+  // ---- settings search: every row whose words match, from every section ----
+  function applySearch(q) {
+    const query = q.trim().toLowerCase();
+    if (!stack) return;
+    stack.classList.toggle("is-searching", Boolean(query));
+    if (!query) {
+      sections.forEach((sec) => {
+        sec.classList.toggle("is-shown", sec.dataset.settingsSection === currentSection);
+        sec.querySelectorAll(".srow, .settings-section-title, .settings-section-sub").forEach((r) => r.classList.remove("is-hidden"));
+      });
+      if (noMatch) noMatch.classList.add("is-hidden");
+      return;
+    }
+    if (typeof closeSettingsPage === "function") closeSettingsPage();
+    let any = false;
+    sections.forEach((sec) => {
+      let hit = false;
+      sec.querySelectorAll(".srow").forEach((row) => {
+        const match = row.textContent.toLowerCase().includes(query);
+        row.classList.toggle("is-hidden", !match);
+        if (match) hit = true;
+      });
+      sec.querySelectorAll(".settings-section-sub").forEach((r) => r.classList.add("is-hidden"));
+      sec.classList.toggle("is-shown", hit);
+      if (hit) any = true;
+    });
+    if (noMatch) noMatch.classList.toggle("is-hidden", any);
+    if (nav) nav.querySelectorAll(".settings-nav-btn").forEach((b) => b.classList.remove("is-active"));
+  }
+  if (search) search.addEventListener("input", () => applySearch(search.value));
+
+  showSettingsSection("replies");
+
+  // ---- settings save themselves ----
+  // Every control inside Settings, except the key fields (sent on purpose
+  // with the Save key button) and the ones that already save themselves or
+  // are page-only preferences.
+  const saved = $("settingsSaved");
+  const saveBtn = $("saveSettings");
+  const SELF_SAVING = new Set([
+    "openaiKey", "elevenKey", "settingsSearch", "themeToggleSettings", "composerOptionsToggle",
+    "micSelect", "dictationLangSelect", "listenDeviceSelect", "listenThreshold", "listenSegmentSeconds",
+    "listenLiveToggle", "listenSpeakerThreshold", "updateAutoToggle", "responseStyleRadios",
+    "personalityPresetSelect", "whisperModelSelect", "settingsVolumeSlider", "settingsLengthSlider",
+  ]);
+  let saveTimer = null;
+  let savedTimer = null;
+  function flashSaved(ok) {
+    if (!saved) return;
+    saved.textContent = ok ? "✓ Saved" : "Not saved — try again";
+    saved.classList.toggle("is-error", !ok);
+    saved.classList.add("is-on");
+    clearTimeout(savedTimer);
+    savedTimer = setTimeout(() => saved.classList.remove("is-on"), ok ? 1800 : 4000);
+  }
+  function scheduleSave() {
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(async () => {
+      const ok = await saveAllSettings({ quiet: true });
+      flashSaved(ok);
+    }, 500);
+  }
+  function wantsAutosave(target) {
+    if (!target || !target.id) {
+      // A radio pill's input has no id; its group does.
+      const group = target && target.closest ? target.closest(".radio-row") : null;
+      return group && group.id && !SELF_SAVING.has(group.id) && group.id !== "dictationModeRadios";
+    }
+    if (SELF_SAVING.has(target.id)) return false;
+    if (target.closest("#settingsSearch")) return false;
+    return true;
+  }
+  if (settingsPanel) {
+    settingsPanel.addEventListener("change", (e) => {
+      if (!wantsAutosave(e.target)) return;
+      scheduleSave();
+    });
+    // Text fields save a moment after you stop typing; sliders as you let go.
+    settingsPanel.addEventListener("input", (e) => {
+      const t = e.target;
+      if (!t || !wantsAutosave(t)) return;
+      if (t.matches("textarea, input[type=text], input[type=number]")) scheduleSave();
+    });
+  }
+  // The Save key button appears once a key has been typed.
+  const keyInputs = ["openaiKey", "elevenKey"].map((id) => $(id)).filter(Boolean);
+  keyInputs.forEach((input) => {
+    input.addEventListener("input", () => {
+      const any = keyInputs.some((k) => k.value.trim());
+      if (saveBtn) saveBtn.classList.toggle("is-hidden", !any);
+    });
+  });
+  if (saveBtn) saveBtn.addEventListener("click", () => setTimeout(() => flashSaved(true), 600));
+})();

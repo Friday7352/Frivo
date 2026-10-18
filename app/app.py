@@ -2203,13 +2203,16 @@ def kokoro_voice_entries():
     for key, name, gender, lang, region in KOKORO_VOICES:
         entries.append({
             "voice_id": KOKORO_PREFIX + key,
-            # No " - " in the name: the picker shows only what's before one.
-            "name": f"{name} ({region}" + (", recommended)" if key in KOKORO_RECOMMENDED else ")"),
+            # CHANGED (2.0): the bare name; the accent is on the language
+            # ("English · British") and "recommended" is a tag.
+            "name": name,
             "category": "free on this PC",
-            "tags": [region.lower(), "free"],
+            "tags": [region.lower(), "free"] + (["recommended"] if key in KOKORO_RECOMMENDED else []),
             "gender": gender,
             "created_at": None,
-            "languages": [{"code": lang, "name": VOICE_LANGUAGE_NAMES.get(lang, lang.upper())}],
+            "languages": [{"code": lang, "name": (
+                f"{VOICE_LANGUAGE_NAMES.get(lang, lang.upper())} · {region}" if lang == "en"
+                else VOICE_LANGUAGE_NAMES.get(lang, lang.upper()))}],
             "language_source": "declared",
             "preview_url": "/api/voices/preview?voice_id=" + KOKORO_PREFIX + key,
             "description": (
@@ -2227,7 +2230,7 @@ def windows_voice_entries():
         short = re.sub(r"^Microsoft\s+|\s+Desktop$", "", v["name"]).strip()
         entries.append({
             "voice_id": WINDOWS_PREFIX + v["name"],
-            "name": f"{short} (Windows)",
+            "name": short,
             "category": "built into Windows",
             "tags": ["windows", "free"],
             "gender": (v.get("gender") or "").lower(),

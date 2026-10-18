@@ -1,18 +1,19 @@
 /* === style.css === */
 /* RYZEN SERVER  ->  voice_chat_web\static\style.css */
 /* ============================================================
-   Frivo — three-column console
+   Frivo 2.0 — one column, a rail, and drawers
    ============================================================
-   One layout, not three. A fixed sidebar holds everything that
-   configures the voice, the middle column is the conversation, and the
-   right column is the listening panel. Nothing moves between them, so
-   every control has exactly one home and muscle memory survives.
+   CHANGED (2.0): the three-column console is gone. The conversation has
+   the whole width; a 60px rail on the left is the only permanent chrome
+   (chat, listening, voices, settings); what the old sidebar held is a row
+   of chips above the message box; Listening is a drawer that slides in
+   beside the chat; Settings is one page at a time with a list on the
+   left. One surface level — hairlines and spacing instead of cards inside
+   cards — and red stays the accent: it marks what is on, selected, yours,
+   and the one button that sends.
 
    Dark is the default; light is the same design with the tokens swapped,
-   selected by data-theme="light" on <html>. Every colour below is a
-   variable for that reason — there are no literal colours in the rules
-   themselves, so a theme is a block of tokens rather than a second
-   stylesheet that drifts out of sync.
+   selected by data-theme="light" on <html>. Every colour is a variable.
    ============================================================ */
 
 /* ============================================================
@@ -22,18 +23,18 @@
 :root {
   color-scheme: dark;
 
-  --bg:          #0d1117;   /* the desk the panels sit on */
-  --surface:     #161b22;   /* a panel */
-  --surface-2:   #1c232d;   /* a card inside a panel */
-  --surface-3:   #262f3b;   /* a control inside a card */
-  --surface-4:   #323d4c;   /* a control being hovered */
+  --bg:          #0f1013;   /* the page */
+  --surface:     #131519;   /* a drawer, a sheet */
+  --surface-2:   #16181d;   /* the message box, a chip, a popover */
+  --surface-3:   #1e2129;   /* a control at rest / hovered row */
+  --surface-4:   #262932;   /* a control being hovered */
 
   --rule:        rgba(255, 255, 255, 0.09);
-  --rule-soft:   rgba(255, 255, 255, 0.055);
+  --rule-soft:   rgba(255, 255, 255, 0.06);
 
-  --ink:         #e8eef7;
-  --ink-dim:     rgba(232, 238, 247, 0.64);
-  --ink-faint:   rgba(232, 238, 247, 0.40);
+  --ink:         #eceef2;
+  --ink-dim:     #a6aab6;
+  --ink-faint:   #6c7181;
 
   /* Red is the tint: it marks what is on, selected, or yours. Sampled
      from the app icon, so the window and the thing that launched it are
@@ -47,24 +48,20 @@
 
   --signal:      #3ecf6d;
   --signal-soft: rgba(62, 207, 109, 0.16);
-  /* Orange, not red. With red carrying the brand it can no longer also
-     mean "this went wrong" — a Delete button and a Save button would be
-     the same colour. Orange keeps failure legible at a glance while
-     staying clearly outside the accent's hue. */
+  /* Orange, not red: with red carrying the brand it can no longer also
+     mean "this went wrong". */
   --alert:       #ff6a00;
   --alert-soft:  rgba(255, 106, 0, 0.16);
-  /* Gold, kept for the favourites star and the "trimmed to length" flag —
-     a lighter class of remark than an error. */
   --warn:        #f0a63c;
   --warn-soft:   rgba(240, 166, 60, 0.16);
 
-  --field:       #1c232d;
+  --field:       #16181d;
   --fill:        rgba(255, 255, 255, 0.06);
   --fill-strong: rgba(255, 255, 255, 0.11);
 
   --bubble-you:     var(--accent-press);
   --bubble-you-ink: #ffffff;
-  --bubble-them:    #1e2632;
+  --bubble-them:    #1c1f26;
   --bubble-them-ink: var(--ink);
 
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
@@ -72,7 +69,6 @@
   --shadow-lg: 0 24px 64px rgba(0, 0, 0, 0.6);
   --panel-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
 
-  /* Speaker tints in the listening panel, mixed against the panel. */
   --speaker-wash: 0.13;
 
   /* Legacy aliases, kept so any rule that still names them stays correct. */
@@ -88,10 +84,10 @@
   --radius-xl:   18px;
   --radius-pill: 999px;
 
-  --font-panel:  -apple-system, BlinkMacSystemFont, "SF Pro Text",
-                 "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  --font-panel:  "Instrument Sans", -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text",
+                 "Segoe UI", system-ui, sans-serif;
   --font-body:   var(--font-panel);
-  --font-mono:   "IBM Plex Mono", "SF Mono", ui-monospace, "Consolas", monospace;
+  --font-mono:   "JetBrains Mono", "SF Mono", ui-monospace, "Consolas", monospace;
 
   --text-body:      15px;
   --text-callout:   14.5px;
@@ -103,7 +99,10 @@
   --ease: cubic-bezier(0.32, 0.72, 0, 1);
   --dur:  200ms;
 
-  --gap:  14px;
+  --rail-w: 60px;
+  --topbar-h: 56px;
+  --column-w: 780px;
+  --drawer-w: 420px;
 }
 
 /* ============================================================
@@ -113,22 +112,19 @@
 html[data-theme="light"] {
   color-scheme: light;
 
-  --bg:          #eef2f8;
+  --bg:          #f4f5f8;
   --surface:     #ffffff;
-  --surface-2:   #f5f8fc;
-  --surface-3:   #eaf0f8;
-  --surface-4:   #dde6f2;
+  --surface-2:   #ffffff;
+  --surface-3:   #eef0f4;
+  --surface-4:   #e3e6ec;
 
-  --rule:        rgba(15, 23, 42, 0.10);
-  --rule-soft:   rgba(15, 23, 42, 0.06);
+  --rule:        rgba(15, 23, 42, 0.11);
+  --rule-soft:   rgba(15, 23, 42, 0.07);
 
-  --ink:         #101827;
-  --ink-dim:     #5b6779;
-  --ink-faint:   #93a0b3;
+  --ink:         #15181f;
+  --ink-dim:     #5c6372;
+  --ink-faint:   #9097a6;
 
-  /* A shade deeper than the dark theme's: the same red that reads as
-     vivid on near-black is glaring on white, and this one has to carry
-     small text. */
   --accent:       #e01b24;
   --accent-hover: #c8161e;
   --accent-press: #ab1219;
@@ -143,12 +139,12 @@ html[data-theme="light"] {
   --warn:        #a16207;
   --warn-soft:   rgba(161, 98, 7, 0.12);
 
-  --field:       #f2f6fc;
+  --field:       #ffffff;
   --fill:        rgba(15, 23, 42, 0.05);
   --fill-strong: rgba(15, 23, 42, 0.09);
 
-  --bubble-them:     #f4f7fc;
-  --bubble-them-ink: #101827;
+  --bubble-them:     #eceef3;
+  --bubble-them-ink: #15181f;
 
   --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06);
   --shadow-md: 0 6px 20px rgba(15, 23, 42, 0.08);
@@ -175,8 +171,6 @@ html, body {
 /* The theme swap animates, so flipping it isn't a flash. Transitions are
    only on colour, so nothing moves. */
 html.theme-ready body,
-html.theme-ready .panel,
-html.theme-ready .side-card,
 html.theme-ready .bubble {
   transition: background-color var(--dur) var(--ease), color var(--dur) var(--ease);
 }
@@ -594,508 +588,10 @@ input[type="range"]::-moz-range-thumb {
 .meter-mini { height: 4px; }
 .meter.is-open .meter-fill { background: var(--accent); }
 
-/* ============================================================
-   Shell — one layout, three columns
-   ============================================================ */
-
-.console {
-  height: 100%;
-  display: grid;
-  grid-template-columns: 330px minmax(0, 1fr) 390px;
-  grid-template-areas: "side main listen";
-  gap: var(--gap);
-  padding: var(--gap);
-  align-items: stretch;
-}
-
-/* Every column is the same object: a rounded panel on the desk. */
-.panel-frame {
-  background: var(--surface);
-  border: 1px solid var(--rule-soft);
-  border-radius: var(--radius-xl);
-  box-shadow: var(--panel-shadow);
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-/* --- sidebar --- */
-.sidebar { grid-area: side; }
-
-.brand {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 18px 18px 14px;
-}
-.brand h1 {
-  margin: 0;
-  font-size: 19px;
-  font-weight: 700;
-  letter-spacing: -0.02em;
-}
-.brand-mark {
-  flex: none;
-  display: grid;
-  place-items: center;
-  width: 26px;
-  height: 26px;
-  color: var(--accent);
-}
-.brand .lamp { margin-left: auto; }
-
-.side-scroll {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  scrollbar-gutter: stable;
-  padding: 0 14px 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-/* A labelled group: small caps label, then one card. */
-.side-group { display: flex; flex-direction: column; gap: 7px; }
-.side-card {
-  background: var(--surface-2);
-  border: 1px solid var(--rule-soft);
-  border-radius: var(--radius-lg);
-  padding: 12px 14px;
-}
-.side-card-tight { padding: 0; overflow: hidden; }
-
-/* A row inside a card: name on the left, value or control on the right. */
-.side-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-height: 34px;
-}
-.side-row + .side-row { margin-top: 4px; }
-.side-row-label {
-  flex: none;
-  font-size: var(--text-subhead);
-  font-weight: 500;
-  color: var(--ink);
-}
-.side-row-sub {
-  margin: 2px 0 0;
-  font-size: var(--text-caption);
-  color: var(--ink-faint);
-}
-
-/* The big borderless pickers — profile and language read as a title with a
-   chevron, not as form fields, because they name the thing you are in. */
-.side-pick {
-  flex: 1;
-  min-width: 0;
-  background: transparent;
-  border-color: transparent;
-  box-shadow: none;
-  padding: 4px 26px 4px 0;
-  font-size: var(--text-callout);
-  font-weight: 600;
-  color: var(--ink);
-  background-position: right 12px center, right 7px center;
-}
-.side-pick:focus { border-color: transparent; box-shadow: none; }
-
-/* The New / Edit / Delete strip under the profile picker. */
-.side-actions {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  border-top: 1px solid var(--rule-soft);
-}
-.side-actions .btn-ghost {
-  border: 0;
-  border-radius: 0;
-  min-height: 38px;
-  background: transparent;
-  font-size: var(--text-footnote);
-  color: var(--ink-dim);
-}
-.side-actions .btn-ghost + .btn-ghost { border-left: 1px solid var(--rule-soft); }
-.side-actions .btn-ghost:hover { background: var(--fill); color: var(--ink); }
-.side-actions .btn-danger:hover { background: var(--alert-soft); color: var(--alert); }
-.side-card-tight > .side-row { padding: 12px 14px; }
-
-.icon-16 { flex: none; width: 16px; height: 16px; }
-.icon-18 { flex: none; width: 18px; height: 18px; }
-
-/* Volume: icon, track, percentage — one line. */
-.volume-row { display: flex; align-items: center; gap: 12px; }
-.volume-row .icon-btn { flex: none; }
-.volume-row input[type="range"] { flex: 1; }
-.volume-value {
-  flex: none;
-  min-width: 40px;
-  text-align: right;
-  font-size: var(--text-footnote);
-  font-variant-numeric: tabular-nums;
-  color: var(--ink-dim);
-}
-
-.icon-btn {
-  display: grid;
-  place-items: center;
-  width: 32px;
-  height: 32px;
-  border: 0;
-  border-radius: var(--radius);
-  background: var(--fill);
-  color: var(--ink-dim);
-  cursor: pointer;
-  transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
-}
-.icon-btn:hover { background: var(--fill-strong); color: var(--ink); }
-
-/* --- reply length --- */
-.fader-panel { }
-.fader-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 10px;
-  margin-bottom: 2px;
-}
-.fader-head .eyebrow {
-  text-transform: uppercase;
-  font-size: var(--text-caption2);
-  color: var(--ink-faint);
-}
-.fader-value {
-  font-size: var(--text-footnote);
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  color: var(--accent);
-}
-.fader-track { position: relative; }
-.ticks {
-  display: flex;
-  justify-content: space-between;
-  margin-top: -2px;
-  font-size: var(--text-caption2);
-  color: var(--ink-faint);
-}
-.fader-note strong { color: var(--ink-dim); font-weight: 600; }
-
-/* --- credits + service status --- */
-.credit-block { display: flex; flex-direction: column; }
-
-.credit-card {
-  display: flex;
-  align-items: center;
-  /* Wraps rather than truncates. In a narrow sidebar the balance drops to
-     its own line, which reads fine; an ellipsis through either the label
-     or the number does not. */
-  flex-wrap: wrap;
-  row-gap: 2px;
-  gap: 10px;
-  width: 100%;
-  padding: 12px 14px;
-  background: var(--surface-2);
-  border: 1px solid var(--rule-soft);
-  border-radius: var(--radius-lg);
-  color: var(--ink);
-  font-family: var(--font-body);
-  font-size: var(--text-body);
-  text-align: left;
-  cursor: pointer;
-  transition: background var(--dur) var(--ease);
-}
-.credit-card:hover { background: var(--surface-3); }
-/* Square off the join while the detail is open, so the two read as one
-   object rather than two stacked cards. */
-.credit-card[aria-expanded="true"] {
-  border-bottom-left-radius: 0;
-  border-bottom-right-radius: 0;
-  border-bottom-color: transparent;
-}
-
-.credit-panel {
-  padding: 4px 14px 12px;
-  background: var(--surface-2);
-  border: 1px solid var(--rule-soft);
-  border-top: 0;
-  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
-  animation: credit-open 180ms var(--ease);
-}
-@keyframes credit-open {
-  from { opacity: 0; transform: translateY(-4px); }
-  to { opacity: 1; transform: none; }
-}
-/* Names what the panel is about, since the card above only says
-   "Credits". Sits above the lines rather than beside them. */
-.credit-source {
-  margin: 0 0 8px;
-  color: var(--ink-faint, var(--ink-dim));
-  font-family: var(--font-panel);
-  font-size: var(--text-caption);
-  letter-spacing: 0.02em;
-}
-
-.credit-line {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 6px 0;
-  font-size: var(--text-footnote);
-}
-.credit-line + .credit-line { box-shadow: inset 0 1px 0 var(--rule-soft); }
-.credit-line-label { color: var(--ink-dim); }
-.credit-line-value {
-  font-family: var(--font-mono);
-  font-variant-numeric: tabular-nums;
-  color: var(--ink);
-}
-.credit-line--plan .credit-line-value { color: var(--ink-dim); }
-.credit-foot {
-  margin: 8px 0 0;
-  font-size: var(--text-caption);
-  color: var(--ink-faint);
-}
-.credit-foot:empty { display: none; }
-.credit-panel .link-btn { margin-top: 8px; }
-.credit-icon { flex: none; color: var(--accent); }
-.credit-name {
-  /* The label never shrinks — it is what names the card, and "Credi…" is
-     worse than any amount of pressure elsewhere. (This is also why the
-     label is "Credits" and not "ElevenLabs credits", which ellipsed to
-     "ElevenLabs cred…" at this width; the full name is in the panel.)
-     The balance below is the part allowed to give way, and the card wraps
-     before either of them is cut. */
-  flex: 0 0 auto;
-  white-space: nowrap;
-  font-size: var(--text-subhead);
-  font-weight: 500;
-  color: var(--ink);
-}
-
-/* The live balance. className is reassigned wholesale in app.js for the
-   service chip but not for this one, so it can carry state classes. */
-.credit-readout {
-  margin-left: auto;
-  padding: 0;
-  border: 0;
-  background: none;
-  color: var(--ink-dim);
-  font-family: var(--font-mono);
-  font-size: var(--text-caption);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-  transition: color var(--dur) var(--ease);
-}
-/* Once wrapped it is on its own line, so the auto margin that pushed it to
-   the right has nothing left to push against — line it up under the label
-   instead of leaving it floating. */
-.credit-card > .credit-readout,
-.credit-card > #sessionCredits { flex: 0 1 auto; }
-.credit-readout.is-low { color: var(--warn); }
-.credit-readout.is-empty { color: var(--alert); }
-.credit-readout.is-stale { opacity: 0.45; }
-#sessionCredits { margin-left: auto; }
-.credit-readout:not(.is-hidden) ~ #sessionCredits { display: none; }
-
-/* The local-service chip. app.js assigns className directly, so this must
-   style on the base class alone plus its two state classes. */
-/* One block per service, stacked. They go down independently and for
-   unrelated reasons, so they are reported independently — and each one
-   opens to show that service's own settings. */
-.service-status-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.service-status {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding: 10px 14px;
-  border: 1px solid var(--rule-soft);
-  border-radius: var(--radius-lg);
-  background: var(--surface-2);
-  color: var(--ink-dim);
-  font-family: var(--font-panel);
-  font-size: var(--text-footnote);
-  text-align: left;
-  cursor: pointer;
-  transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
-}
-.service-status::before {
-  content: "";
-  flex: none;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: currentColor;
-  opacity: 0.7;
-}
-.service-status-name {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-/* The affordance. Points right when closed, down when open, so it reads as
-   "there is more here" rather than as decoration. */
-.service-status-chevron {
-  flex: none;
-  display: inline-flex;
-  margin-left: auto;
-  opacity: 0.65;
-  transform: rotate(0deg);
-  transition: transform var(--dur) var(--ease);
-}
-.service-status[aria-expanded="true"] .service-status-chevron { transform: rotate(90deg); }
-
-.service-status:hover { background: var(--surface-3); color: var(--ink); }
-.service-status.is-ok { color: var(--signal); background: var(--signal-soft); border-color: transparent; }
-.service-status.is-down { color: var(--alert); background: var(--alert-soft); border-color: transparent; }
-
-/* Square off the join while the panel is open, so chip and panel read as
-   one object rather than two stacked ones — same treatment as the credits
-   card above. */
-.service-status[aria-expanded="true"] {
-  border-bottom-left-radius: 0;
-  border-bottom-right-radius: 0;
-}
-
-.service-panel {
-  padding: 10px 12px 12px;
-  background: var(--surface-2);
-  border: 1px solid var(--rule-soft);
-  border-top: 0;
-  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
-  animation: credit-open 180ms var(--ease);
-}
-/* The settings card is the same component the Settings sheet uses, just
-   hosted here. Strip the outer chrome so it does not draw a card inside a
-   card. */
-.service-panel .settings-card {
-  margin: 0;
-  padding: 0;
-  background: none;
-  border: 0;
-  box-shadow: none;
-}
-.service-panel .srow { padding-left: 0; padding-right: 0; }
-/* The sidebar is narrow. The Settings sheet's body size reads as shouting
-   in a 300px column. */
-.service-panel .srow-label { font-size: var(--text-footnote); }
-.service-panel .srow-sub,
-.service-panel .srow-value,
-.service-panel .field-note { font-size: var(--text-caption); }
-.service-panel .field > label { font-size: var(--text-footnote); }
-.service-panel .field { padding: 10px 0; }
-.service-panel input[type="text"],
-.service-panel select { font-size: var(--text-footnote); }
-/* The chip directly above already says whether FrivOSC is connected. */
-.service-panel #frivoscStatusRow { display: none; }
-
-/* Marks where a settings card belongs when a status panel is not borrowing
-   it. Occupies no space. */
-.settings-card-home { display: contents; }
-
-/* --- sidebar foot --- */
-.side-foot {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 12px 14px;
-  margin: 0 14px 14px;
-  background: var(--surface-2);
-  border: 1px solid var(--rule-soft);
-  border-radius: var(--radius-lg);
-}
-.side-foot .switch { margin-left: auto; }
-.theme-name {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  font-size: var(--text-subhead);
-  color: var(--ink);
-}
-.theme-name svg { color: var(--ink-dim); }
 
 /* ============================================================
-   Conversation column
+   Conversation — the turns (base)
    ============================================================ */
-
-.main { grid-area: main; }
-
-.chat-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  flex: none;
-  padding: 14px 16px;
-  border-bottom: 1px solid var(--rule-soft);
-}
-.chat-head .eyebrow {
-  text-transform: none;
-  letter-spacing: -0.01em;
-  font-size: 17px;
-  font-weight: 700;
-  color: var(--ink);
-}
-.chat-head-actions { display: flex; align-items: center; gap: 8px; }
-
-/* The overflow menu. Settings and the listening panel live here so the
-   header stays two words wide. */
-.menu-wrap { position: relative; }
-.menu-btn {
-  display: grid;
-  place-items: center;
-  width: 34px;
-  height: 34px;
-  border: 1px solid var(--rule);
-  border-radius: var(--radius);
-  background: var(--surface);
-  color: var(--ink-dim);
-  cursor: pointer;
-  transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
-}
-.menu-btn:hover { background: var(--surface-3); color: var(--ink); }
-.menu-pop {
-  position: absolute;
-  right: 0;
-  top: calc(100% + 6px);
-  z-index: 45;
-  min-width: 210px;
-  padding: 6px;
-  background: var(--surface);
-  border: 1px solid var(--rule);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-lg);
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  animation: pop-in 160ms var(--ease);
-}
-.menu-pop .btn-ghost {
-  justify-content: flex-start;
-  border: 0;
-  background: none;
-  color: var(--ink);
-  font-weight: 400;
-}
-.menu-pop .btn-ghost:hover { background: var(--fill); }
-.menu-pop .btn-ghost.is-active { background: var(--accent-soft); color: var(--accent); }
-
-.transcript {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  scrollbar-gutter: stable;
-}
-.transcript-body { padding: 18px 18px 22px; }
-
 .empty {
   min-height: 200px;
   display: flex;
@@ -1296,289 +792,10 @@ input[type="range"]::-moz-range-thumb {
 }
 .translate-tip.is-error { color: var(--alert); }
 
-/* ============================================================
-   Composer
-   ============================================================ */
-
-.composer-wrap {
-  flex: none;
-  padding: 12px 16px 14px;
-  border-top: 1px solid var(--rule-soft);
-}
-
-.composer {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 6px 6px 7px;
-  background: var(--surface-2);
-  border: 1px solid var(--rule);
-  border-radius: var(--radius-pill);
-  transition: border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
-}
-.composer:focus-within {
-  border-color: var(--accent-line);
-  box-shadow: 0 0 0 3px var(--accent-soft);
-}
-.composer input[type="text"] {
-  flex: 1;
-  min-width: 0;
-  background: transparent;
-  border-color: transparent;
-  box-shadow: none;
-  padding: 8px 4px;
-  font-size: var(--text-callout);
-}
-.composer input[type="text"]:focus { border-color: transparent; box-shadow: none; }
-
-/* The round buttons at each end. */
-.composer-round {
-  flex: none;
-  width: 36px;
-  height: 36px;
-  display: grid;
-  place-items: center;
-  border: 0;
-  border-radius: 50%;
-  background: var(--fill);
-  color: var(--ink-dim);
-  cursor: pointer;
-  transition: background var(--dur) var(--ease), color var(--dur) var(--ease),
-              transform 90ms var(--ease);
-}
-.composer-round:hover { background: var(--fill-strong); color: var(--ink); }
-.composer-round:active { transform: scale(0.94); }
-
-.btn-send {
-  flex: none;
-  width: 38px;
-  height: 38px;
-  display: grid;
-  place-items: center;
-  border: 0;
-  border-radius: 50%;
-  background: var(--accent);
-  color: var(--accent-ink);
-  cursor: pointer;
-  box-shadow: var(--shadow-sm);
-  transition: background var(--dur) var(--ease), transform 90ms var(--ease);
-}
-.btn-send:hover { background: var(--accent-hover); }
-.btn-send:active { transform: scale(0.94); }
-.btn-send:disabled { opacity: 0.45; cursor: default; transform: none; }
-
-.btn-mic {
-  flex: none;
-  width: 34px;
-  height: 34px;
-  display: grid;
-  place-items: center;
-  border: 0;
-  border-radius: 50%;
-  background: transparent;
-  color: var(--ink-faint);
-  cursor: pointer;
-  transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
-}
-.btn-mic:hover { background: var(--fill); color: var(--ink); }
-.btn-mic.is-recording {
-  background: var(--alert);
-  color: #fff;
-  animation: mic-pulse 1.6s infinite;
-}
-@keyframes mic-pulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(255, 106, 0, 0.5); }
-  50% { box-shadow: 0 0 0 7px rgba(255, 106, 0, 0); }
-}
-
-/* Auto lives in the pill; Speak and OSC sit on the line under it, where
-   there is room for a word each and they can say what they cost. */
-.composer .switch { padding-right: 4px; }
-
-.composer-toggles {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin-top: 9px;
-  padding: 0 4px;
-}
-/* A switch drawn as a chip, so a row of them reads as a row of settings
-   rather than as loose controls floating under the input. */
-.toggle-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 5px 11px 5px 12px;
-  border: 1px solid var(--rule);
-  border-radius: var(--radius-pill);
-  background: var(--surface-2);
-  cursor: pointer;
-  user-select: none;
-  transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease);
-}
-.toggle-chip:hover { background: var(--surface-3); }
-/* The chip is a label wrapping a checkbox but isn't a .switch, so it needs
-   its own rule to put the native box out of sight. */
-.toggle-chip input { position: absolute; opacity: 0; width: 0; height: 0; }
-.toggle-chip .switch-track { width: 30px; height: 18px; }
-.toggle-chip .switch-track::after { width: 14px; height: 14px; }
-.toggle-chip input:checked ~ .switch-track::after { transform: translateX(12px); }
-.toggle-chip .switch-label { order: -1; font-size: var(--text-caption); }
-.toggle-chip:has(input:checked) { border-color: var(--accent-line); background: var(--accent-soft); }
-.toggle-chip:has(input:checked) .switch-label { color: var(--accent); }
-
-.status {
-  margin: 0;
-  height: 18px;
-  line-height: 18px;
-  font-size: var(--text-caption);
-  color: var(--ink-faint);
-  text-align: center;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.status.is-error { color: var(--alert); }
-.composer-status { margin-top: 8px; }
 
 /* ============================================================
-   Listening column
+   Listening — the heard lines and the gate (base)
    ============================================================ */
-
-.listen-panel { grid-area: listen; }
-
-.listen-head {
-  flex: none;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding: 14px 16px;
-  border-bottom: 1px solid var(--rule-soft);
-}
-.listen-head-top {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.listen-mark {
-  flex: none;
-  display: grid;
-  place-items: center;
-  color: var(--accent);
-}
-.listen-title { min-width: 0; }
-.listen-head .eyebrow {
-  text-transform: none;
-  letter-spacing: -0.01em;
-  font-size: 17px;
-  font-weight: 700;
-  color: var(--ink);
-}
-/* Idle / Listening / an error, under the title with a dot in front. */
-.listen-state {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-top: 1px;
-}
-.listen-state .lamp { width: 7px; height: 7px; }
-#listenStatus {
-  font-family: var(--font-panel);
-  font-size: var(--text-caption);
-  color: var(--ink-dim);
-}
-.people-chip {
-  margin-left: auto;
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 5px 11px;
-  border-radius: var(--radius-pill);
-  background: var(--fill);
-  font-size: var(--text-caption);
-  font-variant-numeric: tabular-nums;
-  color: var(--ink-dim);
-  white-space: nowrap;
-}
-
-.listen-actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 7px;
-}
-.listen-actions > * { flex: 1 1 auto; }
-.listen-start { flex: 0 0 122px; }
-
-.listen-body {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  padding: 12px 14px 0;
-  gap: 10px;
-}
-.listen-target { }
-.listen-target > label {
-  display: block;
-  margin-bottom: 6px;
-  font-size: var(--text-footnote);
-  font-weight: 500;
-  color: var(--ink);
-}
-
-.listen-config { border-radius: var(--radius); background: var(--fill); }
-.listen-config > summary {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 9px 13px;
-  font-size: var(--text-footnote);
-  font-weight: 500;
-  color: var(--ink-dim);
-  cursor: pointer;
-  list-style: none;
-}
-.listen-config > summary::-webkit-details-marker { display: none; }
-.listen-config > summary::before {
-  content: "";
-  width: 0;
-  height: 0;
-  border-left: 5px solid var(--ink-faint);
-  border-top: 4px solid transparent;
-  border-bottom: 4px solid transparent;
-  transition: transform var(--dur) var(--ease);
-}
-.listen-config[open] > summary::before { transform: rotate(90deg); }
-.listen-config[open] > summary { color: var(--ink); }
-.listen-config .field { padding: 12px 13px; }
-.listen-config .field:last-child { padding-bottom: 14px; }
-
-.listen-log-wrap { position: relative; flex: 1; min-height: 0; }
-.listen-log {
-  height: 100%;
-  overflow-y: auto;
-  scrollbar-gutter: stable;
-  padding: 2px 0 4px;
-}
-.listen-jump {
-  position: absolute;
-  left: 50%;
-  bottom: 10px;
-  transform: translateX(-50%);
-  padding: 5px 13px;
-  border: 0;
-  border-radius: var(--radius-pill);
-  background: var(--accent);
-  color: var(--accent-ink);
-  font-size: var(--text-caption);
-  font-weight: 600;
-  cursor: pointer;
-  box-shadow: var(--shadow-md);
-}
-
 /* --- a heard line --- */
 /* Each speaker's colour washes the whole card and marks its left edge, so
    who is talking is legible before a single word is read. */
@@ -1764,119 +981,10 @@ input[type="range"]::-moz-range-thumb {
   color: var(--ink-dim);
 }
 
-.listen-foot {
-  flex: none;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 0;
-  padding: 10px 16px;
-  border-top: 1px solid var(--rule-soft);
-  font-size: var(--text-caption);
-  color: var(--ink-faint);
-}
-.listen-foot .listen-mark { color: var(--ink-faint); }
 
 /* ============================================================
-   Settings
-   ============================================================
-   A page in the main column rather than a sheet over everything: the
-   sidebar keeps working while it's open, so changing a voice and checking
-   a key aren't two different modes. Built as iOS grouped lists — a titled
-   section, then a rounded card of rows, each row a label on the left and
-   its value on the right. Anything that needs more than a row's worth of
-   space gets a chevron and a page of its own instead of being crammed in.
+   Settings — rows and drill-in pages (base)
    ============================================================ */
-
-.settings-panel {
-  grid-area: main;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  overflow: hidden;
-  animation: settings-in 240ms var(--ease);
-}
-@keyframes settings-in {
-  from { opacity: 0; transform: translateY(8px); }
-  to { opacity: 1; transform: none; }
-}
-
-/* Open, it takes the conversation's column and the listening column with
-   it — the two panels behind it aren't reachable anyway, and a settings
-   page squeezed into a third of the width is what made the old one need
-   its own full-screen sheet. */
-.console:has(> #settingsPanel:not(.is-hidden)) {
-  grid-template-columns: 330px minmax(0, 1fr);
-  grid-template-areas: "side main";
-}
-.console:has(> #settingsPanel:not(.is-hidden)) > .main,
-.console:has(> #settingsPanel:not(.is-hidden)) > .listen-panel { display: none; }
-
-.settings-head {
-  flex: none;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 18px 22px 14px;
-}
-.settings-head .eyebrow {
-  text-transform: none;
-  letter-spacing: -0.02em;
-  font-size: 26px;
-  font-weight: 700;
-  color: var(--ink);
-}
-.settings-head-actions { display: flex; align-items: center; gap: 8px; }
-.settings-head .btn { border-radius: var(--radius-pill); padding: 8px 18px; }
-
-/* --- the scrolling stack of sections --- */
-.settings-scroll {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  scrollbar-gutter: stable;
-  padding: 4px 22px 24px;
-}
-.settings-stack { display: flex; flex-direction: column; gap: 20px; }
-
-/* --- a section --- */
-/* Icon and title sit outside the card, in the margin to its left, which is
-   what gives the page its rhythm — the eye runs down the icons to find a
-   group rather than reading every row. */
-.settings-section { display: grid; grid-template-columns: 56px minmax(0, 1fr); }
-.settings-section-icon {
-  grid-column: 1;
-  display: flex;
-  justify-content: center;
-  padding-top: 14px;
-  color: var(--accent);
-}
-.settings-section-body { grid-column: 2; min-width: 0; }
-
-.settings-section-head {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 12px 4px 10px;
-}
-.settings-section-title {
-  margin: 0;
-  font-size: 17px;
-  font-weight: 700;
-  letter-spacing: -0.01em;
-  color: var(--ink);
-}
-.settings-section-sub {
-  margin: 2px 0 0;
-  font-size: var(--text-footnote);
-  color: var(--ink-dim);
-}
-.settings-section-head .switch { margin-left: auto; }
-
-/* The first group has no title — it's the one the page opens on. */
-.settings-section--bare > .settings-section-body > .settings-card { margin-top: 0; }
-
 /* --- the card of rows --- */
 .settings-card {
   background: var(--surface);
@@ -1908,7 +1016,7 @@ button.srow:hover { background: var(--fill); }
 button.srow:active { background: var(--fill-strong); }
 
 .srow-icon { flex: none; display: grid; place-items: center; color: var(--accent); }
-.srow-main { min-width: 0; flex: none; }
+.srow-main { min-width: 0; flex: 1 1 auto; }
 .srow-label { display: block; color: var(--ink); }
 /* Opt-in for a row whose sub-label is long enough to need wrapping, used
    only beside an inline .switch. Without it, flex:none sizes the text to
@@ -2082,20 +1190,6 @@ button.srow:hover .srow-chevron { color: var(--ink-dim); }
 }
 .page-seconds input { width: 74px; flex: none; text-align: center; }
 
-/* Narrow: the section icon column costs more than it gives, so the icon
-   moves inline with the title. */
-@media (max-width: 900px) {
-  .settings-section { display: block; }
-  .settings-section-icon {
-    display: inline-flex;
-    padding: 0;
-    margin-right: 8px;
-    vertical-align: middle;
-  }
-  .settings-head { padding: 14px 16px 10px; }
-  .settings-scroll { padding: 4px 16px 20px; }
-  .srow-value { max-width: 40%; }
-}
 
 /* ============================================================
    Prompt inspector
@@ -2824,76 +1918,6 @@ button.srow:hover .srow-chevron { color: var(--ink-dim); }
   border-top: 1px solid var(--rule-soft);
 }
 
-/* ============================================================
-   Narrower screens
-   ============================================================
-   The same three panels, folded rather than rearranged. The listening
-   panel is the first to go, because it's the one you can open on demand;
-   the sidebar follows. Nothing changes place inside a panel at any width,
-   so the app is the same app on a laptop as on a monitor. */
-
-/* Listening docks as a floating card instead of owning a column. */
-@media (max-width: 1279px) {
-  .console {
-    grid-template-columns: 300px minmax(0, 1fr);
-    grid-template-areas: "side main";
-  }
-  .listen-panel {
-    position: fixed;
-    right: 18px;
-    bottom: 18px;
-    top: 18px;
-    z-index: 40;
-    width: 370px;
-    box-shadow: var(--shadow-lg);
-  }
-  .listen-panel.is-docked { right: 18px; }
-}
-
-/* One column: the sidebar becomes a scrolling block above the chat. */
-@media (max-width: 900px) {
-  .console {
-    display: flex;
-    flex-direction: column;
-    height: auto;
-    min-height: 100%;
-    padding: 10px;
-  }
-  .sidebar { max-height: none; }
-  .side-scroll { overflow: visible; }
-  .main { min-height: 70vh; }
-  .listen-panel {
-    position: static;
-    width: auto;
-    box-shadow: var(--panel-shadow);
-    min-height: 60vh;
-  }
-  .listen-panel.is-docked {
-    position: fixed;
-    inset: auto 10px 10px 10px;
-    max-height: 70vh;
-    box-shadow: var(--shadow-lg);
-  }
-}
-
-/* Docking is only meaningful once the panel has stopped owning a column. */
-@media (min-width: 1280px) {
-  .listen-panel.is-docked {
-    position: static;
-    width: auto;
-    box-shadow: var(--panel-shadow);
-  }
-  .dock-only { display: none; }
-
-  /* Closing the panel gives its column back to the conversation rather
-     than leaving a hole where it was. The grid is redefined from the
-     panel's own state, so nothing has to remember to keep the two in
-     step. */
-  .console:has(> #listenPanel.is-hidden) {
-    grid-template-columns: 330px minmax(0, 1fr);
-    grid-template-areas: "side main";
-  }
-}
 
 /* ============================================================
    Layout stability
@@ -2904,19 +1928,13 @@ button.srow:hover .srow-chevron { color: var(--ink-dim); }
    transparent. */
 
 .btn, .btn-ghost, .filter-toggle, .radio-pill, .model-row,
-.service-status, .toggle-chip {
+.service-status {
   border-width: 1px;
   border-style: solid;
 }
 
 /* Held in place rather than removed, so the row doesn't reflow when the
    active profile changes. */
-#languageSuggestBtn { color: var(--accent); background: var(--accent-soft); border-color: var(--accent-line); }
-#languageSuggestBtn.is-hidden {
-  display: inline-flex !important;
-  visibility: hidden;
-  pointer-events: none;
-}
 
 /* ============================================================
    Diagnostics
@@ -2941,13 +1959,13 @@ button.srow:hover .srow-chevron { color: var(--ink-dim); }
    it is news, not a fault. */
 
 .update-chip {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 9px;
-  width: 100%;
-  padding: 10px 14px;
+  gap: 7px;
+  height: 30px;
+  padding: 0 12px;
   border: 1px solid var(--accent-line);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-pill);
   background: var(--accent-soft);
   color: var(--accent);
   font-family: var(--font-panel);
@@ -3062,19 +2080,789 @@ button.srow:hover .srow-chevron { color: var(--ink-dim); }
   .update-progress.is-indeterminate .update-progress-bar { width: 100%; opacity: 0.45; }
 }
 
-/* NEW (1.5.0): Auto-send paused for this message because you typed in it.
-   Dimmed and outlined rather than relabelled: the switch sits inside the
-   message bar, and nothing there may change size and nudge the send
-   button. The tooltip says why and what to do (press Enter). */
-.switch.is-paused .switch-label { opacity: 0.5; text-decoration: line-through; }
-.switch.is-paused .switch-track {
-  opacity: 0.45;
-  outline: 1px dashed var(--ink-faint);
-  outline-offset: 2px;
-}
 
 /* NEW (1.5.0): an on/off row inside a modal field ("Follow reply length"). */
 .field > label.field-toggle { display: flex; align-items: center; gap: 16px; margin: 0; cursor: pointer; }
 .field-toggle-text { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
 .field-toggle-label { color: var(--ink); }
 .field-toggle .switch { flex: none; }
+
+/* ============================================================
+   Shell — rail + workspace
+   ============================================================ */
+
+.app {
+  height: 100%;
+  display: flex;
+  background: var(--bg);
+}
+
+.icon-14 { width: 14px; height: 14px; }
+.icon-16 { width: 16px; height: 16px; }
+.icon-18 { width: 18px; height: 18px; }
+.icon-20 { width: 20px; height: 20px; }
+
+/* --- rail --- */
+.rail {
+  flex: none;
+  width: var(--rail-w);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 14px 0 12px;
+  border-right: 1px solid var(--rule-soft);
+}
+.rail-brand {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  margin-bottom: 12px;
+  border-radius: 10px;
+  background: var(--accent);
+  color: #fff;
+}
+.rail-btn {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--ink-faint);
+  cursor: pointer;
+  transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+.rail-btn:hover { background: var(--fill); color: var(--ink); }
+.rail-btn.is-active { background: var(--accent-soft); color: var(--accent); }
+.rail-spacer { flex: 1; }
+.rail-dot {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 2px var(--bg);
+  display: none;
+}
+.rail-btn.is-live .rail-dot { display: block; }
+/* The theme switch is a rail button: moon in the dark, sun in the light. */
+.rail-theme { gap: 0; }
+.rail-theme .rail-sun { display: none; }
+html[data-theme="light"] .rail-theme .rail-moon { display: none; }
+html[data-theme="light"] .rail-theme .rail-sun { display: block; }
+
+/* --- workspace --- */
+.workspace {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* --- top bar --- */
+.topbar {
+  flex: none;
+  height: var(--topbar-h);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 20px 0 22px;
+  border-bottom: 1px solid var(--rule-soft);
+}
+.topbar-left, .topbar-right { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.profile-avatar {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: var(--text-caption);
+  font-weight: 600;
+}
+.profile-actions { display: flex; gap: 2px; }
+
+.icon-btn {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink-faint);
+  cursor: pointer;
+  transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+.icon-btn:hover { background: var(--fill); color: var(--ink); }
+.icon-btn:disabled { opacity: 0.3; cursor: default; background: none; }
+.icon-btn--danger:hover { color: var(--alert); }
+
+/* One pill for state. */
+.status-wrap { position: relative; }
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-pill);
+  background: var(--surface-2);
+  color: var(--ink-dim);
+  font-family: var(--font-panel);
+  font-size: var(--text-footnote);
+  cursor: pointer;
+  transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+.status-pill:hover, .status-pill[aria-expanded="true"] { background: var(--surface-3); color: var(--ink); }
+.status-pill .lamp { width: 7px; height: 7px; }
+.status-pill-version { font-family: var(--font-mono); font-size: var(--text-caption2); color: var(--ink-faint); }
+.status-pill-version:empty { display: none; }
+.status-pill-version.is-unknown { display: none; }
+.popover.status-pop { right: 0; left: auto; width: 340px; }
+.status-pop .service-status-list { margin-bottom: 10px; }
+.status-pop .credit-card { background: var(--fill); border-color: transparent; }
+.status-pop .credit-card:hover { background: var(--fill-strong); }
+.status-pop .credit-panel { background: var(--fill); border-color: transparent; }
+.status-pop .service-status { background: var(--fill); border-color: transparent; }
+.status-pop .service-panel { background: var(--fill); border-color: transparent; }
+.status-pop .service-status-list:empty { display: none; }
+
+/* --- popovers --- */
+.popover {
+  position: absolute;
+  z-index: 60;
+  top: calc(100% + 8px);
+  left: 0;
+  width: 360px;
+  max-width: calc(100vw - 32px);
+  padding: 14px;
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  animation: pop-in 160ms var(--ease);
+}
+.popover--narrow { width: 260px; }
+.chip-wrap { position: relative; }
+/* The chips sit above the message box, so their popovers open upwards. */
+.session-strip .popover { top: auto; bottom: calc(100% + 8px); }
+@keyframes pop-in {
+  from { opacity: 0; transform: translateY(4px) scale(0.98); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* ============================================================
+   Stage — the conversation and the listening drawer
+   ============================================================ */
+
+.stage {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+}
+/* Settings replaces the stage while it's open. */
+.workspace:has(> #settingsPanel:not(.is-hidden)) > .stage { display: none; }
+
+.main {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.transcript {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+.transcript-body {
+  max-width: var(--column-w);
+  margin: 0 auto;
+  padding: 26px 24px 18px;
+}
+
+/* --- the composer and the strip above it --- */
+.composer-wrap {
+  flex: none;
+  max-width: var(--column-w);
+  width: 100%;
+  margin: 0 auto;
+  padding: 6px 24px 18px;
+}
+
+.session-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  max-width: 260px;
+  padding: 0 11px;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--ink-dim);
+  font-family: var(--font-panel);
+  font-size: var(--text-footnote);
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--dur) var(--ease), color var(--dur) var(--ease), border-color var(--dur) var(--ease);
+}
+.chip:hover, .chip[aria-expanded="true"] { background: var(--surface-3); color: var(--ink); border-color: var(--rule); }
+.chip { overflow: hidden; }
+.chip > span:not(.voice-trigger-text) { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chip svg { flex: none; color: var(--ink-faint); }
+.chip:hover svg, .chip[aria-expanded="true"] svg { color: var(--accent); }
+.chip--suggest { color: var(--accent); border-color: var(--accent-line); background: var(--accent-soft); }
+.chip--suggest.is-hidden { display: none !important; }
+
+/* The voice and language chips reuse the trigger markup the pickers listen to. */
+.voice-picker { position: relative; min-width: 0; flex: none; }
+.chip.voice-trigger { width: auto; max-width: 320px; padding: 0 11px; }
+.voice-trigger-text { display: flex; flex-direction: row; align-items: baseline; gap: 6px; min-width: 0; }
+.voice-trigger-name {
+  font-size: var(--text-footnote);
+  font-weight: 500;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 180px;
+}
+.voice-trigger-tags {
+  flex: 0 1 auto;
+  min-width: 0;
+  font-size: var(--text-caption);
+  color: var(--ink-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-transform: capitalize;
+}
+.voice-trigger-tags:empty { display: none; }
+.voice-trigger:hover .voice-trigger-name, .voice-trigger[aria-expanded="true"] .voice-trigger-name { color: var(--accent); }
+
+/* Reply length fader, inside its popover. */
+.fader-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 8px; }
+.fader-value { font-size: var(--text-footnote); font-weight: 600; color: var(--accent); }
+.fader-track { padding: 2px 0 0; }
+.ticks {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 2px;
+  font-size: var(--text-caption2);
+  color: var(--ink-faint);
+}
+.fader-note { margin-top: 10px; }
+.fader-panel .link-btn { margin-top: 8px; }
+#promptPanel { margin-top: 12px; }
+#promptPanel pre { max-height: 180px; }
+.volume-row { display: flex; align-items: center; gap: 10px; }
+.volume-row .icon-btn { pointer-events: none; }
+.volume-row input[type="range"] { flex: 1; }
+
+.composer {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 56px;
+  padding: 8px 8px 8px 16px;
+  background: var(--surface-2);
+  border: 1px solid var(--rule);
+  border-radius: 16px;
+  transition: border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
+}
+.composer:focus-within { border-color: var(--accent-line); box-shadow: 0 0 0 3px var(--accent-soft); }
+.composer input[type="text"] {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  padding: 8px 4px;
+  font-size: var(--text-body);
+}
+.composer input[type="text"]:focus { border: 0; box-shadow: none; }
+.composer-toggles { display: inline-flex; gap: 6px; }
+.composer-sep { width: 1px; height: 24px; margin: 0 2px; background: var(--rule); }
+
+/* Auto, Speak, Chatbox: an icon that lights up red when on. The checkbox
+   is still a .switch so everything that styles or reads one keeps working. */
+.icon-switch { gap: 0; }
+.icon-switch .switch-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+}
+.icon-switch-track {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--ink-faint);
+  transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+.icon-switch-track::after { display: none; }
+.icon-switch:hover .icon-switch-track { background: var(--fill); color: var(--ink); }
+.icon-switch input:checked ~ .icon-switch-track { background: var(--accent-soft); color: var(--accent); }
+.icon-switch input:focus-visible ~ .icon-switch-track { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* Auto-send paused for this message (you typed in it). */
+.switch.is-paused .icon-switch-track { opacity: 0.45; outline: 1px dashed var(--ink-faint); outline-offset: 1px; }
+
+.btn-mic {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--ink-dim);
+  cursor: pointer;
+  transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+.btn-mic:hover { background: var(--fill); color: var(--ink); }
+.btn-mic.is-recording { background: var(--accent); color: #fff; animation: mic-pulse 1.6s infinite; }
+@keyframes mic-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 var(--accent-line); }
+  50% { box-shadow: 0 0 0 7px transparent; }
+}
+.btn-send {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  cursor: pointer;
+  box-shadow: var(--shadow-sm);
+  transition: background var(--dur) var(--ease), transform 90ms var(--ease);
+}
+.btn-send:hover { background: var(--accent-hover); }
+.btn-send:active { transform: scale(0.94); }
+.btn-send:disabled { opacity: 0.45; cursor: default; transform: none; }
+
+/* The status line: one quiet line under the box; "Ready." is not news. */
+.status {
+  margin: 8px 4px 0;
+  min-height: 18px;
+  font-size: var(--text-caption);
+  color: var(--ink-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.status.is-error { color: var(--alert); }
+.status.is-quiet { visibility: hidden; }
+
+/* ============================================================
+   Conversation — grouped turns, meta on hover
+   ============================================================ */
+.turn.is-ai + .turn.is-ai .turn-who { display: none; }
+/* Your own messages need no avatar: they are the ones on the right. */
+.turn.is-you .turn-avatar { display: none; }
+.turn.is-you { max-width: 76%; }
+.turn.is-ai .bubble { border: 0; }
+.turn-who { display: flex; gap: 6px; }
+.turn-who-style { color: var(--ink-faint); font-weight: 400; }
+.turn-meta { align-items: center; }
+.turn-flag {
+  margin: 6px 2px 0;
+  padding: 2px 9px;
+  background: var(--fill);
+  color: var(--ink-dim);
+  cursor: help;
+}
+.turn.is-you .turn-flag { align-self: flex-end; }
+
+/* ============================================================
+   Listening — a drawer beside the chat
+   ============================================================ */
+.listen-panel {
+  flex: none;
+  width: var(--drawer-w);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--surface);
+  border-left: 1px solid var(--rule-soft);
+  animation: drawer-in 220ms var(--ease);
+}
+@keyframes drawer-in {
+  from { opacity: 0; transform: translateX(16px); }
+  to { opacity: 1; transform: none; }
+}
+.listen-head { flex: none; padding: 12px 16px 12px; border-bottom: 1px solid var(--rule-soft); display: flex; flex-direction: column; gap: 10px; }
+.listen-head-top { display: flex; align-items: center; gap: 8px; min-height: 32px; }
+.listen-head-top .lamp { width: 8px; height: 8px; }
+.listen-head-top .lamp.is-lit { background: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.listen-title-text { margin: 0; font-size: 15px; font-weight: 600; color: var(--ink); }
+#listenStatus { font-family: var(--font-panel); font-size: var(--text-caption); color: var(--ink-dim); }
+.people-chip {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  border-radius: var(--radius-pill);
+  background: var(--fill);
+  font-size: var(--text-caption);
+  color: var(--ink-dim);
+  white-space: nowrap;
+}
+.listen-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.listen-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 16px 0;
+}
+.listen-target { display: flex; align-items: center; gap: 10px; }
+.listen-target > label { flex: none; font-size: var(--text-footnote); color: var(--ink-dim); }
+.listen-target > select, .listen-target > .pretty-select-trigger { flex: 1; min-width: 0; padding: 7px 10px; font-size: var(--text-footnote); }
+.listen-log-wrap { position: relative; flex: 1; min-height: 0; }
+.listen-log { height: 100%; overflow-y: auto; scrollbar-gutter: stable; padding: 2px 0 4px; }
+.listen-jump {
+  position: absolute;
+  left: 50%;
+  bottom: 10px;
+  transform: translateX(-50%);
+  padding: 5px 13px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-size: var(--text-caption);
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: var(--shadow-md);
+}
+.listen-foot {
+  flex: none;
+  margin: 0;
+  padding: 10px 16px;
+  border-top: 1px solid var(--rule-soft);
+  font-size: var(--text-caption);
+  color: var(--ink-faint);
+}
+.listen-entry { border: 0; margin-bottom: 6px; padding: 9px 11px; }
+.gate { margin-bottom: 12px; }
+
+/* ============================================================
+   Settings — list on the left, one page at a time
+   ============================================================ */
+.settings-panel {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  animation: settings-in 200ms var(--ease);
+}
+@keyframes settings-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+.settings-head {
+  flex: none;
+  height: var(--topbar-h);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 0 20px 0 24px;
+  border-bottom: 1px solid var(--rule-soft);
+}
+.settings-title { margin: 0; font-size: 16px; font-weight: 600; color: var(--ink); }
+.settings-head-actions { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.settings-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  width: 320px;
+  max-width: 40vw;
+  padding: 0 12px;
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  background: var(--surface-2);
+  color: var(--ink-faint);
+}
+.settings-search:focus-within { border-color: var(--accent-line); box-shadow: 0 0 0 3px var(--accent-soft); }
+.settings-search input {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  font-size: var(--text-footnote);
+}
+.settings-search input:focus { border: 0; box-shadow: none; }
+.settings-saved {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--text-caption);
+  color: var(--signal);
+  opacity: 0;
+  transition: opacity var(--dur) var(--ease);
+}
+.settings-saved.is-on { opacity: 1; }
+.settings-saved.is-error { color: var(--alert); }
+
+.settings-body { flex: 1 1 auto; min-height: 0; display: flex; }
+.settings-nav {
+  flex: none;
+  width: 232px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 18px 12px;
+  border-right: 1px solid var(--rule-soft);
+}
+.settings-nav-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 38px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--ink-dim);
+  font-family: var(--font-panel);
+  font-size: var(--text-subhead);
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+.settings-nav-btn svg { flex: none; color: var(--ink-faint); }
+.settings-nav-btn:hover { background: var(--fill); color: var(--ink); }
+.settings-nav-btn.is-active { background: var(--accent-soft); color: var(--ink); font-weight: 500; }
+.settings-nav-btn.is-active svg { color: var(--accent); }
+.settings-nav-version { margin-left: auto; font-family: var(--font-mono); font-size: var(--text-caption2); color: var(--ink-faint); }
+
+.settings-scroll {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  padding: 26px 40px 40px;
+}
+.settings-stack { max-width: 880px; display: flex; flex-direction: column; gap: 8px; }
+.settings-section { display: none; flex-direction: column; }
+.settings-section.is-shown { display: flex; }
+.settings-section-title {
+  margin: 0 0 4px;
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+}
+.settings-section-title + .settings-card,
+.settings-section-title + .settings-card-home { margin-top: 10px; }
+.settings-card + .settings-section-title,
+.settings-note + .settings-section-title { margin-top: 30px; font-size: 12px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-faint); }
+.settings-section-sub { margin: 0 0 10px; font-size: var(--text-subhead); color: var(--ink-dim); }
+.settings-section-sub + .settings-card { margin-top: 4px; }
+/* While searching every matching section shows, with its title. */
+.settings-stack.is-searching .settings-section.is-shown { margin-bottom: 18px; }
+.settings-none { margin: 20px 0; color: var(--ink-faint); }
+
+/* The card is a run of rows separated by hairlines — no box. */
+.settings-card { background: transparent; border: 0; border-radius: 0; overflow: visible; }
+.srow { min-height: 56px; padding: 14px 0; gap: 20px; border-bottom: 1px solid var(--rule-soft); }
+.srow + .srow { box-shadow: none; }
+.settings-card > .srow:last-child, .settings-card > [id] > .srow:last-child { border-bottom: 0; }
+button.srow { border-radius: 0; }
+button.srow:hover { background: transparent; }
+button.srow:hover .srow-label { color: var(--accent); }
+button.srow:active { background: transparent; }
+.srow-label { font-weight: 500; }
+.srow-sub { margin-top: 2px; }
+.srow-sub:empty { display: none; }
+.srow-control { flex: none; width: 280px; display: flex; gap: 8px; align-items: center; }
+.srow-control--wide { width: 420px; }
+.srow-control > select, .srow-control > .pretty-select-trigger { flex: 1; min-width: 0; }
+.srow-control > .btn-ghost { flex: none; }
+.srow-slider { flex: none; width: 260px; margin-left: 0; }
+.srow .switch { margin-left: 0; }
+.srow .radio-row { margin-left: 0; }
+.srow--stacked { display: flex; flex-direction: column; align-items: stretch; gap: 10px; }
+.srow--stacked .srow-label { margin-bottom: 0; font-size: var(--text-callout); }
+.srow--stacked .radio-row { width: auto; align-self: flex-start; }
+.srow--stacked textarea { max-width: 620px; }
+.srow--stacked .meter-row { max-width: 620px; }
+.srow--stacked input[type="range"] { max-width: 620px; }
+/* Keys: the row's status sits before the chevron. */
+.srow-status { margin-left: auto; }
+.srow-status + .srow-secret { display: none; }
+.srow-chevron { color: var(--ink-faint); }
+.settings-note { margin: 10px 0 0; }
+
+/* Drill-in pages keep their card look but lose the box as well. */
+.settings-page .settings-card > .field,
+.settings-page .settings-card > [id] > .field { padding-left: 0; padding-right: 0; }
+.settings-back { color: var(--ink-dim); margin-bottom: 10px; }
+.settings-back:hover { background: var(--fill); color: var(--ink); }
+
+/* ============================================================
+   Sheets — the voice picker and the profile editor slide in
+   ============================================================ */
+.sheet-overlay { place-items: stretch end; padding: 0; justify-items: end; }
+.sheet {
+  width: min(600px, 100%);
+  height: 100%;
+  max-height: none;
+  border-radius: 0;
+  border: 0;
+  border-left: 1px solid var(--rule);
+  box-shadow: -24px 0 60px rgba(0, 0, 0, 0.45);
+  animation: sheet-slide 240ms var(--ease);
+}
+@keyframes sheet-slide {
+  from { opacity: 0; transform: translateX(24px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes sheet-in {
+  from { opacity: 0; transform: translateY(10px) scale(0.985); }
+  to   { opacity: 1; transform: none; }
+}
+.modal.sheet { padding: 22px 24px; overflow-y: auto; }
+.modal-title { margin: 0 0 6px; font-size: 18px; font-weight: 600; color: var(--ink); }
+.voice-dialog-for { font-weight: 400; color: var(--ink-faint); font-size: var(--text-footnote); margin-left: 6px; }
+.voice-dialog-for:empty { display: none; }
+.voice-dialog.sheet { padding-top: 6px; }
+.voice-dialog.sheet .voice-list { border: 0; margin: 0 14px; }
+.voice-dialog.sheet .voice-search-row { grid-template-columns: minmax(0, 1fr) 150px auto; padding: 0 22px 10px; }
+.voice-dialog.sheet .voice-filters { padding: 0 22px 10px; }
+/* Engine groups: which ones cost money and which don't. */
+.voice-group { display: flex; align-items: center; gap: 8px; padding: 14px 12px 6px; }
+.voice-group-note { margin-left: auto; font-weight: 400; text-transform: none; letter-spacing: 0; }
+.voice-group-note.is-free { color: var(--signal); }
+.voice-row { padding-right: 8px; }
+.voice-row.is-current { background: var(--accent-soft); border-radius: 10px; }
+.voice-pick { grid-template-columns: minmax(0, 1fr) minmax(0, 150px) 70px; padding: 11px 6px 11px 8px; }
+.voice-cost { font-family: var(--font-mono); font-size: var(--text-caption); color: var(--ink-faint); white-space: nowrap; }
+.voice-cost.is-free { color: var(--signal); }
+.voice-recent {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 0 22px 10px;
+}
+.voice-recent:empty { display: none; }
+.voice-recent .chip { max-width: 200px; }
+.voice-recent .chip.is-current { border-color: var(--accent-line); background: var(--accent-soft); color: var(--ink); }
+
+/* ============================================================
+   Narrower screens
+   ============================================================
+   The listening drawer floats over the chat below 1180px; the settings
+   list becomes a row of tabs below 900px; below 760px the rail is a bar
+   along the bottom, the top bar tightens, and the chips scroll sideways. */
+
+@media (max-width: 1179px) {
+  .listen-panel {
+    position: fixed;
+    top: var(--topbar-h);
+    right: 0;
+    bottom: 0;
+    z-index: 40;
+    width: min(var(--drawer-w), 100vw);
+    box-shadow: var(--shadow-lg);
+  }
+}
+
+@media (max-width: 900px) {
+  .settings-body { flex-direction: column; }
+  .settings-nav {
+    flex-direction: row;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    width: auto;
+    padding: 10px 12px;
+    border-right: 0;
+    border-bottom: 1px solid var(--rule-soft);
+  }
+  .settings-nav .rail-spacer { display: none; }
+  .settings-nav-btn { flex: none; height: 34px; }
+  .settings-nav-version { display: none; }
+  .settings-scroll { padding: 20px 20px 36px; }
+  .settings-search { width: 200px; }
+  .srow { flex-wrap: wrap; }
+  .srow:has(> .switch), .srow:has(> .srow-chevron) { flex-wrap: nowrap; }
+  .srow-control, .srow-control--wide, .srow-slider { width: 100%; }
+  .srow-main--flex { flex: 1 1 100%; min-width: 0; }
+  .srow:has(> .switch) .srow-main--flex, .srow:has(> .srow-chevron) .srow-main--flex { flex: 1 1 0; }
+  .srow-status { flex: none; }
+  .srow-sub { overflow-wrap: anywhere; }
+}
+
+@media (max-width: 760px) {
+  html, body { height: auto; min-height: 100%; }
+  .app { flex-direction: column-reverse; min-height: 100dvh; height: 100dvh; }
+  .rail {
+    flex-direction: row;
+    justify-content: space-around;
+    width: auto;
+    height: 64px;
+    padding: 6px 10px calc(6px + env(safe-area-inset-bottom));
+    border-right: 0;
+    border-top: 1px solid var(--rule-soft);
+    background: var(--surface);
+  }
+  .rail-brand { display: none; }
+  .rail-spacer { display: none; }
+  .rail-btn { width: 48px; height: 44px; }
+  .topbar { height: 52px; padding: 0 12px 0 14px; }
+  .status-pill-text { display: none; }
+  .transcript-body { padding: 16px 14px 10px; }
+  .composer-wrap { padding: 4px 12px 10px; }
+  .session-strip { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin-bottom: 8px; }
+  .session-strip::-webkit-scrollbar { display: none; }
+  .session-strip > * { flex: none; }
+  .chip { flex: none; }
+  .chip.voice-trigger { max-width: 180px; }
+  .chip.voice-trigger .voice-trigger-tags { display: none; }
+  .composer { padding-left: 12px; min-height: 52px; }
+  .composer-sep { display: none; }
+  .listen-panel { top: 52px; bottom: 64px; width: 100vw; }
+  .sheet { width: 100%; }
+  .popover { width: calc(100vw - 48px); }
+  .status-pop { width: calc(100vw - 48px); }
+  .settings-head { padding: 0 12px 0 16px; }
+  .settings-search { width: 150px; }
+  .profile-actions .icon-btn:disabled { display: none; }
+}

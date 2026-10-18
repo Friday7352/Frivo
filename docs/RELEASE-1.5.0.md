@@ -68,3 +68,17 @@ Frivo can now speak without ElevenLabs. Pick a free voice in the Voice list and 
 - With a free voice selected, replies need no ElevenLabs key and use no credits. The reply-length card says "free with this voice" instead of quoting credits, and the line under each reply says **free voice**.
 - **Speaking speed** works with every engine. Hovering a reply's time shows which engine spoke it.
 - Setup installs the free voices automatically. If they can't be installed, setup still finishes: Frivo runs normally, ElevenLabs and Windows voices still work, and Settings says why Kokoro isn't available. Setup also installs the Microsoft Visual C++ runtime Kokoro needs if the PC doesn't already have it. Kokoro needs Python 3.10–3.13, which is what setup installs by default.
+
+## A cleaner interface
+
+The whole page has been redone. Everything still does what it did; it's laid out so the conversation gets the room and the controls are where you reach for them. Red is still the colour of the app.
+
+- **One column.** The conversation has the whole width. The old left sidebar is gone; what it held is now a row of chips above the message box: the **voice**, the **language**, the **response style**, the **reply length** and the **volume**. Click a chip to change it.
+- **A rail on the left** with four buttons: Chat, Listening, Voices and Settings. The one you're on is lit. The theme switch is at the bottom of the rail.
+- **Top bar:** the profile (with New / Edit / Delete beside it), one **status pill** that opens the service chips and your ElevenLabs balance, and Clear chat. The update chip appears here when a new version is out.
+- **The message box is one row:** type, then Auto / Speak / Chatbox as small icons that light up red when on, the mic, and Send. "Ready." no longer shows as a status line; the line only appears when it has something to say.
+- **Conversation:** your messages have no avatar; a run of replies shows the speaker once; the words / credits / time line shows when you hover a reply.
+- **Listening is a drawer** that slides in beside the chat from the rail (or its Listen button). It's closed until you open it. While it runs with the drawer closed, the rail shows a red dot.
+- **The voice picker is a sheet** from the right. Voices are grouped **Free · on this PC**, **Free · built into Windows** and **ElevenLabs**, each with a *free* or *credits* tag, with the voices you use most as chips at the top. It says whose voice you're choosing. The profile editor opens the same way.
+- **Settings** is one page at a time: Accounts & keys, Voices, Replies, Dictation, Listening, VRChat, Providers, Updates. Every row is a label, a one-line hint and its control. **Settings save themselves** as you change them and say *Saved*; only the API keys keep a Save button, which appears once you've typed one. A **search box** finds any setting by its words, across every page.
+- **On a phone** the rail becomes a bar along the bottom, the chips scroll sideways, and the message box stays pinned.

@@ -82,6 +82,9 @@ function check(name, cond, got) {
   p.on('pageerror', e => errors.push(String(e)));
   await p.goto('http://127.0.0.1:5099/', { waitUntil: 'networkidle' });
   await p.waitForTimeout(1200);
+  // CHANGED (2.0): the listening drawer is closed until opened from the rail.
+  await p.click('#listenToggle');
+  await p.waitForTimeout(400);
 
   // Build three entries through the app's own code path.
   await p.evaluate(() => {

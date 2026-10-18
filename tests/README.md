@@ -421,3 +421,7 @@ To also run one real Kokoro reply end to end, set `FRIVO_KOKORO_DIR` to a folder
 - installs `requirements-voices.txt` once per version of that file, retries after a failure, and never fails setup because of it;
 - installs the Visual C++ runtime only when it's missing, treating exit codes 0, 1638 and 3010 as success;
 - wires this into both install and update.
+
+## test-ui-shell.py (2.0 interface)
+
+`python3 tests/test-ui-shell.py` drives the redesigned page in a real browser: the rail (Chat / Listening / Voices / Settings, active state, the listening dot), the drawer, the chips and their popovers, the status pill, the voice sheet's engine groups and cost tags, Settings' one-section-at-a-time navigation and search, autosave with the *Saved* mark, the Save key button, and the light theme. Two older tests were updated for the new layout: `test-listen-click.py` opens the drawer first, and `test-update-ui.py` opens Settings from the rail and the Updates page.

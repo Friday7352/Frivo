@@ -144,7 +144,7 @@ const SHOTS = process.argv[2];
   await wait(800);
 
   console.log('--- the chip ---');
-  check('a newer release puts a chip in the sidebar', await visible('#updateChip'));
+  check('a newer release puts a chip in the top bar', await visible('#updateChip'));
   check('naming the version', (await text('#updateChipText')).includes('1.5.0'), await text('#updateChipText'));
   await p.screenshot({ path: SHOTS + '/update-chip.png', clip: { x: 0, y: 380, width: 360, height: 480 } });
 
@@ -201,8 +201,9 @@ const SHOTS = process.argv[2];
   check('and the chip is gone: 1.5.0 is the newest', !(await visible('#updateChip')));
 
   console.log('--- Settings > About ---');
-  await p.click('#moreBtn'); await p.click('#settingsToggle'); await wait(300);
-  await p.evaluate(() => document.getElementById('aboutSection').scrollIntoView());
+  await p.click('#settingsToggle'); await wait(300);
+  // CHANGED (2.0): Settings shows one section at a time; About is under Updates.
+  await p.click('[data-settings-section="about"]'); await wait(300);
   await wait(200);
   check('the version is the new one', (await text('#aboutVersionValue')) === '1.5.0', await text('#aboutVersionValue'));
   check('"Check for updates" reads up to date', (await text('#checkUpdatesValue')) === 'Up to date', await text('#checkUpdatesValue'));
@@ -232,7 +233,7 @@ const SHOTS = process.argv[2];
   console.log('--- the switch, and skipping ---');
   await p.evaluate(() => fetch('/_test/version/1.4.0'));
   await p.reload({ waitUntil: 'networkidle' }); await wait(600);
-  await p.click('#moreBtn'); await p.click('#settingsToggle'); await wait(200);
+  await p.click('#settingsToggle'); await wait(200);
   await p.evaluate(() => { const t = document.getElementById('updateAutoToggle'); t.checked = false; t.dispatchEvent(new Event('change', { bubbles: true })); });
   await wait(500);
   await p.reload({ waitUntil: 'networkidle' }); await wait(600);
