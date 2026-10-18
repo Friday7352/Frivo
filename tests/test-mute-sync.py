@@ -197,6 +197,15 @@ function check(name, cond, got) {
   await wait(2000);
   check('losing the mic state does not stop what is running', await recording());
 
+  // NEW (1.5.0): opening Frivo while already unmuted in VRChat must not
+  // switch dictation on. Only a change of mute after that does.
+  console.log('\n--- opening the page while unmuted ---');
+  await mute('off');
+  await p.reload({ waitUntil: 'networkidle' }); await wait(2500);
+  check('dictation is off when the page opens, even unmuted', !(await recording()));
+  await mute('on'); await wait(1500); await mute('off'); await wait(2000);
+  check('unmuting after that still starts it', await recording());
+
   console.log('\nerrors: ' + (errors.length ? JSON.stringify(errors) : 'none'));
   await b.close();
   if (fails.length) { console.log(`\n${fails.length} failed: ${fails.join(', ')}`); process.exit(1); }

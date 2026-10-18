@@ -108,3 +108,10 @@ Every spoken reply was saved in Frivo's audio folder and never removed. Replies 
 
 - Voice previews are kept, because there's one per voice and they're reused.
 - To keep replies longer, set `audio_keep_days` in `config.json` (`0` keeps them all).
+
+## Dictation stays off when Frivo opens
+
+With **Follow VRChat mute** on, opening Frivo while your VRChat mic was already live used to switch dictation on by itself. Now dictation is always off when the page opens. Mute and unmute in VRChat (or press the mic button) to start it.
+
+- The same goes for FrivOSC reconnecting: it doesn't start dictation on its own.
+- Turning **Follow VRChat mute** on while you're unmuted still starts dictation straight away, as the switch says.

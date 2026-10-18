@@ -2049,6 +2049,12 @@ let unmuteOnSendEnabled = false;
 let typingIndicatorEnabled = true;   // NEW (typing)
 let lastSyncedMute = null;
 let frivoscMuted = null;
+// NEW (1.5.0): dictation never starts by itself when the page loads. The
+// first mute state VRChat reports after a load (or after FrivOSC
+// reconnects) is only noted, so being unmuted at that moment isn't taken as
+// "you just unmuted". Unmuting after that still starts dictation, and
+// switching Follow VRChat mute on still acts at once (that switch clears this).
+let muteSyncNeedsBaseline = true;
 
 function noteManualDictationOverride() {
   // The current mute state has now been "handled" by the person, so the
@@ -2061,12 +2067,22 @@ function applyMuteSync() {
     // Nothing is driving dictation, so forget where we were. Turning the
     // switch back on should act on the next change, not on a stale one.
     lastSyncedMute = null;
+    // NEW (1.5.0): and when FrivOSC comes back, take its first report as
+    // where things stand rather than as a change.
+    if (!frivoscConnected) muteSyncNeedsBaseline = true;
     return;
   }
   // Before VRChat has said anything, muted is null — genuinely unknown, and
   // not the same as unmuted. Acting on it would start dictation for a mic
   // that may well be muted.
   if (frivoscMuted === null) return;
+  // NEW (1.5.0): the first state after a page load is a starting point, not
+  // a change. This is what stopped dictation switching itself on at load.
+  if (muteSyncNeedsBaseline) {
+    muteSyncNeedsBaseline = false;
+    lastSyncedMute = frivoscMuted;
+    return;
+  }
   if (frivoscMuted === lastSyncedMute) return;
 
   lastSyncedMute = frivoscMuted;
@@ -2220,6 +2236,7 @@ if (oscMuteSyncToggle) {
     // do nothing at all until the next mute/unmute cycle, which reads as
     // broken.
     lastSyncedMute = null;
+    muteSyncNeedsBaseline = false;   // NEW (1.5.0): turning it on acts now, as the switch says
     saveOscSwitches({ osc_mute_sync: oscMuteSyncToggle.checked }, oscMuteSyncToggle);
   });
 }
