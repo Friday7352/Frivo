@@ -957,16 +957,67 @@
                     </span>
                     <div class="radio-row" id="transcriptionProviderRadios" role="radiogroup" aria-label="Transcription provider"></div>
                   </div>
-                  <button class="srow" type="button" data-settings-page="ollama">
-                    <span class="srow-main srow-main--flex"><span class="srow-label">Ollama</span></span>
-                    <span class="srow-value" id="settingsOllamaValue">Not set</span>
-                    <span class="srow-chevron"><svg class="icon-16"><use href="#i-chevron"/></svg></span>
-                  </button>
-                  <button class="srow" type="button" data-settings-page="whisper">
-                    <span class="srow-main srow-main--flex"><span class="srow-label">Evora</span></span>
-                    <span class="srow-value" id="settingsWhisperValue">Not set</span>
-                    <span class="srow-chevron"><svg class="icon-16"><use href="#i-chevron"/></svg></span>
-                  </button>
+                </div>
+
+                <!-- CHANGED (2.0): Evora and Ollama are set up right here,
+                     not on pages of their own. -->
+                <h3 class="settings-section-title">Evora <span class="settings-inline-value" id="settingsWhisperValue">Not set</span></h3>
+                <p class="settings-section-sub">Local transcription and speaker recognition. Install and open Evora on the machine that will process audio.</p>
+                <div class="settings-card-home" id="whisperSettingsHome"></div>
+                <div class="settings-card" id="whisperSettings">
+                  <div class="srow">
+                    <label class="srow-main srow-main--flex" for="whisperUrl">
+                      <span class="srow-label">Evora address</span>
+                      <span class="srow-sub" id="whisperTestNote"></span>
+                    </label>
+                    <span class="srow-control srow-control--wide">
+                      <input type="text" id="whisperUrl" placeholder="http://192.168.1.x:9000" autocomplete="off">
+                      <button id="testWhisperBtn" class="btn-ghost btn-sm" type="button">Test</button>
+                    </span>
+                  </div>
+                  <div class="srow">
+                    <label class="srow-main srow-main--flex" for="whisperModelSelect">
+                      <span class="srow-label">Evora model</span>
+                      <span class="srow-sub" id="whisperModelNote">Switches live, no restart. Test the connection first to load the list.</span>
+                    </label>
+                    <span class="srow-control srow-control--wide">
+                      <select id="whisperModelSelect"></select>
+                      <button id="applyWhisperModelBtn" class="btn-ghost btn-sm" type="button">Apply</button>
+                    </span>
+                  </div>
+                </div>
+
+                <h3 class="settings-section-title">Ollama <span class="settings-inline-value" id="settingsOllamaValue">Not set</span></h3>
+                <p class="settings-section-sub">A local chat model, for replies and translation without OpenAI.</p>
+                <div class="settings-card" id="ollamaSettings">
+                  <div class="srow">
+                    <label class="srow-main srow-main--flex" for="ollamaUrl">
+                      <span class="srow-label">Ollama address</span>
+                      <span class="srow-sub" id="ollamaTestNote"></span>
+                    </label>
+                    <span class="srow-control srow-control--wide">
+                      <input type="text" id="ollamaUrl" placeholder="http://192.168.1.x:11434" autocomplete="off">
+                      <button id="testOllamaBtn" class="btn-ghost btn-sm" type="button">Test</button>
+                    </span>
+                  </div>
+                  <div class="srow">
+                    <label class="srow-main srow-main--flex" for="ollamaModel">
+                      <span class="srow-label">Model</span>
+                      <span class="srow-sub">e.g. llama3.1:8b</span>
+                    </label>
+                    <span class="srow-control srow-control--wide">
+                      <input type="text" id="ollamaModel" placeholder="llama3.1:8b" autocomplete="off">
+                    </span>
+                  </div>
+                  <div class="srow">
+                    <label class="srow-main srow-main--flex" for="ollamaTranslationModel">
+                      <span class="srow-label">Translation model</span>
+                      <span class="srow-sub">Blank to reuse the model above.</span>
+                    </label>
+                    <span class="srow-control srow-control--wide">
+                      <input type="text" id="ollamaTranslationModel" placeholder="(same as above)" autocomplete="off">
+                    </span>
+                  </div>
                 </div>
               </section>
 
@@ -1113,44 +1164,6 @@
                 <div class="model-list" id="translationModelList" role="radiogroup" aria-label="Translation model"></div>
                 <input type="text" id="translationModelCustom" class="model-custom-input is-hidden" placeholder="Custom model ID, e.g. gpt-4.1-nano">
                 <p class="model-estimate" id="translationModelEstimate"></p>
-              </div>
-            </div>
-          </div>
-
-          <div class="settings-page is-hidden" data-page="ollama" data-title="Ollama">
-            <div class="settings-card" id="ollamaSettings">
-              <div class="field">
-                <label for="ollamaUrl">Ollama address</label>
-                <div class="row">
-                  <input type="text" id="ollamaUrl" placeholder="http://192.168.1.x:11434" autocomplete="off">
-                  <button id="testOllamaBtn" class="btn-ghost btn-sm" type="button">Test</button>
-                </div>
-                <label for="ollamaModel" class="sublabel">Model</label>
-                <input type="text" id="ollamaModel" placeholder="llama3.1:8b" autocomplete="off">
-                <label for="ollamaTranslationModel" class="sublabel">Translation model <span class="field-hint">— blank to reuse the model above</span></label>
-                <input type="text" id="ollamaTranslationModel" placeholder="(same as above)" autocomplete="off">
-                <p class="field-note" id="ollamaTestNote"></p>
-              </div>
-            </div>
-          </div>
-
-          <div class="settings-page is-hidden" data-page="whisper" data-title="Evora">
-            <div class="settings-card-home" id="whisperSettingsHome"></div>
-            <div class="settings-card" id="whisperSettings">
-              <div class="field">
-                <label for="whisperUrl">Evora address</label>
-                <div class="row">
-                  <input type="text" id="whisperUrl" placeholder="http://192.168.1.x:9000" autocomplete="off">
-                  <button id="testWhisperBtn" class="btn-ghost btn-sm" type="button">Test</button>
-                </div>
-                <p class="field-note" id="whisperTestNote">Install and open Evora on the machine that will process audio.</p>
-
-                <label for="whisperModelSelect" class="sublabel">Evora model <span class="field-hint">— switches live, no restart</span></label>
-                <div class="row">
-                  <select id="whisperModelSelect"></select>
-                  <button id="applyWhisperModelBtn" class="btn-ghost btn-sm" type="button">Apply</button>
-                </div>
-                <p class="field-note" id="whisperModelNote">Test the connection first to load the model list.</p>
               </div>
             </div>
           </div>

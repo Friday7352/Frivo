@@ -281,33 +281,6 @@ const serviceStatus = $("serviceStatus");
 const LOCAL_STATUS_POLL_MS = 30000;
 let localStatusTimer = null;
 
-// Each service's settings live in exactly one node in the document. The
-// Settings page and the status chip's panel both host that same node by
-// moving it, never by copying it — two copies would mean duplicate element
-// ids and two values that quietly drift apart. `home` is the empty marker
-// left behind in Settings, so it can always be put back.
-const SERVICE_SETTINGS = {
-  whisper: { card: "whisperSettings", home: "whisperSettingsHome" },
-  frivosc: { card: "oscSettings", home: "oscSettingsHome" },
-};
-
-function claimServiceSettings(id, container) {
-  const spec = SERVICE_SETTINGS[id];
-  if (!spec) return;
-  const card = document.getElementById(spec.card);
-  if (card && card.parentElement !== container) container.append(card);
-}
-
-function releaseServiceSettings(id) {
-  const spec = SERVICE_SETTINGS[id];
-  if (!spec) return;
-  const card = document.getElementById(spec.card);
-  const home = document.getElementById(spec.home);
-  if (card && home && card.parentElement !== home.parentElement) {
-    home.after(card);
-  }
-}
-
 function serviceChipTitle(service) {
   const lines = [`${service.name} at ${service.url}`, service.message];
   // FrivOSC has nothing to fall back to — if it is down, VRChat just gets
@@ -319,99 +292,83 @@ function serviceChipTitle(service) {
   return lines.join("\n");
 }
 
-// Survives a re-render, so a panel you opened does not shut itself the next
-// time the poll comes round.
-const expandedServices = new Set();
 let renderedServiceIds = "";
+
+// CHANGED (2.0): a service is a row in the status popover — dot, name,
+// state, one line of detail — with a Settings link that opens the page
+// where it is set up. The chips used to expand and pull the settings card
+// into themselves; in a popover that read as a second, cramped Settings.
+const SERVICE_SETTINGS_TARGET = {
+  whisper: { section: "providers" },
+  ollama: { section: "providers" },
+  frivosc: { section: "vrchat" },
+};
 
 function buildServiceBlock(service) {
   const block = document.createElement("div");
   block.className = "service-block";
   block.dataset.serviceId = service.id;
 
-  const chip = document.createElement("button");
-  chip.type = "button";
+  const chip = document.createElement("div");
   chip.className = "service-status";
-  chip.setAttribute("aria-expanded", "false");
 
   const name = document.createElement("span");
   name.className = "service-status-name";
-  chip.append(name);
+  const state = document.createElement("span");
+  state.className = "service-status-state";
+  const detail = document.createElement("span");
+  detail.className = "service-status-detail";
+  const link = document.createElement("button");
+  link.type = "button";
+  link.className = "service-status-link";
+  link.textContent = "Settings";
+  link.setAttribute("aria-label", `${service.name} settings`);
 
-  const chevron = document.createElement("span");
-  chevron.className = "service-status-chevron";
-  chevron.innerHTML = '<svg class="icon-16" aria-hidden="true"><use href="#i-chevron"/></svg>';
-  chip.append(chevron);
-
-  const panel = document.createElement("div");
-  panel.className = "service-panel is-hidden";
-
-  block.append(chip, panel);
+  const head = document.createElement("span");
+  head.className = "service-status-head";
+  head.append(name, state);
+  chip.append(head, detail, link);
+  block.append(chip);
   return block;
 }
 
 function paintServiceBlock(block, service) {
   const chip = block.querySelector(".service-status");
-  const open = expandedServices.has(service.id);
   chip.className = "service-status " + (service.ok ? "is-ok" : "is-down");
-  chip.setAttribute("aria-expanded", open ? "true" : "false");
   chip.title = serviceChipTitle(service);
   block.querySelector(".service-status-name").textContent = service.name;
-  block.querySelector(".service-panel").classList.toggle("is-hidden", !open);
+  block.querySelector(".service-status-state").textContent = service.ok ? "· connected" : "· unreachable";
+  const detail = block.querySelector(".service-status-detail");
+  detail.textContent = service.ok ? (service.url || "") : (service.message || "");
+  if (!service.ok && service.fallback !== false) detail.textContent += " · falling back to OpenAI";
+}
+
+// What the pill says when something is down: the first service that is.
+function paintStatusPill(services) {
+  const pill = $("statusPillBtn");
+  if (!pill) return;
+  const down = services.filter((s) => !s.ok);
+  pill.classList.toggle("is-down", down.length > 0);
+  const text = $("statusPillText");
+  if (text && down.length) text.textContent = `${down[0].name} offline`;
+  else if (text && readyLamp.classList.contains("is-lit")) text.textContent = "Ready";
 }
 
 function renderServiceChips(services) {
-  // Rebuilt only when the set of services changes. Repainting in place
-  // matters because an open panel is holding the live settings card, and
-  // replaceChildren() would throw it away mid-edit.
   const signature = services.map((s) => s.id).join(",");
   if (signature !== renderedServiceIds) {
-    Array.from(serviceStatus.children).forEach((block) => {
-      releaseServiceSettings(block.dataset.serviceId);
-    });
     serviceStatus.replaceChildren(...services.map(buildServiceBlock));
     renderedServiceIds = signature;
   }
-
   services.forEach((service, index) => {
     const block = serviceStatus.children[index];
-    if (!block) return;
-    paintServiceBlock(block, service);
-    if (expandedServices.has(service.id)) {
-      claimServiceSettings(service.id, block.querySelector(".service-panel"));
-    }
+    if (block) paintServiceBlock(block, service);
   });
+  paintStatusPill(services);
 }
 
-function toggleServicePanel(id) {
-  const block = serviceStatus.querySelector(`.service-block[data-service-id="${id}"]`);
-  if (!block) return;
-  const panel = block.querySelector(".service-panel");
-  const chip = block.querySelector(".service-status");
-
-  if (expandedServices.has(id)) {
-    expandedServices.delete(id);
-    releaseServiceSettings(id);
-    panel.classList.add("is-hidden");
-    chip.setAttribute("aria-expanded", "false");
-    return;
-  }
-
-  // One at a time. Two open panels in a narrow sidebar means scrolling to
-  // find the one you wanted.
-  Array.from(expandedServices).forEach((other) => {
-    if (other !== id) toggleServicePanel(other);
-  });
-
-  expandedServices.add(id);
-  claimServiceSettings(id, panel);
-  panel.classList.remove("is-hidden");
-  chip.setAttribute("aria-expanded", "true");
-}
-
-function collapseAllServicePanels() {
-  Array.from(expandedServices).forEach((id) => toggleServicePanel(id));
-}
+// Kept for the callers that still ask; nothing expands any more.
+function collapseAllServicePanels() {}
 
 async function loadLocalStatus() {
   if (!serviceStatus) return;
@@ -420,13 +377,10 @@ async function loadLocalStatus() {
     const data = await res.json();
 
     if (!res.ok || data.none_selected) {
-      Array.from(serviceStatus.children).forEach((block) => {
-        releaseServiceSettings(block.dataset.serviceId);
-      });
-      expandedServices.clear();
       serviceStatus.replaceChildren();
       renderedServiceIds = "";
       serviceStatus.classList.add("is-hidden");
+      paintStatusPill([]);
       return;
     }
 
@@ -450,11 +404,16 @@ function startLocalStatusPolling() {
 
 if (serviceStatus) {
   // Delegated, because the blocks are rebuilt when the service set changes.
+  // CHANGED (2.0): a row opens that service's settings.
   serviceStatus.addEventListener("click", (event) => {
-    const chip = event.target.closest(".service-status");
-    if (!chip) return;
-    const block = chip.closest(".service-block");
-    if (block) toggleServicePanel(block.dataset.serviceId);
+    const block = event.target.closest(".service-block");
+    if (!block) return;
+    const target = SERVICE_SETTINGS_TARGET[block.dataset.serviceId];
+    if (!target) return;
+    if (typeof closeAllPopovers === "function") closeAllPopovers();
+    setSettingsOpen(true);
+    if (typeof showSettingsSection === "function") showSettingsSection(target.section);
+    if (target.page && typeof openSettingsPage === "function") openSettingsPage(target.page);
   });
 }
 
@@ -7478,6 +7437,7 @@ window.addEventListener("pagehide", () => {
     ["statusPillBtn", "statusPop"],
   ].map(([b, p]) => ({ btn: $(b), pop: $(p) })).filter((x) => x.btn && x.pop);
 
+  window.closeAllPopovers = () => closePopovers(null);
   function closePopovers(except) {
     popovers.forEach(({ btn, pop }) => {
       if (pop === except) return;
@@ -7578,7 +7538,7 @@ window.addEventListener("pagehide", () => {
   const pageToSection = {
     openai: "accounts", eleven: "accounts", "reply-length": "replies", model: "replies",
     "max-tokens": "replies", "translation-provider": "listening", "translation-model": "listening",
-    ollama: "providers", whisper: "providers", "earlier-versions": "about",
+    "earlier-versions": "about",
   };
   if (stack) {
     stack.addEventListener("click", (e) => {

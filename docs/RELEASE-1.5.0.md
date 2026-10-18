@@ -75,7 +75,8 @@ The whole page has been redone. Everything still does what it did; it's laid out
 
 - **One column.** The conversation has the whole width. The old left sidebar is gone; what it held is now a row of chips above the message box: the **voice**, the **language**, the **response style**, the **reply length** and the **volume**. Click a chip to change it.
 - **A rail on the left** with four buttons: Chat, Listening, Voices and Settings. The one you're on is lit. The theme switch is at the bottom of the rail.
-- **Top bar:** the profile (with New / Edit / Delete beside it), one **status pill** that opens the service chips and your ElevenLabs balance, and Clear chat. The update chip appears here when a new version is out.
+- **Top bar:** the profile (with New / Edit / Delete beside it), one **status pill**, and Clear chat. The pill turns orange and names the service when Evora, Ollama or FrivOSC is unreachable; click it for each service's state, what's wrong, a Settings button that opens its page, and your ElevenLabs balance. The update chip appears here when a new version is out.
+- **Evora and Ollama are set up on the Providers page itself** (address, Test, model), and FrivOSC on the VRChat page — no more pages inside pages, and nothing expands inside a chip.
 - **The message box is one row:** type, then Auto / Speak / Chatbox as small icons that light up red when on, the mic, and Send. "Ready." no longer shows as a status line; the line only appears when it has something to say.
 - **Conversation:** your messages have no avatar; a run of replies shows the speaker once; the words / credits / time line shows when you hover a reply.
 - **Listening is a drawer** that slides in beside the chat from the rail (or its Listen button). It's closed until you open it. While it runs with the drawer closed, the rail shows a red dot.

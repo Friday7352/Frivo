@@ -2232,7 +2232,67 @@ html[data-theme="light"] .rail-theme .rail-sun { display: block; }
 .status-pill-version.is-unknown { display: none; }
 .popover.status-pop { right: 0; left: auto; width: 340px; }
 .status-pop .service-status-list { margin-bottom: 10px; }
-.status-pop .credit-card { background: var(--fill); border-color: transparent; }
+/* CHANGED (2.0): services are rows — dot, name · state, one line of detail,
+   and a Settings button that opens the page where the service is set up. */
+.status-pop .service-status-list { display: flex; flex-direction: column; margin: 0 0 10px; }
+.status-pop .service-status {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-areas: "dot head link" "dot detail link";
+  align-items: center;
+  column-gap: 10px;
+  row-gap: 1px;
+  padding: 9px 6px;
+  border: 0;
+  border-bottom: 1px solid var(--rule-soft);
+  border-radius: 0;
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+}
+.status-pop .service-status::before {
+  grid-area: dot;
+  align-self: start;
+  margin-top: 6px;
+  width: 8px;
+  height: 8px;
+  opacity: 1;
+}
+.status-pop .service-status.is-ok, .status-pop .service-status.is-down { color: var(--ink); background: transparent; }
+.status-pop .service-status.is-ok::before { background: var(--signal); box-shadow: 0 0 0 3px var(--signal-soft); }
+.status-pop .service-status.is-down::before { background: var(--alert); box-shadow: 0 0 0 3px var(--alert-soft); }
+.status-pop .service-status-name,
+.status-pop .service-status-state { grid-area: head; font-size: var(--text-subhead); }
+.status-pop .service-status-name { font-weight: 500; justify-self: start; }
+.status-pop .service-status-state { justify-self: start; color: var(--ink-dim); }
+/* Name and state share a cell: the state is pushed right of the name. */
+.status-pop .service-status-head { grid-area: head; display: flex; gap: 6px; align-items: baseline; min-width: 0; }
+.status-pop .service-status-detail {
+  grid-area: detail;
+  min-width: 0;
+  font-size: var(--text-caption);
+  color: var(--ink-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.status-pop .service-status.is-down .service-status-detail { color: var(--alert); white-space: normal; }
+.status-pop .service-status-link {
+  grid-area: link;
+  padding: 4px 9px;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink-dim);
+  font: inherit;
+  font-size: var(--text-caption);
+  cursor: pointer;
+}
+.status-pop .service-status:hover .service-status-link { background: var(--fill); color: var(--ink); }
+.status-pill.is-down .lamp { background: var(--alert); box-shadow: 0 0 0 3px var(--alert-soft); }
+.status-pop .credit-block { width: 100%; }
+.status-pop .credit-card { width: 100%; display: flex; flex-wrap: nowrap; padding: 10px 12px; background: var(--fill); border-color: transparent; }
+.status-pop .credit-card .readout { margin-left: auto; white-space: nowrap; }
 .status-pop .credit-card:hover { background: var(--fill-strong); }
 .status-pop .credit-panel { background: var(--fill); border-color: transparent; }
 .status-pop .service-status { background: var(--fill); border-color: transparent; }
@@ -2696,6 +2756,7 @@ html[data-theme="light"] .rail-theme .rail-sun { display: block; }
 .settings-note + .settings-section-title { margin-top: 30px; font-size: 12px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-faint); }
 .settings-section-sub { margin: 0 0 10px; font-size: var(--text-subhead); color: var(--ink-dim); }
 .settings-section-sub + .settings-card { margin-top: 4px; }
+.settings-inline-value { margin-left: 8px; font-size: var(--text-caption); font-weight: 400; letter-spacing: 0; text-transform: none; color: var(--ink-faint); }
 /* While searching every matching section shows, with its title. */
 .settings-stack.is-searching .settings-section.is-shown { margin-bottom: 18px; }
 .settings-none { margin: 20px 0; color: var(--ink-faint); }
