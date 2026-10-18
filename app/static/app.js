@@ -2285,6 +2285,11 @@ function sendToChatbox(text, { speaking = false, keepTyping = false } = {}) {
 // Each page goes a little early on purpose. FrivOSC collects twice a
 // second, so a page sent right on time could show up half a second late.
 const CHATBOX_PAGE_LEAD_SECONDS = 0.4;
+// CHANGED (1.5.0): most replies now come with exact times ("at"): the
+// second the voice finishes the last word of the page before. Those only
+// need to make up for FrivOSC's half-second collection, so they go a
+// little earlier than that and land just as the word ends.
+const CHATBOX_PAGE_LEAD_EXACT_SECONDS = 0.15;
 
 function makeChatboxFollower(pages) {
   let next = 0;          // the first page not sent yet
@@ -2294,7 +2299,9 @@ function makeChatboxFollower(pages) {
   let duration = 0;
   let finished = false;
 
-  const dueAt = (i) => Math.max(0, pages[i].start * duration - CHATBOX_PAGE_LEAD_SECONDS);
+  const dueAt = (i) => (typeof pages[i].at === "number"   // CHANGED (1.5.0)
+    ? Math.max(0, pages[i].at - CHATBOX_PAGE_LEAD_EXACT_SECONDS)
+    : Math.max(0, pages[i].start * duration - CHATBOX_PAGE_LEAD_SECONDS));
   const position = () => clockOffset + (performance.now() - clockAt) / 1000;
 
   function stop() {

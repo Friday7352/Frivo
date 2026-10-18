@@ -89,11 +89,13 @@ The whole page has been redone. Everything still does what it did; it's laid out
 
 A long spoken reply used to flip through its chatbox pages every second and a half or so, far faster than the voice could say them. The last page was up while the voice was still on the first. Now each page appears as the voice gets to it.
 
-- Frivo splits the reply into pages and sends each one just before the voice reaches it. The pages are the same as before, counter included.
+- Frivo splits the reply into pages. Each page after the first appears when the voice finishes the last word of the page before it. The pages look the same as before, counter included.
+  - **ElevenLabs:** Frivo asks for the time each character is spoken along with the audio. It's the same voice and the same credits.
+  - **Kokoro and Windows voices:** Frivo speaks each page on its own and joins them, so it knows exactly where each one ends. You may hear a slightly longer pause between pages.
 - If you pause a reply, the next page waits, and when you play it again it carries on from where the voice is.
 - The typing dots stay up between pages, the same as before.
 - Replies sent without the voice (**Speak** off) still go as one message and page the way they always have.
-- When each page shows is worked out from the text, so it can be off by a second or so on a long page. It never runs more than a page ahead or behind.
+- If the exact timing isn't available (ElevenLabs refuses that request, or a free voice can't be spoken a page at a time), Frivo works the timing out from the text instead. That can be off by a second or so on a long page.
 - No new FrivOSC is needed: each page fits in one chatbox message, and FrivOSC passes those on exactly as they are.
 
 ## Old reply audio is deleted

@@ -2111,15 +2111,42 @@ def write_wav(path, samples, sample_rate):
         out.writeframes(pcm.tobytes())
 
 
-def kokoro_speak(text, voice, language, path):
+def _kokoro_options(voice, language):
+    # CHANGED (1.5.0): shared by kokoro_speak() and kokoro_speak_pages().
     lang = KOKORO_LANGS.get(language)
     if language == "English" and voice.startswith("b"):
         lang = "en-gb"
     speed = clamp_speaking_speed(CFG.get("speaking_speed", 1.0))
+    return {"voice": voice, "speed": max(0.5, min(2.0, speed)), "lang": lang}
+
+
+def kokoro_speak(text, voice, language, path):
+    options = _kokoro_options(voice, language)   # CHANGED (1.5.0)
     # One at a time: two at once would only make both slower on the CPU.
     with KOKORO_SPEAK_LOCK:
-        samples, rate = kokoro_engine().create(text, voice=voice, speed=max(0.5, min(2.0, speed)), lang=lang)
+        samples, rate = kokoro_engine().create(text, **options)
     write_wav(path, samples, rate)
+
+
+def kokoro_speak_pages(pages, voice, language, path):
+    """
+    NEW (1.5.0): speaks each chatbox page on its own and joins them into one
+    file. Returns the second each page ends, which is exactly when the voice
+    finishes that page's last word.
+    """
+    import numpy as np
+
+    options = _kokoro_options(voice, language)
+    parts, ends, total, rate = [], [], 0, None
+    with KOKORO_SPEAK_LOCK:
+        engine = kokoro_engine()
+        for page in pages:
+            samples, rate = engine.create(page, **options)
+            parts.append(samples)
+            total += len(samples)
+            ends.append(total / float(rate))
+    write_wav(path, np.concatenate(parts), rate)
+    return ends
 
 
 def windows_voices_available():
@@ -2196,6 +2223,59 @@ def windows_speak(text, name, path):
             pass
     if result.returncode != 0 or not os.path.isfile(path) or os.path.getsize(path) == 0:
         raise RuntimeError(f"The Windows voice couldn't speak: {(result.stderr or result.stdout or '').strip()[:300]}")
+
+
+def windows_speak_pages(pages, name, path):
+    """
+    NEW (1.5.0): speaks each chatbox page to its own wave file in one
+    PowerShell run, then joins them. Returns the second each page ends.
+    """
+    import wave
+
+    speed = clamp_speaking_speed(CFG.get("speaking_speed", 1.0))
+    rate = max(-10, min(10, round((speed - 1.0) * 10)))
+    stem = os.path.join(AUDIO_DIR, uuid.uuid4().hex)
+    outs = [f"{stem}-{i}.part.wav" for i in range(len(pages))]
+    job = stem + ".json"
+    with open(job, "w", encoding="utf-8") as handle:
+        json.dump({"pages": list(pages), "voice": name, "rate": rate, "outs": outs}, handle)
+    script = (
+        "$ErrorActionPreference = 'Stop';"
+        f"$job = [IO.File]::ReadAllText({_ps_literal(job)}, [Text.Encoding]::UTF8) | ConvertFrom-Json;"
+        "Add-Type -AssemblyName System.Speech;"
+        "$s = New-Object System.Speech.Synthesis.SpeechSynthesizer;"
+        "try { $s.SelectVoice([string]$job.voice); $s.Rate = [int]$job.rate;"
+        " for ($i = 0; $i -lt @($job.pages).Count; $i++) {"
+        " $s.SetOutputToWaveFile([string]@($job.outs)[$i]); $s.Speak([string]@($job.pages)[$i]) };"
+        " $s.SetOutputToNull() } finally { $s.Dispose() }"
+    )
+    try:
+        result = _run_powershell(script, timeout=180)
+        if result.returncode != 0 or not all(os.path.isfile(o) and os.path.getsize(o) for o in outs):
+            raise RuntimeError(f"The Windows voice couldn't speak: {(result.stderr or result.stdout or '').strip()[:300]}")
+        frames, ends, total, params = [], [], 0, None
+        for out_path in outs:
+            with wave.open(out_path, "rb") as part:
+                these = (part.getnchannels(), part.getsampwidth(), part.getframerate())
+                if params and these != params:
+                    raise RuntimeError("The Windows voice changed format between pages.")
+                params = these
+                count = part.getnframes()
+                frames.append(part.readframes(count))
+                total += count
+                ends.append(total / float(params[2]))
+        with wave.open(path, "wb") as joined:
+            joined.setnchannels(params[0])
+            joined.setsampwidth(params[1])
+            joined.setframerate(params[2])
+            joined.writeframes(b"".join(frames))
+        return ends
+    finally:
+        for leftover in outs + [job]:
+            try:
+                os.remove(leftover)
+            except OSError:
+                pass
 
 
 def kokoro_voice_entries():
@@ -2303,6 +2383,23 @@ def warm_free_voices():
         log_server_event(f"Free voices: warm-up failed: {e!r}")
 
 
+def _elevenlabs_payload(text):
+    """CHANGED (1.5.0): shared by get_tts_audio() and elevenlabs_tts_timed()."""
+    voice_settings = {"stability": 0.5, "similarity_boost": 0.75}
+    # Only sent when it isn't the natural pace. Older ElevenLabs models
+    # reject an unknown key outright, and there's no reason to risk that on
+    # a value that means "leave it alone".
+    speed = clamp_speaking_speed(CFG.get("speaking_speed", 1.0))
+    if abs(speed - 1.0) > 0.001:
+        voice_settings["speed"] = round(speed, 3)
+
+    return {
+        "text": text,
+        "model_id": "eleven_multilingual_v2",
+        "voice_settings": voice_settings,
+    }
+
+
 def get_tts_audio(text, voice_id, language="English"):
     # NEW (1.5.0): a free voice is spoken on this PC; everything below is
     # the ElevenLabs path, unchanged.
@@ -2315,19 +2412,7 @@ def get_tts_audio(text, voice_id, language="English"):
         "Content-Type": "application/json",
         "Accept": "audio/mpeg",
     }
-    voice_settings = {"stability": 0.5, "similarity_boost": 0.75}
-    # Only sent when it isn't the natural pace. Older ElevenLabs models
-    # reject an unknown key outright, and there's no reason to risk that on
-    # a value that means "leave it alone".
-    speed = clamp_speaking_speed(CFG.get("speaking_speed", 1.0))
-    if abs(speed - 1.0) > 0.001:
-        voice_settings["speed"] = round(speed, 3)
-
-    payload = {
-        "text": text,
-        "model_id": "eleven_multilingual_v2",
-        "voice_settings": voice_settings,
-    }
+    payload = _elevenlabs_payload(text)   # CHANGED (1.5.0)
     resp = requests.post(url, headers=headers, json=payload, timeout=60)
     if resp.status_code != 200:
         raise RuntimeError(f"ElevenLabs error {resp.status_code}: {resp.text[:300]}")
@@ -2336,6 +2421,95 @@ def get_tts_audio(text, voice_id, language="English"):
     with open(os.path.join(AUDIO_DIR, filename), "wb") as f:
         f.write(resp.content)
     return filename
+
+
+class TimedSpeechUnavailable(Exception):
+    """NEW (1.5.0): the timed request was refused, and nothing was spoken."""
+
+
+def page_ends_from_alignment(pages, alignment):
+    """
+    NEW (1.5.0): when the voice finishes each page's last character, from
+    ElevenLabs' per-character timings. Matched by counting non-space
+    characters, because the pages are re-spaced and the timings follow the
+    original text. None if the two don't line up.
+    """
+    try:
+        chars = alignment["characters"]
+        char_ends = alignment["character_end_times_seconds"]
+    except (KeyError, TypeError):
+        return None
+    times = [end for ch, end in zip(chars, char_ends) if not str(ch).isspace()]
+    counts = [sum(1 for c in page if not c.isspace()) for page in pages]
+    if not counts or sum(counts) != len(times) or 0 in counts:
+        return None
+    ends, seen = [], 0
+    for count in counts:
+        seen += count
+        ends.append(float(times[seen - 1]))
+    return ends
+
+
+def elevenlabs_tts_timed(text, voice_id, pages):
+    """
+    NEW (1.5.0): ElevenLabs' with-timestamps request. Same voice, same
+    credits, and it also says when each character is spoken.
+    """
+    import base64
+
+    url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}/with-timestamps"
+    headers = {
+        "xi-api-key": CFG["elevenlabs_api_key"],
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    }
+    resp = requests.post(url, headers=headers, json=_elevenlabs_payload(text), timeout=60)
+    if resp.status_code != 200:
+        # Refused, so nothing was spoken or billed. The plain request is
+        # tried next, and its error is the one you see if it fails too.
+        raise TimedSpeechUnavailable(f"ElevenLabs timestamps {resp.status_code}: {resp.text[:200]}")
+    data = resp.json()
+    audio = base64.b64decode(data["audio_base64"])
+    filename = f"{uuid.uuid4().hex}.mp3"
+    with open(os.path.join(AUDIO_DIR, filename), "wb") as f:
+        f.write(audio)
+    ends = page_ends_from_alignment(pages, data.get("alignment")) \
+        or page_ends_from_alignment(pages, data.get("normalized_alignment"))
+    return filename, ends
+
+
+def get_tts_audio_timed(text, voice_id, language, plan):
+    """
+    NEW (1.5.0): speaks `text`, and says exactly when the voice finishes
+    the last word of each chatbox page in `plan`. Returns (filename, ends).
+    ends is None when there's only one page or the timing couldn't be had,
+    and then the page estimates the timing instead.
+    """
+    pages = [_CHATBOX_COUNTER_RE.sub("", p["text"]) for p in plan]
+    if len(pages) <= 1:
+        return get_tts_audio(text, voice_id, language), None
+    engine = tts_engine(voice_id)
+    if engine == "elevenlabs":
+        # Only a refused request falls back. Anything after ElevenLabs said
+        # yes may already be billed, and asking again would bill it twice.
+        try:
+            return elevenlabs_tts_timed(text, voice_id, pages)
+        except TimedSpeechUnavailable as e:
+            log_server_event(f"Chatbox timing: falling back to an estimate: {e}")
+            return get_tts_audio(text, voice_id, language), None
+    try:
+        filename = f"{uuid.uuid4().hex}.wav"
+        path = os.path.join(AUDIO_DIR, filename)
+        if engine == "kokoro":
+            ends = kokoro_speak_pages(pages, voice_id[len(KOKORO_PREFIX):], language, path)
+        else:
+            ends = windows_speak_pages(pages, voice_id[len(WINDOWS_PREFIX):], path)
+        return filename, ends
+    except Exception as e:
+        # Free voices cost nothing, so any problem here just means the reply
+        # is spoken the usual way and the pages use the estimate.
+        log_server_event(f"Chatbox timing: falling back to an estimate ({engine}): {e!r}")
+        return get_tts_audio(text, voice_id, language), None
 
 
 # ---------- Routes ----------
@@ -3759,11 +3933,12 @@ def chatbox_page_plan(text):
 # there's one per voice, they're reused, and making one takes a while.
 
 AUDIO_PRUNE_INTERVAL_SECONDS = 6 * 3600
-# Windows-voice job files are deleted as soon as they're used. One that's
-# left over is from a crash, so a day is plenty to keep it.
+# Windows-voice job files and page parts are deleted as soon as they're
+# used. One that's left over is from a crash, so a day is plenty to keep it.
 AUDIO_LEFTOVER_SECONDS = 24 * 3600
 _AUDIO_REPLY_RE = re.compile(r"^[0-9a-f]{32}\.(mp3|wav)$")
-_AUDIO_JOB_RE = re.compile(r"^[0-9a-f]{32}\.json$")
+# CHANGED (1.5.0): and the per-page parts a crashed Windows voice left.
+_AUDIO_JOB_RE = re.compile(r"^[0-9a-f]{32}(\.json|-\d+\.part\.wav)$")
 
 
 def prune_audio_cache(now=None):
@@ -4874,9 +5049,12 @@ def chat():
         # exactly as before rather than falling silent.
         audio_filename = None
         audio_seconds = 0.0
+        chatbox_plan = chatbox_page_plan(spoken)   # NEW (1.5.0)
+        page_ends = None                           # NEW (1.5.0)
         if speak:
             audio_start = time.perf_counter()
-            audio_filename = get_tts_audio(spoken, voice_id, language)
+            # CHANGED (1.5.0): also says when the voice finishes each page.
+            audio_filename, page_ends = get_tts_audio_timed(spoken, voice_id, language, chatbox_plan)
             audio_seconds = time.perf_counter() - audio_start
     except Exception as e:
         if history and history[-1].get("role") == "user":
@@ -4887,6 +5065,13 @@ def chat():
     # threw partway through isn't billed to the day's total.
     # CHANGED (1.5.0): free voices cost nothing, so count nothing.
     credits_spent = len(spoken) if speak and voice_engine == "elevenlabs" else 0
+
+    # NEW (1.5.0): exact timing, when there is some. Page 1 shows when the
+    # voice starts, and each page after it when the voice finishes the last
+    # word of the page before.
+    if page_ends and len(page_ends) == len(chatbox_plan):
+        for i, page in enumerate(chatbox_plan):
+            page["at"] = 0.0 if i == 0 else round(page_ends[i - 1], 3)
     if credits_spent:
         record_usage(credits_spent)
 
@@ -4915,7 +5100,7 @@ def chat():
             # NEW (1.5.0): the reply as chatbox pages, each timed to where
             # the voice reaches it. Pages are only sent one at a time while
             # the reply is spoken. Text-only replies still go as one message.
-            "chatbox_pages": chatbox_page_plan(spoken),
+            "chatbox_pages": chatbox_plan,   # CHANGED (1.5.0): may carry exact "at" times
             # Measured text and audio generation times for the UI.
             "text_seconds": round(text_seconds, 2),
             "audio_seconds": round(audio_seconds, 2),

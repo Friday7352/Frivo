@@ -15,6 +15,12 @@ page sends each page when the voice reaches it. This checks:
     pages go just before the voice reaches them, a pause holds the next
     page, skipping ahead sends only the latest due page, the end sends
     whatever is left, and the Chatbox switch off stops it
+  * exact timing: each page after the first is timed to the moment the
+    voice finishes the last word of the page before. That comes from
+    ElevenLabs' per-character timings, or from speaking Kokoro and Windows
+    voices one page at a time. A refused ElevenLabs request falls back
+    without being billed twice, and a free voice that fails falls back to
+    the estimate
   * pruning deletes old reply audio and leftover job files, and keeps
     previews, recent files and anything Frivo didn't make
 
@@ -139,7 +145,116 @@ def server_side():
     check("the setting is honoured", mod.prune_audio_cache(now)[0] == 1)
     check("a missing folder is fine", (setattr(mod, "AUDIO_DIR", os.path.join(cache, "gone"))
                                        or mod.prune_audio_cache(now)) == (0, 0))
+    timed_side(mod)
     return plan
+
+
+def timed_side(mod):
+    print("--- exact timing ---")
+    import base64
+    import wave
+    from types import SimpleNamespace
+    import numpy as np
+
+    cache = tempfile.mkdtemp(prefix="frivo-timed-")
+    mod.AUDIO_DIR = cache
+    plan = mod.chatbox_page_plan(LONG)
+    bodies = [mod._CHATBOX_COUNTER_RE.sub("", p["text"]) for p in plan]
+
+    # Fake ElevenLabs timings: character i of the original text ends at i/20 s.
+    alignment = {"characters": list(LONG),
+                 "character_end_times_seconds": [i / 20 for i in range(len(LONG))]}
+    want, seen = [], 0
+    for body in bodies:
+        seen += len(body.replace(" ", ""))
+        # The seen-th non-space character in the original text.
+        idx = [i for i, c in enumerate(LONG) if not c.isspace()][seen - 1]
+        want.append(idx / 20)
+    got = mod.page_ends_from_alignment(bodies, alignment)
+    check("ElevenLabs timings: each page ends on its last character", got == want, (got, want))
+    check("timings that don't line up are refused",
+          mod.page_ends_from_alignment(bodies, {"characters": list("abc"),
+                                                "character_end_times_seconds": [1, 2, 3]}) is None)
+
+    calls = []
+
+    def post(answer):
+        def fake(url, **kw):
+            calls.append(url)
+            return answer(url)
+        return fake
+
+    timed_ok = lambda url: SimpleNamespace(status_code=200, text="", content=b"mp3", json=lambda: {
+        "audio_base64": base64.b64encode(b"mp3").decode(), "alignment": alignment})
+    mod.CFG.update(elevenlabs_api_key="k", speaking_speed=1.0)
+    mod.requests.post = post(timed_ok)
+    name, ends = mod.get_tts_audio_timed(LONG, "EL1", "English", plan)
+    check("ElevenLabs: one timed request", calls == [
+        "https://api.elevenlabs.io/v1/text-to-speech/EL1/with-timestamps"], calls)
+    check("ElevenLabs: audio saved, times returned",
+          open(os.path.join(cache, name), "rb").read() == b"mp3" and ends == want)
+
+    calls.clear()
+    mod.requests.post = post(lambda url: SimpleNamespace(status_code=200, content=b"mp3", text="")
+                             if "with-timestamps" not in url else
+                             SimpleNamespace(status_code=422, text="nope", content=b""))
+    name, ends = mod.get_tts_audio_timed(LONG, "EL1", "English", plan)
+    check("ElevenLabs refused: falls back to the plain request", len(calls) == 2 and ends is None, calls)
+
+    calls.clear()
+    mod.requests.post = post(lambda url: SimpleNamespace(status_code=200, text="", json=lambda: {}))
+    try:
+        mod.get_tts_audio_timed(LONG, "EL1", "English", plan)
+        raised = False
+    except Exception:
+        raised = True
+    check("ElevenLabs accepted but unreadable: no second (billed) request", raised and len(calls) == 1, calls)
+
+    # Kokoro: a fake engine that makes 100 samples per character at 24 kHz.
+    class FakeKokoro:
+        def create(self, text, voice, speed, lang):
+            return np.zeros(len(text) * 100, dtype="float32"), 24000
+    mod.kokoro_engine = lambda: FakeKokoro()
+    name, ends = mod.get_tts_audio_timed(LONG, mod.KOKORO_PREFIX + "af_heart", "English", plan)
+    sums = np.cumsum([len(b) * 100 for b in bodies]) / 24000
+    with wave.open(os.path.join(cache, name), "rb") as w:
+        frames = w.getnframes()
+    check("Kokoro: each page ends where its clip ends",
+          ends is not None and np.allclose(ends, sums), (ends, list(sums)))
+    check("Kokoro: one file with every page in it", frames == sum(len(b) * 100 for b in bodies), frames)
+
+    # Windows: the fake PowerShell writes each page's wave (10 ms per character).
+    def fake_ps(script, timeout=60):
+        path = script.split("ReadAllText('", 1)[1].split("'", 1)[0].replace("''", "'")
+        job = json.load(open(path, encoding="utf-8"))
+        for page, out in zip(job["pages"], job["outs"]):
+            with wave.open(out, "wb") as w:
+                w.setnchannels(1); w.setsampwidth(2); w.setframerate(16000)
+                w.writeframes(b"\0\0" * (160 * len(page)))
+        return SimpleNamespace(returncode=0, stderr="", stdout="")
+    mod._run_powershell = fake_ps
+    name, ends = mod.get_tts_audio_timed(LONG, mod.WINDOWS_PREFIX + "Microsoft Zira Desktop", "English", plan)
+    sums = np.cumsum([len(b) * 160 for b in bodies]) / 16000
+    check("Windows: each page ends where its clip ends",
+          ends is not None and np.allclose(ends, sums), (ends, list(sums)))
+    left = [n for n in os.listdir(cache) if ".part." in n or n.endswith(".json")]
+    check("Windows: page parts and the job are cleaned up", left == [], left)
+
+    mod._run_powershell = lambda script, timeout=60: SimpleNamespace(returncode=1, stderr="boom", stdout="")
+    mod.free_tts_audio = lambda text, voice_id, language: "fallback.wav"
+    name, ends = mod.get_tts_audio_timed(LONG, mod.WINDOWS_PREFIX + "Microsoft Zira Desktop", "English", plan)
+    check("a free voice that fails falls back to the estimate", (name, ends) == ("fallback.wav", None))
+
+    # Through /api/chat, with ElevenLabs.
+    mod.requests.post = post(timed_ok)
+    mod.record_usage = lambda credits: None
+    mod.CFG.update(response_style="mimic", follow_length=False, voice_id="EL1")
+    res = mod.app.test_client().post("/api/chat", json={"message": LONG, "speak": True,
+                                                         "language": "English", "max_words": 400})
+    data = res.get_json() or {}
+    ats = [p.get("at") for p in data.get("chatbox_pages") or []]
+    check("/api/chat: page 1 at 0, each later page when the last one's words end",
+          res.status_code == 200 and ats == [0.0] + [round(e, 3) for e in want[:-1]], (res.status_code, ats, data.get("error")))
 
 
 NODE_HARNESS = r"""
@@ -205,6 +320,12 @@ out.off = sent.splice(0); out.offEnds = typingEnds; osc = true;
 clock = 0; timers = []; f = make([{ text: "a", start: 0 }, { text: "b", start: 0.99 }]);
 f.update(true, 0, 10); runUntil(9.4); f.update(false, 10, 10);
 out.early = sent.splice(0);
+
+// Exact times: page two at 6.0 s and three at 13.0 s (the "at" wins over the
+// estimate's 30%/60%).
+clock = 0; timers = []; f = make([{ text: "x", start: 0, at: 0 }, { text: "y", start: 0.3, at: 6 }, { text: "z", start: 0.6, at: 13 }]);
+f.update(true, 0, 20); runUntil(20); f.update(false, 20, 20);
+out.exact = sent.splice(0);
 console.log(JSON.stringify(out));
 """
 
@@ -251,6 +372,8 @@ def browser_side():
     check("chatbox off: stops, and the dots come down",
           at(out["off"]) == [("one", 0), ("two", 5.6)] and out["offEnds"] == 1,
           (at(out["off"]), out["offEnds"]))
+    check("exact times: each page just as the last word ends",
+          at(out["exact"]) == [("x", 0), ("y", 5.85), ("z", 12.85)], at(out["exact"]))
     check("audio ending first still shows the last page",
           [r["text"] for r in out["early"]] == ["a", "b"], at(out["early"]))
 
