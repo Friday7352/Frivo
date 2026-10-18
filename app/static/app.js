@@ -137,6 +137,8 @@ const allowFallbackToggle = $("allowFallbackToggle");
 const ollamaSettings = $("ollamaSettings");
 const ollamaUrl = $("ollamaUrl");
 const ollamaModel = $("ollamaModel");
+const ollamaModelBalanced = $("ollamaModelBalanced");   // NEW (1.5.0)
+const ollamaModelBest = $("ollamaModelBest");           // NEW (1.5.0)
 const ollamaTranslationModel = $("ollamaTranslationModel");
 const ollamaTestNote = $("ollamaTestNote");
 const testOllamaBtn = $("testOllamaBtn");
@@ -442,6 +444,7 @@ function syncProviderVisibility() {
   if (ollamaSettings) {
     ollamaSettings.classList.toggle("is-hidden", !anyProviderIs("ollama"));
   }
+  if (typeof syncAiChip === "function") syncAiChip();   // NEW (1.5.0)
   if (whisperSettings) {
     const usingLocal =
       getRadioValue(transcriptionProviderRadios, "openai") === "local_whisper";
@@ -498,6 +501,9 @@ function buildProviderPickers(settings) {
 
   if (ollamaUrl) ollamaUrl.value = settings.ollama_url || "";
   if (ollamaModel) ollamaModel.value = settings.ollama_model || "";
+  if (ollamaModelBalanced) ollamaModelBalanced.value = settings.ollama_model_balanced || "";   // NEW (1.5.0)
+  if (ollamaModelBest) ollamaModelBest.value = settings.ollama_model_best || "";               // NEW (1.5.0)
+  if (typeof setAiChipTier === "function") setAiChipTier(settings.ollama_tier || "fast");     // NEW (1.5.0)
   if (ollamaTranslationModel) {
     ollamaTranslationModel.value = settings.ollama_translation_model || "";
   }
@@ -1409,6 +1415,23 @@ const AVATAR_YOU_SVG =
   '<circle cx="12" cy="8" r="3.4"/><path d="M5 20v-1a4 4 0 0 1 4-4h6a4 4 0 0 1 4 4v1"/></svg>';
 
 
+// NEW (1.5.0): local or cloud, for a reply's hover. Ollama runs on your own
+// PC or server; OpenAI and ElevenLabs are cloud services. Frivo's voices and
+// the Windows voices run on the Frivo PC.
+function whereWritten(names) {
+  return names.split(", ").map((part) => {
+    if (/^Ollama\b/.test(part)) return `${part} (local)`;
+    if (/^(OpenAI|ChatGPT)\b/.test(part)) return `${part} (cloud)`;
+    return part;   // "No AI": Word for word, nothing was asked
+  }).join(", ");
+}
+
+function whereSpoken(engine, name) {
+  const where = !engine || engine === "elevenlabs" ? "cloud" : "local";
+  // "Frivo voice (free)" → "Frivo voice (free, local)": one bracket, not two.
+  return /\)$/.test(name) ? name.replace(/\)$/, `, ${where})`) : `${name} (${where})`;
+}
+
 function addTurn(who, text, opts = {}) {
   // Query fresh each time: clearTranscript() rebuilds this node, so a
   // reference cached at page load goes stale and removing it does nothing.
@@ -1468,10 +1491,13 @@ function addTurn(who, text, opts = {}) {
     if (opts.textSeconds != null && opts.audioSeconds != null) {
       // No ElevenLabs line when it was never called — "ElevenLabs: 0.0s"
       // suggests it ran impossibly fast rather than not at all.
+      // CHANGED (1.5.0): says which AI wrote it and which voice spoke it,
+      // and whether each ran locally or in the cloud.
+      const writer = whereWritten(opts.textEngineName || "ChatGPT");
       time.title =
         opts.spoke === false
-          ? `ChatGPT: ${opts.textSeconds.toFixed(1)}s · not spoken`
-          : `ChatGPT: ${opts.textSeconds.toFixed(1)}s · ${opts.voiceEngineName || "ElevenLabs"}: ${opts.audioSeconds.toFixed(1)}s`;  // CHANGED (1.5.0)
+          ? `${writer}: ${opts.textSeconds.toFixed(1)}s · not spoken`
+          : `${writer}: ${opts.textSeconds.toFixed(1)}s · ${whereSpoken(opts.voiceEngine, opts.voiceEngineName || "ElevenLabs")}: ${opts.audioSeconds.toFixed(1)}s`;
     }
     meta.appendChild(time);
   }
@@ -1786,6 +1812,8 @@ async function saveAllSettings({ close = false, quiet = false } = {}) {
     transcription_provider: getRadioValue(transcriptionProviderRadios, "openai"),
     ollama_url: ollamaUrl ? ollamaUrl.value.trim() : "",
     ollama_model: ollamaModel ? ollamaModel.value.trim() : "",
+    ollama_model_balanced: ollamaModelBalanced ? ollamaModelBalanced.value.trim() : "",   // NEW (1.5.0)
+    ollama_model_best: ollamaModelBest ? ollamaModelBest.value.trim() : "",               // NEW (1.5.0)
     ollama_translation_model: ollamaTranslationModel
       ? ollamaTranslationModel.value.trim()
       : "",
@@ -3748,6 +3776,106 @@ function refreshPromptIfOpen() {
   if (!promptPanel.classList.contains("is-hidden")) loadPromptPreview();
 }
 
+
+// ---------- NEW (1.5.0): the AI chip — Fast, Balanced or Best ----------
+//
+// With Chat replies set to Ollama, a chip above the message box picks which
+// of three Ollama models writes replies (Settings → Providers names them).
+// Switching tells the server, which unloads the others and loads the new
+// one, so the next reply doesn't wait for it to load.
+// "var", not const/let: Settings can load before this part of the script
+// has run, and these must already exist (as undefined) when it does.
+var aiChipWrap = $("aiChipWrap");
+var aiChipText = $("aiChipText");
+var aiPopNote = $("aiPopNote");
+var aiTierList = $("aiTierList");
+var AI_TIER_NAMES = { fast: "Fast", balanced: "Balanced", best: "Best" };
+var aiTier = window.__pendingAiTier || "fast";
+
+function setAiChipTier(tier) {
+  if (!AI_TIER_NAMES) { window.__pendingAiTier = tier; return; }   // not set up yet
+  aiTier = AI_TIER_NAMES[tier] ? tier : "fast";
+  if (aiChipText) aiChipText.textContent = AI_TIER_NAMES[aiTier];
+}
+
+function syncAiChip() {
+  if (!aiChipWrap) aiChipWrap = $("aiChipWrap");
+  if (!aiChipWrap) return;
+  const usingOllama = typeof chatProviderRadios !== "undefined"
+    && getRadioValue(chatProviderRadios, "openai") === "ollama";
+  aiChipWrap.classList.toggle("is-hidden", !usingOllama);
+}
+
+function describeTier(t) {
+  if (!t.installed) return { text: `${t.model} · not downloaded — on the Ollama PC run: ollama pull ${t.model}`, warn: true };
+  if (t.loaded && t.gpu_percent != null && t.gpu_percent < 100) {
+    return { text: `${t.model} · ${t.gpu_percent}% on the graphics card, the rest on the CPU (slower)`, warn: true };
+  }
+  if (t.loaded) return { text: `${t.model} · loaded, on the graphics card`, warn: false };
+  return { text: `${t.model} · ready`, warn: false };
+}
+
+async function refreshAiPop() {
+  if (!aiTierList) return;
+  if (aiPopNote) aiPopNote.textContent = "Checking…";
+  let data;
+  try {
+    data = await (await fetch("/api/ollama/status")).json();
+  } catch (err) {
+    data = { reachable: false, error: "Couldn't reach Frivo.", tiers: [] };
+  }
+  setAiChipTier(data.tier || aiTier);
+  if (aiPopNote) aiPopNote.textContent = data.reachable ? "" : (data.error || "Ollama isn't reachable.");
+  aiTierList.innerHTML = "";
+  (data.tiers || []).forEach((t) => {
+    const row = document.createElement("label");
+    row.className = "ai-tier" + (data.reachable && !t.installed ? " is-missing" : "");
+    const input = document.createElement("input");
+    input.type = "radio";
+    input.name = "aiTier";
+    input.value = t.id;
+    input.checked = t.id === aiTier;
+    const body = document.createElement("span");
+    const name = document.createElement("span");
+    name.className = "ai-tier-name";
+    name.textContent = t.name;
+    const sub = document.createElement("span");
+    const info = data.reachable ? describeTier(t) : { text: t.model, warn: false };
+    sub.className = "ai-tier-sub" + (info.warn ? " is-warn" : "");
+    sub.textContent = info.text;
+    body.append(name, sub);
+    row.append(input, body);
+    input.addEventListener("change", () => chooseAiTier(t.id, t.model));
+    aiTierList.appendChild(row);
+  });
+}
+
+// Catch up with anything Settings did before this part had run.
+setAiChipTier(aiTier);
+syncAiChip();
+
+async function chooseAiTier(tier, model) {
+  const previous = aiTier;
+  setAiChipTier(tier);
+  try {
+    const res = await fetch("/api/ollama/tier", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tier }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Couldn't switch.");
+    setStatus(`Replies now use ${AI_TIER_NAMES[tier]} (${data.model}). It's loading on the Ollama PC.`);
+    // Look again once it's had a moment to load, to show where it landed.
+    setTimeout(() => {
+      const pop = $("aiPop");
+      if (pop && !pop.classList.contains("is-hidden")) refreshAiPop();
+    }, 4000);
+  } catch (err) {
+    setAiChipTier(previous);
+    setStatus(`AI model not changed: ${err.message}`, true);
+  }
+}
 
 // ---------- NEW (1.5.0): free voices ----------
 //
@@ -5933,6 +6061,7 @@ async function send() {
       repaired: data.repaired,
       keptExact: data.kept_exact,  // NEW (1.5.0)
       voiceEngineName: data.voice_engine_name,  // NEW (1.5.0)
+      textEngineName: data.text_engine_name || (data.text_seconds ? "" : "No AI"),  // NEW (1.5.0)
       voiceEngine: data.voice_engine,  // NEW (1.5.0)
       credits: data.credits,  // NEW (1.5.0): what was actually billed
       spoke: data.spoke,
@@ -7583,6 +7712,7 @@ window.addEventListener("pagehide", () => {
     ["lengthChip", "lengthPop"],
     ["volumeChip", "volumePop"],
     ["oscChip", "oscPop"],
+    ["aiChip", "aiPop"],   // NEW (1.5.0)
     ["statusPillBtn", "statusPop"],
   ].map(([b, p]) => ({ btn: $(b), pop: $(p) })).filter((x) => x.btn && x.pop);
 
@@ -7602,6 +7732,7 @@ window.addEventListener("pagehide", () => {
       pop.classList.toggle("is-hidden", !opening);
       btn.setAttribute("aria-expanded", opening ? "true" : "false");
       if (opening && pop.id === "lengthPop" && typeof refreshPromptIfOpen === "function") refreshPromptIfOpen();
+      if (opening && pop.id === "aiPop" && typeof refreshAiPop === "function") refreshAiPop();   // NEW (1.5.0)
     });
     pop.addEventListener("click", (e) => e.stopPropagation());
   });

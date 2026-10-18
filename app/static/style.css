@@ -2938,3 +2938,12 @@ button.srow:active { background: transparent; }
   .settings-search { width: 150px; }
   .profile-actions .icon-btn:disabled { display: none; }
 }
+
+/* NEW (1.5.0): the AI chip's list of Fast / Balanced / Best. */
+.popover--ai .ai-tier { display: flex; align-items: flex-start; gap: 10px; padding: 9px 0; cursor: pointer; }
+.popover--ai .ai-tier + .ai-tier { border-top: 1px solid var(--rule); }
+.popover--ai .ai-tier input { margin-top: 3px; accent-color: var(--accent); }
+.popover--ai .ai-tier-name { font-weight: 600; }
+.popover--ai .ai-tier-sub { display: block; font-size: var(--text-caption); color: var(--ink-dim); }
+.popover--ai .ai-tier-sub.is-warn { color: var(--warn); }
+.popover--ai .ai-tier.is-missing { opacity: .6; }

@@ -418,6 +418,10 @@ The test simulates hidden names by blanking what `enumerateDevices` returns, bec
 
 The second half runs the real voices through Frivo when sherpa-onnx is installed and `app/voices` holds them (`python app/voice_pack.py install` gets them). It checks that every voice loads and speaks on one thread, the speed, exact chatbox page times, that at most two voices stay loaded, the messages for another language and for a missing voice, the move off Kokoro, and previews.
 
+## test-ollama-models.py (1.5.0)
+
+`python3 tests/test-ollama-models.py` runs Frivo against a stand-in Ollama server. It checks the Fast / Balanced / Best slots (defaults, saving, the one in use writing replies), that switching unloads the others and loads the new one, the status the AI chip shows (downloaded, loaded, share on the graphics card, Ollama unreachable), that requests ask for no thinking and to stay loaded (and retry without `think` if refused), that a stray `<think>` block is removed, the `ollama pull` message for a missing model, the engine name on replies, and that no OpenAI key is needed with Ollama.
+
 ## check-windows-voices.bat (1.5.0)
 
 Double-click `tests/check-windows-voices.bat` on a Windows PC. It runs the real `app/windows_speech.ps1` the way Frivo does: it lists the voices, speaks with one older and one newer voice (one page, three pages, two speeds, non-English text), and checks that a missing voice fails cleanly and that the helper exits when Frivo would close it. It also checks that the setup scripts parse. Everything is timed and written to `tests/windows-voice-check/` (ignored by git).

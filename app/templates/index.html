@@ -354,6 +354,23 @@
                 <span id="styleChipText">Clean up</span>
               </button>
 
+              <!-- NEW (1.5.0): which of the three Ollama models writes replies.
+                   Only shown while Chat replies is set to Ollama. -->
+              <div class="chip-wrap is-hidden" id="aiChipWrap">
+                <button id="aiChip" class="chip" type="button" aria-haspopup="dialog"
+                        aria-expanded="false" aria-controls="aiPop" title="Which AI model writes replies">
+                  <svg class="icon-14" aria-hidden="true"><use href="#i-chip"/></svg>
+                  <span id="aiChipText">Fast</span>
+                </button>
+                <div id="aiPop" class="popover popover--osc popover--ai is-hidden" role="dialog" aria-label="AI model">
+                  <div class="osc-pop-head">
+                    <span class="eyebrow">AI model · Ollama</span>
+                    <span class="osc-pop-mic" id="aiPopNote"></span>
+                  </div>
+                  <div id="aiTierList" role="radiogroup" aria-label="AI model"></div>
+                </div>
+              </div>
+
               <!-- Reply length, in a popover with the fader and the prompt
                    inspector. -->
               <div class="chip-wrap">
@@ -1034,18 +1051,38 @@
                     </span>
                   </div>
                   <div class="srow">
+                    <!-- CHANGED (1.5.0): three models to switch between with the AI chip
+                         above the message box. This one is Fast. -->
                     <label class="srow-main srow-main--flex" for="ollamaModel">
-                      <span class="srow-label">Model</span>
-                      <span class="srow-sub">e.g. llama3.1:8b</span>
+                      <span class="srow-label">Fast model</span>
+                      <span class="srow-sub">The quickest. e.g. gemma3:4b</span>
                     </label>
                     <span class="srow-control srow-control--wide">
-                      <input type="text" id="ollamaModel" placeholder="llama3.1:8b" autocomplete="off">
+                      <input type="text" id="ollamaModel" placeholder="gemma3:4b" autocomplete="off">
+                    </span>
+                  </div>
+                  <div class="srow"><!-- NEW (1.5.0) -->
+                    <label class="srow-main srow-main--flex" for="ollamaModelBalanced">
+                      <span class="srow-label">Balanced model</span>
+                      <span class="srow-sub">Better replies, about as quick. e.g. qwen3.5:4b</span>
+                    </label>
+                    <span class="srow-control srow-control--wide">
+                      <input type="text" id="ollamaModelBalanced" placeholder="qwen3.5:4b" autocomplete="off">
+                    </span>
+                  </div>
+                  <div class="srow"><!-- NEW (1.5.0) -->
+                    <label class="srow-main srow-main--flex" for="ollamaModelBest">
+                      <span class="srow-label">Best model</span>
+                      <span class="srow-sub">The best replies; slower if it doesn't fit on the graphics card. e.g. qwen3.5:9b</span>
+                    </label>
+                    <span class="srow-control srow-control--wide">
+                      <input type="text" id="ollamaModelBest" placeholder="qwen3.5:9b" autocomplete="off">
                     </span>
                   </div>
                   <div class="srow">
                     <label class="srow-main srow-main--flex" for="ollamaTranslationModel">
                       <span class="srow-label">Translation model</span>
-                      <span class="srow-sub">Blank to reuse the model above.</span>
+                      <span class="srow-sub">Blank to reuse the model in use.</span><!-- CHANGED (1.5.0) -->
                     </label>
                     <span class="srow-control srow-control--wide">
                       <input type="text" id="ollamaTranslationModel" placeholder="(same as above)" autocomplete="off">

@@ -115,3 +115,18 @@ With **Follow VRChat mute** on, opening Frivo while your VRChat mic was already 
 
 - The same goes for FrivOSC reconnecting: it doesn't start dictation on its own.
 - Turning **Follow VRChat mute** on while you're unmuted still starts dictation straight away, as the switch says.
+
+## Three Ollama models to switch between
+
+With **Chat replies** set to Ollama, an **AI** chip above the message box picks which model writes replies: **Fast**, **Balanced** or **Best**. You name the three in **Settings → Providers → Ollama** (for example `gemma3:4b`, `qwen3.5:4b` and `qwen3.5:9b`).
+
+- Click the chip to see each model and how it's doing: whether it's downloaded on the Ollama PC, whether it's loaded, and whether it all fits on the graphics card. If part of it runs on the CPU, the chip says so, because that makes it slower.
+- Switching unloads the other two and loads the new one straight away, so there's room on the graphics card (and for Evora, if it shares it) and the next reply doesn't wait.
+- A model that isn't downloaded yet says exactly what to run on the Ollama PC (`ollama pull …`).
+
+## Ollama works better
+
+- **The model stays loaded.** Ollama used to unload it after five idle minutes, so the first reply after a break waited for it to load again.
+- **No "thinking" first.** Models that think before answering (such as Qwen 3.5) now answer straight away, instead of coming back slow or empty.
+- **No OpenAI key needed** when Chat replies uses Ollama, as the README always said.
+- **Replies say which AI wrote them, and where.** Hovering a reply's time shows, for example, "Ollama · gemma3:4b (local): 1.3s · Frivo voice (free, local): 0.4s" or "OpenAI · gpt-4o-mini (cloud): 1.1s · ElevenLabs (cloud): 0.9s". It used to say "ChatGPT" whatever answered. If Ollama couldn't be reached and the fallback used OpenAI, the hover shows that too.

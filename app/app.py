@@ -62,7 +62,7 @@ import time
 import uuid
 import threading
 
-from flask import Flask, request, jsonify, render_template, send_from_directory, redirect
+from flask import Flask, request, jsonify, render_template, send_from_directory, redirect, g  # CHANGED (1.5.0): g
 from urllib.parse import urlsplit
 import requests
 from openai import OpenAI
@@ -220,6 +220,12 @@ CA_KEY_PATH = os.path.join(DATA_DIR, "ca-key.pem")
 # Local provider defaults used while configuration loads.
 DEFAULT_OLLAMA_URL = "http://localhost:11434"
 DEFAULT_OLLAMA_MODEL = "llama3.1:8b"
+# NEW (1.5.0): three Ollama models to switch between: quickest, a middle
+# one, and the best one. "ollama_model" stays the Fast one, so a config
+# from before this keeps the model it had.
+OLLAMA_TIERS = [("fast", "Fast"), ("balanced", "Balanced"), ("best", "Best")]
+OLLAMA_TIER_KEYS = {"fast": "ollama_model", "balanced": "ollama_model_balanced", "best": "ollama_model_best"}
+OLLAMA_TIER_DEFAULTS = {"fast": DEFAULT_OLLAMA_MODEL, "balanced": "qwen3.5:4b", "best": "qwen3.5:9b"}
 DEFAULT_WHISPER_URL = "http://localhost:9000"
 
 # How long to wait on a local service before deciding it isn't there. Short,
@@ -678,6 +684,10 @@ def load_config():
         "transcription_provider": "openai",
         "ollama_url": DEFAULT_OLLAMA_URL,
         "ollama_model": DEFAULT_OLLAMA_MODEL,
+        # NEW (1.5.0): the Balanced and Best models, and which of the three is in use.
+        "ollama_model_balanced": OLLAMA_TIER_DEFAULTS["balanced"],
+        "ollama_model_best": OLLAMA_TIER_DEFAULTS["best"],
+        "ollama_tier": "fast",
         # Blank uses the chat model for translation.
         "ollama_translation_model": "",
         "whisper_url": DEFAULT_WHISPER_URL,
@@ -1383,7 +1393,7 @@ def summarize_to_length(text, max_words, language="English"):
             make_openai_client(),
             provider=resolve_provider("chat_provider", CHAT_PROVIDERS),
             model=CFG.get("model", RECOMMENDED_TEXT_MODEL),
-            ollama_model=CFG.get("ollama_model") or DEFAULT_OLLAMA_MODEL,
+            ollama_model=active_ollama_model(),   # CHANGED (1.5.0)
             messages=[{"role": "user", "content": build_summarize_prompt(text, max_words, language)}],
             max_tokens=int(max_words * 4) + 60,
             temperature=0.2,
@@ -1467,6 +1477,37 @@ def resolve_provider(key, provider_list, default="openai"):
 def ollama_base_url():
     url = (CFG.get("ollama_url") or DEFAULT_OLLAMA_URL).strip().rstrip("/")
     return url or DEFAULT_OLLAMA_URL
+
+
+def ollama_tier():
+    """NEW (1.5.0): which of the three Ollama models is in use."""
+    tier = CFG.get("ollama_tier") or "fast"
+    return tier if tier in OLLAMA_TIER_KEYS else "fast"
+
+
+def tier_model(tier):
+    """NEW (1.5.0): the model name in one of the three slots."""
+    return (CFG.get(OLLAMA_TIER_KEYS[tier]) or "").strip() or OLLAMA_TIER_DEFAULTS[tier]
+
+
+def active_ollama_model():
+    """NEW (1.5.0): the Ollama model replies use right now."""
+    return tier_model(ollama_tier())
+
+
+def note_text_engine(name):
+    """
+    NEW (1.5.0): remembers which AI wrote (part of) this reply, so the reply
+    can say so. The hover used to say "ChatGPT" whatever actually answered.
+    """
+    try:
+        from flask import g, has_request_context
+        if has_request_context():
+            engines = g.setdefault("text_engines", [])
+            if name not in engines:
+                engines.append(name)
+    except Exception:
+        pass
 
 
 def whisper_base_url():
@@ -1627,7 +1668,7 @@ def probe_provider(kind, timeout=None):
             models = [m.get("name", "") for m in (response.json().get("models") or [])]
             if not models:
                 return True, "Connected, but no models are pulled yet. Run: ollama pull llama3.1:8b"
-            wanted = (CFG.get("ollama_model") or DEFAULT_OLLAMA_MODEL).strip()
+            wanted = active_ollama_model()   # CHANGED (1.5.0)
             if wanted and wanted not in models:
                 return True, (
                     f"Connected. {len(models)} model(s) available, but '{wanted}' isn't one of "
@@ -1652,6 +1693,10 @@ def probe_provider(kind, timeout=None):
     return False, "Unknown provider."
 
 
+class OllamaModelMissing(RuntimeError):
+    """NEW (1.5.0): Ollama is there, but this model hasn't been downloaded."""
+
+
 def ollama_chat(*, model, messages, max_tokens, temperature=None):
     """
     Calls an Ollama server's /api/chat and returns an OpenAI-shaped response.
@@ -1664,18 +1709,37 @@ def ollama_chat(*, model, messages, max_tokens, temperature=None):
         "messages": messages,
         "stream": False,
         "options": {"num_predict": max_tokens},
+        # NEW (1.5.0): answer straight away. Models that "think" first would
+        # spend the word allowance thinking and come back slow, or empty.
+        "think": False,
+        # NEW (1.5.0): stay loaded. Ollama otherwise unloads the model after
+        # five idle minutes, and the next reply waits for it to load again.
+        # Switching to another of the three unloads this one (set_ollama_tier).
+        "keep_alive": -1,
     }
     if temperature is not None:
         payload["options"]["temperature"] = temperature
     response = requests.post(
         url, json=payload, timeout=(LOCAL_CONNECT_TIMEOUT, LOCAL_READ_TIMEOUT)
     )
+    # NEW (1.5.0): an older Ollama, or a model with no thinking switch, may
+    # refuse "think". Asked again without it.
+    if response.status_code == 400 and "think" in response.text.lower():
+        payload.pop("think", None)
+        response = requests.post(
+            url, json=payload, timeout=(LOCAL_CONNECT_TIMEOUT, LOCAL_READ_TIMEOUT)
+        )
+    if response.status_code == 404 and "not found" in response.text.lower():
+        raise OllamaModelMissing(f"The model '{model}' isn't on the Ollama PC yet. On that PC, run: ollama pull {model}")
     response.raise_for_status()
     data = response.json()
 
     content = ((data.get("message") or {}).get("content") or "").strip()
+    # NEW (1.5.0): a model that thinks anyway sometimes puts it in the reply.
+    content = re.sub(r"(?s)<think>.*?</think>", "", content).strip()
     if not content:
         raise RuntimeError("Ollama returned an empty reply.")
+    note_text_engine(f"Ollama · {model}")   # NEW (1.5.0)
 
     # Ollama reports why generation stopped; "length" is the same signal
     # OpenAI gives when the token ceiling was hit.
@@ -1714,6 +1778,10 @@ def create_chat_completion(client, *, max_tokens, provider="openai", temperature
         except Exception as e:
             if not fallback_allowed():
                 log_server_event(f"Ollama unavailable ({e!r}) — fallback off, failing.")
+                # NEW (1.5.0): Ollama is fine, the model just isn't downloaded:
+                # say that, not "isn't reachable".
+                if isinstance(e, OllamaModelMissing):
+                    raise
                 raise RuntimeError(
                     "Ollama isn't reachable. Start it, or switch Chat replies to "
                     "OpenAI in Settings. (Automatic fallback to OpenAI is turned "
@@ -1744,6 +1812,8 @@ def create_chat_completion(client, *, max_tokens, provider="openai", temperature
 
     def _create(**extra):
         return client.chat.completions.create(**extra, **kwargs)
+
+    note_text_engine(f"OpenAI · {kwargs.get('model', '')}".rstrip(" ·"))   # NEW (1.5.0)
 
     def _without_temperature(**extra):
         kwargs.pop("temperature", None)
@@ -1798,7 +1868,7 @@ def get_chat_reply(history, max_words, language="English", condense=True, temper
     client = make_openai_client()
     model = CFG.get("model", RECOMMENDED_TEXT_MODEL)
     provider = resolve_provider("chat_provider", CHAT_PROVIDERS)
-    ollama_model = CFG.get("ollama_model") or DEFAULT_OLLAMA_MODEL
+    ollama_model = active_ollama_model()   # CHANGED (1.5.0): the slot in use
 
     per_word = 1.4
     if language in SPACELESS_LANGUAGES or language in {"Korean", "Russian", "Ukrainian",
@@ -2813,10 +2883,14 @@ def settings():
             ("ollama_url", DEFAULT_OLLAMA_URL),
             ("whisper_url", DEFAULT_WHISPER_URL),
             ("ollama_model", DEFAULT_OLLAMA_MODEL),
+            ("ollama_model_balanced", OLLAMA_TIER_DEFAULTS["balanced"]),   # NEW (1.5.0)
+            ("ollama_model_best", OLLAMA_TIER_DEFAULTS["best"]),           # NEW (1.5.0)
             ("ollama_translation_model", ""),
         ):
             if key in data:
                 CFG[key] = (data.get(key) or "").strip() or default
+        if data.get("ollama_tier") in OLLAMA_TIER_KEYS:   # NEW (1.5.0)
+            CFG["ollama_tier"] = data["ollama_tier"]
 
         if "allow_openai_fallback" in data:
             CFG["allow_openai_fallback"] = bool(data.get("allow_openai_fallback"))
@@ -2849,6 +2923,9 @@ def settings():
             "transcription_providers": TRANSCRIPTION_PROVIDERS,
             "ollama_url": CFG.get("ollama_url", DEFAULT_OLLAMA_URL),
             "ollama_model": CFG.get("ollama_model", DEFAULT_OLLAMA_MODEL),
+            "ollama_model_balanced": tier_model("balanced"),   # NEW (1.5.0)
+            "ollama_model_best": tier_model("best"),           # NEW (1.5.0)
+            "ollama_tier": ollama_tier(),                      # NEW (1.5.0)
             "ollama_translation_model": CFG.get("ollama_translation_model", ""),
             "whisper_url": CFG.get("whisper_url", DEFAULT_WHISPER_URL),
             "allow_openai_fallback": bool(CFG.get("allow_openai_fallback", False)),
@@ -3032,8 +3109,7 @@ def translate_text(text, target_language):
             provider=provider,
             model=CFG.get("translation_model", RECOMMENDED_TRANSLATION_MODEL),
             ollama_model=CFG.get("ollama_translation_model")
-            or CFG.get("ollama_model")
-            or DEFAULT_OLLAMA_MODEL,
+            or active_ollama_model(),   # CHANGED (1.5.0)
             messages=[{"role": "user", "content": prompt}],
             max_tokens=max(120, len(text) // 2),
         )
@@ -4854,6 +4930,87 @@ def preview_prompt():
     )
 
 
+# ---------- Ollama: three models to switch between ----------
+# NEW (1.5.0): Fast, Balanced and Best. Only the one in use is kept loaded:
+# switching unloads the others, so the graphics card has room for it (and for
+# Evora, if it shares the card), and loads the new one straight away, so the
+# next reply doesn't wait for it.
+
+def _ollama_get(path):
+    response = requests.get(f"{ollama_base_url()}{path}", timeout=LOCAL_CONNECT_TIMEOUT)
+    response.raise_for_status()
+    return response.json()
+
+
+def _ollama_set_loaded(model, keep):
+    """Loads (keep=True) or unloads a model, without asking it anything."""
+    requests.post(f"{ollama_base_url()}/api/generate",
+                  json={"model": model, "keep_alive": -1 if keep else 0},
+                  timeout=(LOCAL_CONNECT_TIMEOUT, LOCAL_READ_TIMEOUT))
+
+
+def _same_model(a, b):
+    """'gemma3:4b' and 'gemma3:4b', or 'llama3.1' and 'llama3.1:latest'."""
+    norm = lambda name: name if ":" in name else name + ":latest"
+    return norm(a or "") == norm(b or "")
+
+
+def ollama_tier_status():
+    tiers = [{"id": t, "name": name, "model": tier_model(t)} for t, name in OLLAMA_TIERS]
+    status = {"tier": ollama_tier(), "tiers": tiers, "reachable": False, "error": "",
+              "chat_provider": resolve_provider("chat_provider", CHAT_PROVIDERS)}
+    try:
+        installed = [m.get("name", "") for m in (_ollama_get("/api/tags").get("models") or [])]
+        loaded = _ollama_get("/api/ps").get("models") or []
+        status["reachable"] = True
+    except Exception as e:
+        status["error"] = f"Ollama isn't reachable at {ollama_base_url()}."
+        log_server_event(f"Ollama status: {e!r}")
+        return status
+    for tier in tiers:
+        tier["installed"] = any(_same_model(tier["model"], m) for m in installed)
+        running = next((m for m in loaded if _same_model(tier["model"], m.get("name"))), None)
+        tier["loaded"] = bool(running)
+        if running and running.get("size"):
+            # How much of it is on the graphics card. Under 100 means part
+            # runs on the CPU, which is slower.
+            tier["gpu_percent"] = round(100 * (running.get("size_vram") or 0) / running["size"])
+    return status
+
+
+@app.route("/api/ollama/status")
+def ollama_status_route():
+    return jsonify(ollama_tier_status())
+
+
+@app.route("/api/ollama/tier", methods=["POST"])
+def set_ollama_tier():
+    data = request.get_json(silent=True) or {}
+    tier = data.get("tier")
+    if tier not in OLLAMA_TIER_KEYS:
+        return jsonify({"error": "Pick Fast, Balanced or Best."}), 400
+    CFG["ollama_tier"] = tier
+    save_config(CFG)
+    wanted = tier_model(tier)
+    others = {tier_model(t) for t in OLLAMA_TIER_KEYS if t != tier} - {wanted}
+
+    def swap():
+        for model in others:
+            try:
+                _ollama_set_loaded(model, keep=False)
+            except Exception:
+                pass
+        try:
+            _ollama_set_loaded(wanted, keep=True)
+        except Exception as e:
+            log_server_event(f"Ollama: couldn't load {wanted}: {e!r}")
+
+    # In the background: loading a model can take a few seconds, and the
+    # switch shouldn't wait for it.
+    threading.Thread(target=swap, name="ollama-swap", daemon=True).start()
+    return jsonify({"ok": True, "tier": tier, "model": wanted})
+
+
 @app.route("/api/translate", methods=["POST"])
 def translate():
     """
@@ -4878,8 +5035,7 @@ def translate():
             client,
             provider=resolve_provider("translation_provider", TRANSLATION_PROVIDERS),
             ollama_model=CFG.get("ollama_translation_model")
-            or CFG.get("ollama_model")
-            or DEFAULT_OLLAMA_MODEL,
+            or active_ollama_model(),   # CHANGED (1.5.0)
             model=CFG.get("translation_model", RECOMMENDED_TRANSLATION_MODEL),
             messages=[
                 {
@@ -5027,7 +5183,10 @@ def chat():
 
     # CHANGED (1.5.0): the profile is looked up first, so a Mimic message
     # that never calls the model doesn't need an OpenAI key.
-    if not verbatim and not CFG["openai_api_key"]:
+    # CHANGED (1.5.0): only when OpenAI writes the reply. With Ollama chosen
+    # for Chat replies, every step of a reply goes to Ollama.
+    if (not verbatim and not CFG["openai_api_key"]
+            and resolve_provider("chat_provider", CHAT_PROVIDERS) == "openai"):
         return jsonify({"error": "Add your OpenAI key in Settings before sending."}), 400
     # Only demanded when something is actually going to be spoken, so
     # text-only replies work on an OpenAI key alone. CHANGED (1.5.0): and
@@ -5216,6 +5375,9 @@ def chat():
             "kept_exact": kept_exact,
             "follow_length": follow_length,  # NEW (1.5.0)
             "voice_engine": voice_engine,  # NEW (1.5.0)
+            # NEW (1.5.0): which AI wrote it ("Ollama · gemma3:4b",
+            # "OpenAI · gpt-4o-mini"), or empty when none was needed.
+            "text_engine_name": ", ".join(g.get("text_engines", [])),
             "voice_engine_name": TTS_ENGINE_NAMES[voice_engine],
             # NEW (1.5.0): the reply as chatbox pages, each timed to where
             # the voice reaches it. Pages are only sent one at a time while
