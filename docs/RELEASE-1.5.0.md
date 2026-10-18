@@ -130,3 +130,21 @@ With **Chat replies** set to Ollama, an **AI** chip above the message box picks 
 - **No "thinking" first.** Models that think before answering (such as Qwen 3.5) now answer straight away, instead of coming back slow or empty.
 - **No OpenAI key needed** when Chat replies uses Ollama, as the README always said.
 - **Replies say which AI wrote them, and where.** Hovering a reply's time shows, for example, "Ollama · gemma3:4b (local): 1.3s · Frivo voice (free, local): 0.4s" or "OpenAI · gpt-4o-mini (cloud): 1.1s · ElevenLabs (cloud): 0.9s". It used to say "ChatGPT" whatever answered. If Ollama couldn't be reached and the fallback used OpenAI, the hover shows that too.
+
+## Set up local AI, step by step
+
+**Settings → Providers → Ollama** has a new link, **New to this? Set it up step by step**, which opens a guide to running Frivo's replies on your own graphics card with Ollama.
+
+- Two questions first: whether the AI runs on the Frivo PC or another PC, and how much video memory its graphics card has (with a tick box for when Evora shares the card). The guide then picks the Fast, Balanced and Best models that fit, and says when Best will run partly on the CPU.
+- Every command has a **Copy** button: paste it into PowerShell and press Enter. The steps only show what you need. On the same PC there's no firewall or address step.
+- The settings step also restarts Ollama with those settings, so they always take effect. Setting them by hand and restarting Ollama the usual way can leave it running without them.
+- The last step tests the address and switches Frivo over with one button.
+- A troubleshooting section covers the usual snags: "ollama" not recognized, nothing listening, other PCs can't connect, a model only partly on the graphics card, a model not downloaded yet, and how to tell replies come from your own PC.
+
+## The chips stay on one row
+
+With the AI and VRChat chips (and **Use English** when a profile suggests another language), the chips above the message box no longer wrap into two rows. The voice chip gives way first: its details shorten, then it shows just the voice's name.
+
+## Replies say Local or OpenAI
+
+Hovering a reply shows a small **Local** (green) or **OpenAI** tag in the line underneath, so you can see at a glance where it was written. Hover the tag for the model's name.

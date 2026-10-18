@@ -1426,6 +1426,15 @@ function whereWritten(names) {
   }).join(", ");
 }
 
+// NEW (1.5.0): "Local" or "OpenAI" for the reply's hover line. A reply
+// that needed OpenAI anywhere (the fallback, say) says OpenAI.
+function replySource(names) {
+  if (!names || names === "No AI") return "";
+  if (/OpenAI|ChatGPT/.test(names)) return "OpenAI";
+  if (/Ollama/.test(names)) return "Local";
+  return "";
+}
+
 function whereSpoken(engine, name) {
   const where = !engine || engine === "elevenlabs" ? "cloud" : "local";
   // "Frivo voice (free)" → "Frivo voice (free, local)": one bracket, not two.
@@ -1479,6 +1488,18 @@ function addTurn(who, text, opts = {}) {
       : `${opts.credits != null ? opts.credits : opts.charCount} credits`;
     cost.textContent = `${opts.wordCount} words${target} · ${spent}`;
     meta.appendChild(cost);
+  }
+
+  // NEW (1.5.0): where the reply was written, in a word: "Local" (Ollama,
+  // on your own PC or server) or "OpenAI". Nothing when no AI was asked
+  // (Word for word in English).
+  const source = replySource(opts.textEngineName);
+  if (source) {
+    const where = document.createElement("span");
+    where.className = "turn-source" + (source === "Local" ? " is-local" : "");
+    where.textContent = source;
+    where.title = opts.textEngineName;   // the model, for anyone who wants it
+    meta.appendChild(where);
   }
 
   // Actual measured generation time — ChatGPT + ElevenLabs combined, with

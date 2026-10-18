@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<!-- NEW (1.5.0): "Set up local AI", a step-by-step guide to running Ollama
+     for Frivo, at /setup/ollama. Linked from Settings > Providers > Ollama. -->
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Set up local AI · Frivo</title>
+  <link rel="icon" href="{{ url_for('static', filename='Frivo.ico') }}" sizes="any">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v={{ asset_version }}">
+  <script>
+    (function () {
+      try {
+        var saved = localStorage.getItem("voice_console_theme");
+        document.documentElement.dataset.theme = saved === "light" ? "light" : "dark";
+      } catch (e) {
+        document.documentElement.dataset.theme = "dark";
+      }
+    })();
+  </script>
+  <style>
+    html, body { height: auto; min-height: 100%; overflow: auto; }
+    body { background: var(--bg, #0e0f12); color: var(--ink); font-family: var(--font-panel, "Instrument Sans", system-ui, sans-serif); }
+    .guide { max-width: 780px; margin: 0 auto; padding: 28px 20px 80px; line-height: 1.55; }
+    .guide a { color: var(--accent); }
+    .back { display: inline-flex; gap: 6px; align-items: center; color: var(--ink-dim) !important; text-decoration: none; font-size: 14px; }
+    .back:hover { color: var(--ink) !important; }
+    h1 { font-size: 28px; margin: 14px 0 6px; letter-spacing: -0.01em; }
+    .lead { color: var(--ink-dim); margin: 0 0 22px; }
+    .card { border: 1px solid var(--rule); border-radius: 14px; background: var(--surface, rgba(255,255,255,0.02)); padding: 18px 20px; margin: 0 0 16px; }
+    .card h2 { font-size: 18px; margin: 0 0 10px; display: flex; gap: 10px; align-items: baseline; }
+    .num { flex: none; display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; background: var(--accent); color: var(--accent-ink, #fff); font-size: 14px; font-weight: 600; }
+    .card p { margin: 6px 0; }
+    .card ol, .card ul { margin: 6px 0; padding-left: 22px; }
+    .card li { margin: 3px 0; }
+    .hint { color: var(--ink-dim); font-size: 14px; }
+    .q { margin: 10px 0 16px; }
+    .q-label { font-weight: 600; display: block; margin-bottom: 6px; }
+    .choices { display: flex; flex-wrap: wrap; gap: 8px; }
+    .choice { display: inline-flex; align-items: center; gap: 8px; padding: 7px 12px; border: 1px solid var(--rule); border-radius: 999px; cursor: pointer; font-size: 14px; }
+    .choice input { accent-color: var(--accent); margin: 0; }
+    .choice:has(input:checked) { border-color: var(--accent-line, var(--accent)); background: var(--accent-soft, rgba(250,47,47,.12)); }
+    select, .field { font: inherit; color: var(--ink); background: var(--field, #16181d); border: 1px solid var(--rule); border-radius: 10px; padding: 8px 12px; }
+    .field { width: 100%; max-width: 380px; }
+    .models { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 12px; }
+    .model { border: 1px solid var(--rule); border-radius: 12px; padding: 10px 12px; }
+    .model b { display: block; font-size: 13px; color: var(--ink-dim); font-weight: 500; }
+    .model code { font-size: 15px; color: var(--ink); background: none; padding: 0; }
+    .model span { display: block; font-size: 12.5px; color: var(--ink-dim); margin-top: 2px; }
+    .model.is-warn span { color: var(--warn); }
+    .cmd { position: relative; margin: 10px 0; }
+    .cmd pre { margin: 0; padding: 14px 16px; padding-right: 86px; border-radius: 10px; background: var(--field, #16181d); border: 1px solid var(--rule); overflow-x: auto; font-family: var(--font-mono, "JetBrains Mono", monospace); font-size: 13px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--ink); }
+    /* Long commands wrap on screen (never under the Copy button); copying takes the text as written. */
+    .copy { position: absolute; top: 8px; right: 8px; font: inherit; font-size: 13px; padding: 5px 12px; border-radius: 8px; border: 1px solid var(--rule); background: var(--surface-3, #262932); color: var(--ink); cursor: pointer; }
+    .copy:hover { border-color: var(--accent); }
+    .copy.is-done { background: var(--signal-soft, rgba(62,207,109,.16)); border-color: var(--signal, #3ecf6d); }
+    .expect { border-left: 3px solid var(--signal, #3ecf6d); padding: 4px 0 4px 12px; margin: 10px 0; color: var(--ink-dim); font-size: 14px; }
+    .expect code, .hint code, .card p code, .card li code { font-family: var(--font-mono, monospace); font-size: 0.92em; background: var(--fill, rgba(255,255,255,.06)); padding: 1px 5px; border-radius: 5px; }
+    .warnbox { border-left: 3px solid var(--warn); padding: 4px 0 4px 12px; margin: 10px 0; color: var(--ink-dim); font-size: 14px; }
+    .btn-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; align-items: center; }
+    .gbtn { font: inherit; font-size: 14px; padding: 8px 16px; border-radius: 10px; border: 1px solid var(--rule); background: var(--surface-3, #262932); color: var(--ink); cursor: pointer; }
+    .gbtn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink, #fff); }
+    .gbtn:disabled { opacity: .5; cursor: default; }
+    .result { font-size: 14px; margin-top: 8px; }
+    .result.ok { color: var(--signal, #3ecf6d); }
+    .result.bad { color: var(--warn); }
+    details { border: 1px solid var(--rule); border-radius: 10px; padding: 10px 14px; margin: 8px 0; }
+    summary { cursor: pointer; font-weight: 600; }
+    details p, details ul { font-size: 14px; }
+    .only-other.is-hidden, .only-same.is-hidden { display: none !important; }
+    @media (max-width: 640px) { .models { grid-template-columns: 1fr; } h1 { font-size: 24px; } }
+  </style>
+</head>
+<body>
+<main class="guide">
+  <a class="back" href="/">← Back to Frivo</a>
+  <h1>Set up local AI</h1>
+  <p class="lead">
+    Let a graphics card on your own PC write Frivo's replies, instead of OpenAI. It's free, nothing
+    leaves your home network, and on a decent graphics card it's about as quick. It takes about
+    15 minutes, and every command is ready to copy.
+  </p>
+
+  <!-- ===== Questions ===== -->
+  <section class="card" id="questions">
+    <h2>First, two questions</h2>
+    <div class="q">
+      <span class="q-label">Which PC will run the AI?</span>
+      <div class="choices">
+        <label class="choice"><input type="radio" name="where" value="same" checked> This PC, the one Frivo runs on</label>
+        <label class="choice"><input type="radio" name="where" value="other"> Another PC on my network</label>
+      </div>
+      <p class="hint">Pick the PC with the best graphics card. Do every step below <b>on that PC</b>, except the last one.</p>
+    </div>
+    <div class="q">
+      <label class="q-label" for="vram">How much video memory does its graphics card have?</label>
+      <select id="vram">
+        <option value="0">No graphics card (CPU only)</option>
+        <option value="4">4 GB</option>
+        <option value="6">6 GB</option>
+        <option value="8" selected>8 GB</option>
+        <option value="10">10 GB</option>
+        <option value="12">12 GB</option>
+        <option value="16">16 GB</option>
+        <option value="24">24 GB</option>
+        <option value="32">32 GB or more</option>
+      </select>
+      <p class="hint">Not sure? On that PC, open <b>Task Manager</b> (Ctrl + Shift + Esc) → <b>Performance</b> → <b>GPU</b>,
+        and look at <b>Dedicated GPU memory</b>: it's the number after the slash, like <code>0.0/8.0 GB</code>.</p>
+      <label class="choice" style="margin-top:6px"><input type="checkbox" id="evora"> Evora also uses this graphics card</label>
+    </div>
+    <p style="margin:14px 0 0;font-weight:600">Your three models</p>
+    <p class="hint" style="margin-top:2px">Frivo lets you switch between these with the <b>AI</b> chip above the message box.</p>
+    <div class="models" id="models"></div>
+    <p class="hint" id="modelsNote"></p>
+  </section>
+
+  <!-- ===== Steps ===== -->
+  <section class="card">
+    <h2><span class="num">1</span>Update the graphics driver</h2>
+    <p>The AI runs on the graphics card, and an old driver is the most common reason it doesn't.</p>
+    <ul>
+      <li><b>NVIDIA:</b> open the <b>NVIDIA app</b> (or GeForce Experience) and install the latest driver, or get it from
+        <a href="https://www.nvidia.com/drivers" target="_blank" rel="noopener">nvidia.com/drivers</a>.</li>
+      <li><b>AMD:</b> use <b>AMD Software: Adrenalin Edition</b>. Recent Radeon cards (RX 6000 and newer) are supported.</li>
+    </ul>
+    <p class="hint">Restart the PC if the driver installer asks you to.</p>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">2</span>Install Ollama</h2>
+    <ol>
+      <li>Go to <a href="https://ollama.com/download" target="_blank" rel="noopener">ollama.com/download</a>, choose <b>Windows</b>, and download <b>OllamaSetup.exe</b>.</li>
+      <li>Run it and click through the installer.</li>
+      <li>When it finishes, an Ollama window may open. You won't need it, so you can close it. Ollama keeps running in the background (its icon is near the clock).</li>
+    </ol>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">3</span>Set Ollama up for Frivo</h2>
+    <p>Open <b>PowerShell</b>: click Start, type <b>PowerShell</b>, and open <b>Windows PowerShell</b>. Then copy this,
+      paste it into PowerShell (right-click pastes), and press <b>Enter</b>.</p>
+    <div class="cmd"><pre id="cmdSettings"></pre><button class="copy" type="button" data-copy="cmdSettings">Copy</button></div>
+    <p class="hint">What this does: it keeps the AI loaded so replies never wait for it,
+      <span class="only-other">lets other PCs on your network use it, </span>uses less video memory,
+      and restarts Ollama so the settings take effect.</p>
+    <div class="expect only-other">After a few seconds, the last line should show <code>0.0.0.0:11434</code> and <code>LISTENING</code>.
+      If it shows <code>127.0.0.1:11434</code> instead, see <b>Other PCs can't connect</b> at the bottom.</div>
+    <div class="expect only-same">After a few seconds, the last line should show <code>11434</code> and <code>LISTENING</code>.</div>
+  </section>
+
+  <section class="card only-other">
+    <h2><span class="num">4</span>Let Frivo's PC connect</h2>
+    <p>This one needs PowerShell <b>as administrator</b>: click Start, type <b>PowerShell</b>, right-click
+      <b>Windows PowerShell</b>, and choose <b>Run as administrator</b>. Then copy, paste and press Enter:</p>
+    <div class="cmd"><pre id="cmdFirewall"></pre><button class="copy" type="button" data-copy="cmdFirewall">Copy</button></div>
+    <div class="expect">In the table at the end, <b>NetworkCategory</b> should say <code>Private</code>.
+      If it says <code>Public</code>, run the next command with your network's name from the first column, then you're done with this step.</div>
+    <div class="cmd"><pre id="cmdPrivate">Set-NetConnectionProfile -InterfaceAlias "Ethernet" -NetworkCategory Private</pre><button class="copy" type="button" data-copy="cmdPrivate">Copy</button></div>
+    <p class="hint">Replace <code>Ethernet</code> with the name from the first column, such as <code>Wi-Fi</code>. Only do this on your home network:
+      Ollama has no password, so anyone on a Private network can use it.</p>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">5</span>Download the AI models</h2>
+    <p>Back in a normal PowerShell window, copy, paste and press Enter. This downloads your three models
+      (<span id="downloadSize"></span> in all), so it can take a while.</p>
+    <div class="cmd"><pre id="cmdPull"></pre><button class="copy" type="button" data-copy="cmdPull">Copy</button></div>
+    <div class="expect">Each one ends with <code>success</code>.</div>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">6</span>Check it works</h2>
+    <p>Copy, paste and press Enter. The first time, the answer can take up to a minute while the model loads.</p>
+    <div class="cmd"><pre id="cmdCheck"></pre><button class="copy" type="button" data-copy="cmdCheck">Copy</button></div>
+    <div class="expect">You should get a short hello, then a table where <b>PROCESSOR</b> says <code>100% GPU</code>
+      and <b>UNTIL</b> says <code>Forever</code>.</div>
+    <p class="hint">Typed <code>ollama</code> on its own and got a menu? Press <b>Esc</b>; you don't need it.</p>
+  </section>
+
+  <section class="card only-other">
+    <h2><span class="num">7</span>Find this PC's address</h2>
+    <div class="cmd"><pre id="cmdIp"></pre><button class="copy" type="button" data-copy="cmdIp">Copy</button></div>
+    <div class="expect">Note the <b>IPAddress</b> next to your network, something like <code>192.168.1.50</code>.</div>
+  </section>
+
+  <section class="card">
+    <h2><span class="num">8</span>Connect Frivo</h2>
+    <p class="only-other">Do this step in Frivo, on any device. Type the address from step 7:</p>
+    <p class="only-same">Frivo and Ollama are on the same PC, so the address is already filled in:</p>
+    <input class="field" id="url" type="text" autocomplete="off" spellcheck="false" placeholder="http://192.168.1.50:11434">
+    <label class="choice" style="margin-top:10px"><input type="checkbox" id="alsoTranslate" checked> Use it for translations too</label>
+    <div class="btn-row">
+      <button class="gbtn" type="button" id="testBtn">Test</button>
+      <button class="gbtn primary" type="button" id="useBtn">Use local AI in Frivo</button>
+    </div>
+    <div class="result" id="result"></div>
+  </section>
+
+  <!-- ===== Help ===== -->
+  <section class="card">
+    <h2>If something isn't right</h2>
+    <details>
+      <summary>"ollama" isn't recognized</summary>
+      <p>PowerShell windows opened before Ollama was installed don't know about it. Close PowerShell, open a new one, and try again.</p>
+    </details>
+    <details>
+      <summary>Test says nothing is listening, or it can't connect</summary>
+      <ul>
+        <li>Check Ollama is running: its icon should be near the clock. If not, start <b>Ollama</b> from the Start menu.</li>
+        <li class="only-other">On Frivo's PC, open <code>http://&lt;the address&gt;:11434</code> in a browser. It should say <b>Ollama is running</b>.
+          If it doesn't load, redo step 4 and check the network is <b>Private</b>.</li>
+        <li>Make sure the address starts with <code>http://</code> (not https) and ends with <code>:11434</code>.</li>
+      </ul>
+    </details>
+    <details class="only-other">
+      <summary>Other PCs can't connect (it shows 127.0.0.1:11434)</summary>
+      <p>Ollama started without the settings from step 3. Run step 3 again. If it still shows <code>127.0.0.1</code>, open the Ollama
+        window (from the Start menu), click the sidebar icon at the top left, then <b>Settings</b>, turn on
+        <b>Expose Ollama to the network</b>, and run step 3 once more.</p>
+    </details>
+    <details>
+      <summary>UNTIL says "4 minutes from now", not "Forever"</summary>
+      <p>The same cause: run step 3 again. (Frivo also asks Ollama to keep the model loaded, so replies from Frivo stay quick either way.)</p>
+    </details>
+    <details>
+      <summary>PROCESSOR shows a split, like "30%/70% CPU/GPU"</summary>
+      <p>The model doesn't fit in the graphics card's memory, so part of it runs on the processor, which is much slower.
+        Use a smaller model: pick <b>Balanced</b> or <b>Fast</b> with the AI chip, close other programs using the graphics card
+        (such as games), or tick <b>Evora also uses this graphics card</b> above if it does, and download the models it suggests.</p>
+    </details>
+    <details>
+      <summary>Frivo says a model "isn't on the Ollama PC yet"</summary>
+      <p>That model hasn't been downloaded. Run the command it shows (<code>ollama pull …</code>) on the Ollama PC, or redo step 5.</p>
+    </details>
+    <details>
+      <summary>Replies aren't as good as with OpenAI</summary>
+      <p>Smaller models are quicker but less careful, especially with <b>Clean up</b>, which has strict rules. Try <b>Balanced</b>
+        or <b>Best</b> with the AI chip. You can switch back to OpenAI any time in <b>Settings → Providers → Chat replies</b>.</p>
+    </details>
+    <details>
+      <summary>How do I know replies come from my PC?</summary>
+      <p>Hover over a reply in Frivo: the line underneath says <b>Local</b> for your own AI, or <b>OpenAI</b>.
+        To be strict about it, turn off <b>Fall back to OpenAI if a local service is down</b> in Settings → Providers;
+        then Frivo shows an error instead of quietly using OpenAI.</p>
+    </details>
+  </section>
+</main>
+
+<script>
+(function () {
+  // Approximate memory each model needs while loaded (its download plus room
+  // for the conversation), in GB. Sizes are Ollama's default downloads.
+  var MODELS = {
+    "gemma3:1b":   { need: 1.4, download: 0.8,  name: "Gemma 3 · 1B" },
+    "qwen3.5:2b":  { need: 3.2, download: 2.7,  name: "Qwen 3.5 · 2B" },
+    "gemma3:4b":   { need: 3.3, download: 3.4,  name: "Gemma 3 · 4B" },
+    "qwen3.5:4b":  { need: 4.2, download: 4.0,  name: "Qwen 3.5 · 4B" },
+    "qwen3.5:9b":  { need: 7.6, download: 7.0,  name: "Qwen 3.5 · 9B" },
+    "gemma3:12b":  { need: 8.8, download: 8.2,  name: "Gemma 3 · 12B" },
+    "qwen3.5:27b": { need: 19,  download: 18,   name: "Qwen 3.5 · 27B" }
+  };
+  var BEST_ORDER = ["qwen3.5:27b", "gemma3:12b", "qwen3.5:9b", "qwen3.5:4b", "qwen3.5:2b", "gemma3:1b"];
+
+  function $(id) { return document.getElementById(id); }
+  function where() { return document.querySelector('input[name="where"]:checked').value; }
+
+  // Picks Fast, Balanced and Best for the memory there is to spare.
+  function pick(vram, evora) {
+    if (!vram) {
+      return { fast: "gemma3:1b", balanced: "gemma3:4b", best: "qwen3.5:4b", cpu: true };
+    }
+    var spare = vram - 0.5 - (evora ? 3 : 0);   // Windows takes a little; Evora's speech model ~3 GB
+    var fits = function (m) { return MODELS[m].need <= spare; };
+    var fast = fits("gemma3:4b") ? "gemma3:4b" : "gemma3:1b";
+    var balanced = fits("qwen3.5:4b") ? "qwen3.5:4b" : (fits("qwen3.5:2b") ? "qwen3.5:2b" : "gemma3:1b");
+    var best = BEST_ORDER.filter(fits)[0] || "gemma3:1b";
+    var partial = false;
+    if (best === balanced || MODELS[best].need <= MODELS[balanced].need) {
+      // Nothing bigger fits completely. Offer the next size up, which runs
+      // partly on the CPU: slower, but better replies.
+      var bigger = BEST_ORDER.filter(function (m) {
+        return MODELS[m].need > MODELS[balanced].need && MODELS[m].need <= spare * 1.8;
+      }).pop();
+      if (bigger) { best = bigger; partial = true; }
+    }
+    return { fast: fast, balanced: balanced, best: best, partial: partial, spare: spare };
+  }
+
+  var current = null;
+
+  function render() {
+    var vram = parseInt($("vram").value, 10);
+    var evora = $("evora").checked;
+    var other = where() === "other";
+    current = pick(vram, evora);
+
+    document.querySelectorAll(".only-other").forEach(function (el) { el.classList.toggle("is-hidden", !other); });
+    document.querySelectorAll(".only-same").forEach(function (el) { el.classList.toggle("is-hidden", other); });
+    // Renumber the steps that are showing.
+    var n = 0;
+    document.querySelectorAll(".card .num").forEach(function (el) {
+      if (!el.closest(".card").classList.contains("is-hidden")) el.textContent = ++n;
+    });
+
+    var slots = [["Fast", current.fast, "The quickest replies."],
+                 ["Balanced", current.balanced, "Better replies, still quick."],
+                 ["Best", current.best, current.partial
+                    ? "The best replies. Won't fully fit, so part runs on the CPU: slower."
+                    : "The best replies that fit."]];
+    $("models").innerHTML = "";
+    slots.forEach(function (s) {
+      var div = document.createElement("div");
+      div.className = "model" + (s[0] === "Best" && current.partial ? " is-warn" : "");
+      div.innerHTML = "<b></b><code></code><span></span>";
+      div.querySelector("b").textContent = s[0];
+      div.querySelector("code").textContent = s[1];
+      div.querySelector("span").textContent = s[2];
+      $("models").appendChild(div);
+    });
+    $("modelsNote").textContent = current.cpu
+      ? "Without a graphics card it works, but slowly: a reply can take 10 seconds or more. OpenAI is quicker on a PC like this."
+      : current.spare < 3.3
+        ? "There isn't much room on this graphics card" + (evora ? " with Evora on it too" : "") +
+          ", so only small models fit, and some slots share one. They're quick but basic; for better replies, use a PC with more video memory" +
+          (evora ? ", or run Evora somewhere else." : ".")
+        : "";
+
+    var unique = [current.fast, current.balanced, current.best].filter(function (m, i, a) { return a.indexOf(m) === i; });
+    var gb = unique.reduce(function (t, m) { return t + MODELS[m].download; }, 0);
+    $("downloadSize").textContent = "about " + Math.round(gb) + " GB";
+
+    var settings = [
+      '# Frivo: settings for Ollama',
+      '$settings = @{',
+      other ? '  OLLAMA_HOST            = "0.0.0.0:11434"   # other PCs can connect' : null,
+      '  OLLAMA_KEEP_ALIVE      = "-1"              # stay loaded',
+      '  OLLAMA_FLASH_ATTENTION = "1"               # with the next line, less memory',
+      '  OLLAMA_KV_CACHE_TYPE   = "q8_0"',
+      '}',
+      'foreach ($name in $settings.Keys) {',
+      '  [Environment]::SetEnvironmentVariable($name, $settings[$name], "User")',
+      '  Set-Item -Path "Env:$name" -Value $settings[$name]',
+      '}',
+      '# Restart Ollama so it uses them',
+      'Stop-Process -Name "ollama app", "ollama" -Force -ErrorAction SilentlyContinue',
+      'Start-Sleep -Seconds 2',
+      '$app = "$env:LOCALAPPDATA\\Programs\\Ollama\\ollama app.exe"',
+      'if (Test-Path $app) { Start-Process $app } else { Write-Host "Start Ollama from the Start menu." }',
+      'Start-Sleep -Seconds 6',
+      'netstat -ano | findstr 11434'
+    ].filter(function (l) { return l !== null; }).join("\n");
+    $("cmdSettings").textContent = settings;
+
+    $("cmdFirewall").textContent = [
+      'New-NetFirewallRule -DisplayName "Ollama (Frivo)" -Direction Inbound -Protocol TCP -LocalPort 11434 -Action Allow -Profile Private',
+      'Get-NetConnectionProfile | Select-Object InterfaceAlias, NetworkCategory'
+    ].join("\n");
+
+    $("cmdPull").textContent = unique.map(function (m) { return "ollama pull " + m; }).join("\n");
+    $("cmdCheck").textContent = 'ollama run ' + current.fast + ' "Say hi in one sentence."\nollama ps';
+    $("cmdIp").textContent = 'Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.IPAddress -notlike "127.*" -and $_.IPAddress -notlike "169.254.*" } | Select-Object InterfaceAlias, IPAddress';
+
+    var url = $("url");
+    if (!other) { url.value = "http://localhost:11434"; url.readOnly = true; }
+    else if (url.readOnly) { url.readOnly = false; url.value = url.dataset.saved && !/localhost/.test(url.dataset.saved) ? url.dataset.saved : ""; }
+  }
+
+  // Copy buttons.
+  document.querySelectorAll(".copy").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var text = $(btn.dataset.copy).textContent;
+      var done = function () {
+        btn.textContent = "Copied"; btn.classList.add("is-done");
+        setTimeout(function () { btn.textContent = "Copy"; btn.classList.remove("is-done"); }, 1800);
+      };
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(text).then(done, fallback);
+      } else { fallback(); }
+      function fallback() {
+        var ta = document.createElement("textarea");
+        ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
+        document.body.appendChild(ta); ta.select();
+        try { document.execCommand("copy"); done(); } catch (e) { btn.textContent = "Select and copy"; }
+        ta.remove();
+      }
+    });
+  });
+
+  function show(text, ok) {
+    var el = $("result");
+    el.textContent = text;
+    el.className = "result " + (ok ? "ok" : "bad");
+  }
+
+  function address() {
+    var v = $("url").value.trim();
+    if (!v) return "";
+    if (!/^https?:\/\//i.test(v)) v = "http://" + v;
+    if (!/:\d+\/?$/.test(v)) v = v.replace(/\/$/, "") + ":11434";
+    $("url").value = v;
+    return v;
+  }
+
+  async function test() {
+    var url = address();
+    if (!url) { show("Type the address from the step before, like http://192.168.1.50:11434.", false); return false; }
+    show("Testing…", true);
+    try {
+      var res = await fetch("/api/provider-test", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ kind: "ollama", url: url }) });
+      var data = await res.json();
+      show(data.message || data.error || (data.ok ? "Connected." : "Couldn't connect."), Boolean(data.ok));
+      return Boolean(data.ok);
+    } catch (e) {
+      show("Couldn't reach Frivo: " + e.message, false);
+      return false;
+    }
+  }
+
+  $("testBtn").addEventListener("click", test);
+  $("useBtn").addEventListener("click", async function () {
+    var btn = this;
+    btn.disabled = true;
+    try {
+      if (!(await test())) return;
+      var body = {
+        chat_provider: "ollama",
+        ollama_url: address(),
+        ollama_model: current.fast,
+        ollama_model_balanced: current.balanced,
+        ollama_model_best: current.best
+      };
+      if ($("alsoTranslate").checked) body.translation_provider = "ollama";
+      var res = await fetch("/api/settings", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body) });
+      if (!res.ok) throw new Error("Frivo didn't save it.");
+      var el = $("result");
+      el.className = "result ok";
+      el.innerHTML = "";
+      el.append("Done. Frivo now writes replies on your own PC. ");
+      var a = document.createElement("a");
+      a.href = "/"; a.textContent = "Back to Frivo";
+      el.append(a, " — pick Fast, Balanced or Best with the AI chip above the message box. (Reload any other Frivo tabs.)");
+    } catch (e) {
+      show("Not saved: " + e.message, false);
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  ["vram", "evora"].forEach(function (id) { $(id).addEventListener("change", render); });
+  document.querySelectorAll('input[name="where"]').forEach(function (r) { r.addEventListener("change", render); });
+
+  // Start from what Frivo already has: another PC if its address isn't localhost.
+  fetch("/api/settings").then(function (r) { return r.json(); }).then(function (s) {
+    var saved = (s.ollama_url || "").trim();
+    $("url").dataset.saved = saved;
+    if (saved && !/localhost|127\.0\.0\.1/.test(saved)) {
+      document.querySelector('input[name="where"][value="other"]').checked = true;
+      render();
+      $("url").value = saved;
+    }
+  }).catch(function () {});
+  render();
+})();
+</script>
+</body>
+</html>

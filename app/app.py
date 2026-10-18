@@ -2710,6 +2710,13 @@ def index():
     )
 
 
+# NEW (1.5.0): "Set up local AI", the step-by-step Ollama guide. Linked
+# from Settings > Providers > Ollama.
+@app.route("/setup/ollama")
+def setup_ollama_guide():
+    return render_template("setup_ollama.html", asset_version=asset_version())
+
+
 @app.route("/diagnose")
 def diagnose():
     """

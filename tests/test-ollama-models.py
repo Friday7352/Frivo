@@ -43,6 +43,8 @@ def check(name, condition, got=None):
 os.environ["APPDATA"] = tempfile.mkdtemp(prefix="frivo-ollama-home-")
 ws = tempfile.mkdtemp(prefix="frivo-ollama-")
 shutil.copy(os.path.join(APP, "app.py"), os.path.join(ws, "app.py"))
+for folder in ("templates", "static"):   # for the setup guide page
+    os.symlink(os.path.join(APP, folder), os.path.join(ws, folder))
 spec = importlib.util.spec_from_file_location("frivo_ollama", os.path.join(ws, "app.py"))
 mod = importlib.util.module_from_spec(spec)
 sys.modules["frivo_ollama"] = mod
@@ -166,6 +168,12 @@ ollama["up"] = False
 status = client.get("/api/ollama/status").get_json()
 check("Ollama down: says so", not status["reachable"] and "isn't reachable" in status["error"], status)
 ollama["up"] = True
+
+print("--- the setup guide ---")
+page = client.get("/setup/ollama")
+html = page.get_data(as_text=True)
+check("the guide page opens", page.status_code == 200 and "Set up local AI" in html, page.status_code)
+check("and Settings links to it", "/setup/ollama" in open(os.path.join(APP, "templates", "index.html"), encoding="utf-8").read())
 
 print("--- the OpenAI key ---")
 mod.CFG["chat_provider"] = "openai"

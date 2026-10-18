@@ -2947,3 +2947,27 @@ button.srow:active { background: transparent; }
 .popover--ai .ai-tier-sub { display: block; font-size: var(--text-caption); color: var(--ink-dim); }
 .popover--ai .ai-tier-sub.is-warn { color: var(--warn); }
 .popover--ai .ai-tier.is-missing { opacity: .6; }
+
+/* NEW (1.5.0): "Local" or "OpenAI" in a reply's hover line. */
+.turn-source { flex: none; padding: 0 7px; border: 1px solid var(--rule); border-radius: var(--radius-pill); }
+.turn-source.is-local { color: var(--signal); border-color: var(--signal-soft); }
+
+/* CHANGED (1.5.0): the chips stay on one row. With the AI and VRChat chips
+   there can be eight, and the row used to wrap into two. Now the voice chip
+   gives way first: its details shorten, and on narrower windows they're
+   left off (the name stays). Every other chip keeps its size. Phones already
+   scroll the row sideways (see the max-width: 760px block). */
+@media (min-width: 761px) {
+  .session-strip { flex-wrap: nowrap; }
+  .session-strip > * { flex: none; }
+  .session-strip > #voicePicker { flex: 0 1 auto; min-width: 0; }
+  .session-strip > #voicePicker .chip.voice-trigger { max-width: 100%; }
+  .session-strip .voice-trigger-name { flex: none; }
+}
+@media (min-width: 761px) and (max-width: 1180px) {
+  .session-strip .chip.voice-trigger .voice-trigger-tags { display: none; }
+}
+
+/* NEW (1.5.0): the link to the Set up local AI guide. */
+.settings-guide-link { display: inline-block; margin-left: 4px; color: var(--accent); text-decoration: none; font-weight: 500; }
+.settings-guide-link:hover { text-decoration: underline; }
