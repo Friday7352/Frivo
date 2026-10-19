@@ -844,6 +844,22 @@
                       <span class="switch-track" aria-hidden="true"></span>
                     </span>
                   </label>
+                  <!-- NEW (1.5.0): Tag words, one list for every profile with Shape words for tags. -->
+                  <div class="srow srow--stacked" id="tagWordsRow">
+                    <span class="srow-main srow-main--flex">
+                      <span class="srow-label">Tag words</span>
+                      <span class="srow-sub">Words and phrases that become voice tags instead of being read out, for every profile with Shape words for tags on. "AI picks" chooses the tag from how it's meant.</span>
+                    </span>
+                    <div class="tag-words" id="tagWordsList" role="list" aria-label="Tag words"></div>
+                    <form class="tag-words-add" id="tagWordsForm" autocomplete="off">
+                      <input type="text" id="tagWordsWord" maxlength="40" placeholder="Word or phrase, like brb" aria-label="Word or phrase">
+                      <span class="tag-words-arrow" aria-hidden="true">→</span>
+                      <input type="text" id="tagWordsTag" maxlength="38" list="tagWordsTagList" placeholder="AI picks" aria-label="Tag it becomes">
+                      <datalist id="tagWordsTagList"></datalist>
+                      <button type="submit" class="btn btn-sm">Add</button>
+                    </form>
+                    <p class="tag-words-foot"><span id="tagWordsNote"></span> <button type="button" class="link-btn" id="tagWordsReset">Put back the defaults</button></p>
+                  </div>
                   <div class="srow">
                     <span class="srow-main srow-main--flex">
                       <span class="srow-label">Delivery</span>

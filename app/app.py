@@ -685,6 +685,8 @@ def load_config():
         "hold_accent": "off",
         "expressive_model": "eleven_v4",   # NEW (1.5.0)
         "voice_accent": "auto",   # NEW (1.5.0): the accent the anchor is made in
+        # NEW (1.5.0): Tag words (see DEFAULT_TAG_WORDS); None means the defaults.
+        "tag_words": None,
         # Sampling temperature for the reply. 0.7 is the long-standing
         # OpenAI default and what this app used implicitly before the
         # setting was exposed, so an existing config behaves identically.
@@ -1235,6 +1237,163 @@ TAG_SHAPING_WORDS = {
 }
 
 
+# NEW (1.5.0): Tag words: words and phrases that Shape words for tags turns
+# into tags instead of reading out. One central list (Settings > Voices),
+# used by every profile with Shape words for tags on. Each entry has a tag,
+# or "" for "AI picks": the AI chooses from how it's meant (a light "lol" is
+# [chuckles], an awkward one [nervous laugh], a sarcastic one [scoffs]).
+DEFAULT_TAG_WORDS = [{"word": w, "tag": ""} for w in
+                     ("lol", "haha", "lmao", "lmfao", "rofl", "hehe", "heh", "teehee", "omg", "ugh", "smh", "pfft")]
+TAG_WORDS_MAX = 100
+# What the backstop uses for an "AI picks" word the AI left in, by how big
+# it is. A word you added yourself on "AI picks" has no guess and is left
+# to the AI.
+_TAG_WORD_GUESS = {
+    "lol": "laughs", "haha": "laughs", "lmao": "laughs hard", "lmfao": "laughs hard", "rofl": "laughs hard",
+    "hehe": "giggles", "teehee": "giggles", "heh": "chuckles", "lel": "chuckles", "omg": "gasps",
+    "ugh": "sighs", "smh": "sighs", "pfft": "scoffs",
+}
+_LAUGHISH = ("laugh", "chuckl", "giggl", "gasp", "sigh", "groan", "scoff")
+
+
+def normalize_tag_words(value):
+    """A clean list: [{"word", "tag"}], words lowercased and unique, tags valid or ""."""
+    if not isinstance(value, list):
+        return [dict(e) for e in DEFAULT_TAG_WORDS]
+    out, seen = [], set()
+    for entry in value:
+        if not isinstance(entry, dict):
+            continue
+        word = re.sub(r"\s+", " ", str(entry.get("word") or "")).strip().lower()[:40]
+        tag = re.sub(r"[\[\]]", "", str(entry.get("tag") or "")).strip().lower()[:38]
+        if not word or word in seen or not re.search(r"\w", word):
+            continue
+        if tag and not AUDIO_TAG_RE.fullmatch(f"[{tag}]"):
+            tag = ""
+        seen.add(word)
+        out.append({"word": word, "tag": tag})
+        if len(out) >= TAG_WORDS_MAX:
+            break
+    return out
+
+
+def tag_words():
+    return normalize_tag_words(CFG.get("tag_words", DEFAULT_TAG_WORDS))
+
+
+def _tag_word_pattern(word):
+    """How a typed word is matched: "haha" also matches "hahaha", "lol"
+    also "lool" and "LOL", and a phrase allows any spacing."""
+    unit = re.fullmatch(r"([a-z]{2})\1+", word)
+    if unit:
+        return f"a?(?:{re.escape(unit.group(1))}){{2,}}h?"
+    if " " in word:
+        return r"\s+".join(re.escape(part) for part in word.split())
+    if re.fullmatch(r"[a-z]+", word):
+        return "".join(re.escape(c) + "+" for c in word)
+    return re.escape(word)
+
+
+_TAG_WORD_CACHE = {"key": None, "re": None, "entries": []}
+
+
+def _tag_word_matcher():
+    entries = tag_words()
+    key = json.dumps(entries)
+    if _TAG_WORD_CACHE["key"] != key:
+        compiled = [(e, re.compile(_tag_word_pattern(e["word"]), re.I)) for e in entries]
+        alts = "|".join(f"(?:{_tag_word_pattern(e['word'])})" for e in sorted(entries, key=lambda e: -len(e["word"])))
+        _TAG_WORD_CACHE.update(key=key, entries=compiled,
+                               re=re.compile(rf"(?<![\w\[])(?P<w>{alts})(?![\w\]])", re.I) if alts else None)
+    return _TAG_WORD_CACHE["re"], _TAG_WORD_CACHE["entries"]
+
+
+def tag_word_entry(text):
+    """The Tag words entry `text` is, or None."""
+    _, entries = _tag_word_matcher()
+    for entry, pattern in entries:
+        if pattern.fullmatch(text or ""):
+            return entry
+    return None
+
+
+def is_text_speak(word):
+    return tag_word_entry(word) is not None
+
+
+def text_speak_tag(word):
+    """The tag a Tag word becomes when the AI left it in: its own tag, or
+    for "AI picks" a guess by how big it is (None when there's no guess)."""
+    entry = tag_word_entry(word)
+    if not entry:
+        return None
+    if entry["tag"]:
+        return entry["tag"]
+    w = entry["word"]
+    guess = _TAG_WORD_GUESS.get(w)
+    if guess in ("laughs", "chuckles") and ((word.isupper() and len(word) > 2)
+                                             or re.fullmatch(r"a?(?:ha){3,}h?", word.lower())):
+        return "laughs hard"
+    return guess
+
+
+def replace_text_speak(text):
+    """
+    NEW (1.5.0): any Tag word left in `text` becomes its tag where it was,
+    so the voice never reads out "lol". One already next to a tag of the
+    same kind is just dropped; an "AI picks" word with no guess is left.
+    """
+    matcher, _ = _tag_word_matcher()
+    if not text or not matcher or not matcher.search(text):
+        return text
+
+    def swap(m):
+        tag = text_speak_tag(m.group("w"))
+        if not tag:
+            return m.group(0)
+        before = text[:m.start()].rstrip()
+        after = text[m.end():].lstrip()
+        near = re.search(r"\[([^\]]+)\]\s*$", before) or re.match(r"^\[([^\]]+)\]", after)
+        if near and (near.group(1).lower() == tag or (any(k in tag for k in _LAUGHISH)
+                                                     and any(k in near.group(1).lower() for k in _LAUGHISH))):
+            return ""
+        return f"[{tag}]"
+
+    out = matcher.sub(swap, text)
+    out = re.sub(r"[ \t]{2,}", " ", out)
+    out = re.sub(r" +([.,!?;:…])", r"\1", out)
+    out = tidy_audio_tags(out.strip())
+    return re.sub(r"^[\s,.;:]+(?=\S)", "", out)   # a message that was only "lol."
+
+
+def tag_words_prompt():
+    """What the AI is told about the Tag words list."""
+    entries = tag_words()
+    if not entries:
+        return ""
+    fixed = [e for e in entries if e["tag"]]
+    picks = [e for e in entries if not e["tag"]]
+    lines = ["TEXT-SPEAK BECOMES A TAG:",
+             "These words and phrases are never said aloud. Wherever one appears (in any capitalisation or "
+             "stretched out, like \"lool\" or \"hahaha\"), remove it and put a tag where it was."]
+    if fixed:
+        lines.append("Always these tags:")
+        lines += [f"- \"{e['word']}\": [{e['tag']}]" for e in fixed]
+    if picks:
+        lines.append("For these, choose the tag that fits how it's meant here: "
+                     + ", ".join(f"\"{e['word']}\"" for e in picks) + ".")
+        lines += [
+            "- light, after something mildly funny: [chuckles]; at something actually funny: [laughs]",
+            "- stretched or in capitals (\"hahaha\", \"LMAO\", \"LOL\"): [laughs hard]",
+            "- playful or mischievous (\"hehe\"): [giggles]",
+            "- awkward or nervous (after an apology, bad news, something embarrassing): [nervous laugh]",
+            "- sarcastic or dismissive: [scoffs]",
+            "- surprise: [gasps]; frustration or disbelief: [sighs] or [groans]",
+            "Read the whole message to decide which fits.",
+        ]
+    return "\n".join(lines) + "\n"
+
+
 def tag_shaping_stays_on_message(source, output):
     """
     NEW (1.5.0): cleanup_stays_on_message for Shape words for tags, where
@@ -1250,9 +1409,10 @@ def tag_shaping_stays_on_message(source, output):
         return False
 
     def traced(word, pool):
-        return word in ECHO_GRAMMAR_WORDS or word in TAG_SHAPING_WORDS or any(_close_spelling(word, other) for other in pool)
+        return (word in ECHO_GRAMMAR_WORDS or word in TAG_SHAPING_WORDS or is_text_speak(word)
+                or any(_close_spelling(word, other) for other in pool))
 
-    a_content = [w for w in a if w not in ECHO_GRAMMAR_WORDS and w not in TAG_SHAPING_WORDS]
+    a_content = [w for w in a if w not in ECHO_GRAMMAR_WORDS and w not in TAG_SHAPING_WORDS and not is_text_speak(w)]
     b_content = [w for w in b if w not in ECHO_GRAMMAR_WORDS]
     new_words = [w for w in b_content if not traced(w, a)]
     if len(new_words) > max(2, math.ceil(0.2 * len(a_content))):
@@ -3541,7 +3701,8 @@ def expressive_voice_rules(response_style, language, delivery, shaping=False):
             "\"ugh [sighs]\" becomes \"[sighs]\")\n"
             "- add a short natural lead-in of one or two words after a tag (\"[gasps] Oh,\", \"[sighs] Well,\")\n"
             "- adjust punctuation next to a tag (a comma, an ellipsis, a full stop) so the pause lands right\n"
-            "Everything else stays as cleaned up: same meaning, same order, nothing new said. Never add a "
+            + tag_words_prompt()
+            + "Everything else stays as cleaned up: same meaning, same order, nothing new said. Never add a "
             "sentence, an opinion, a name or a fact.\n\n"
         )
     if response_style == "echo":
@@ -4409,6 +4570,8 @@ def settings():
             CFG["expressive_voice"] = data.get("expressive_voice") is True
         if "tag_shaping" in data:   # NEW (1.5.0)
             CFG["tag_shaping"] = data.get("tag_shaping") is True
+        if "tag_words" in data:     # NEW (1.5.0)
+            CFG["tag_words"] = normalize_tag_words(data.get("tag_words"))
         if "voice_delivery" in data:
             CFG["voice_delivery"] = normalize_voice_delivery(data.get("voice_delivery"), CFG.get("voice_delivery", DEFAULT_VOICE_DELIVERY))
         if "hold_accent" in data:
@@ -4519,6 +4682,7 @@ def settings():
             # NEW (1.5.0)
             "expressive_voice": CFG.get("expressive_voice") is True,
             "tag_shaping": CFG.get("tag_shaping") is True,   # NEW (1.5.0)
+            "tag_words": tag_words(),                        # NEW (1.5.0)
             "voice_delivery": normalize_voice_delivery(CFG.get("voice_delivery")),
             "hold_accent": normalize_hold_accent(CFG.get("hold_accent")),
             "hold_accent_modes": HOLD_ACCENT_MODES,
@@ -7295,6 +7459,8 @@ def chat():
         # no tags at all.
         if voice_engine == "elevenlabs":
             voiced = tidy_audio_tags(spoken)
+            if shaping:
+                voiced = replace_text_speak(voiced)   # NEW (1.5.0): no "lol" read out
             if not ACCENT_TAG_RE.search(message):   # NEW (1.5.0): not one you typed
                 voiced = ACCENT_TAG_RE.sub("", voiced).strip()
             if voice_style["delivery"] == "calm":

@@ -1923,6 +1923,7 @@ async function saveAllSettings({ close = false, quiet = false } = {}) {
     // NEW (1.5.0): Expressive voice and Delivery, for the default profile.
     expressive_voice: $("expressiveVoiceToggle") ? $("expressiveVoiceToggle").checked : false,
     tag_shaping: $("tagShapingToggle") ? $("tagShapingToggle").checked : false,   // NEW (1.5.0)
+    tag_words: Array.isArray(tagWordsState) ? tagWordsState : undefined,           // NEW (1.5.0)
     hold_accent: $("holdAccentRadios") ? getRadioValue($("holdAccentRadios"), "anchor") : "anchor",   // NEW (1.5.0)
     voice_accent: $("voiceAccentSelect") ? $("voiceAccentSelect").value : "auto",   // NEW (1.5.0)
     expressive_model: $("expressiveModelRadios") ? getRadioValue($("expressiveModelRadios"), "eleven_v4") : "eleven_v4",   // NEW (1.5.0)
@@ -9360,6 +9361,7 @@ function applyVoiceStyleSettings(data) {
   if (toggle) toggle.checked = data.expressive_voice === true;
   const shapingToggle = $("tagShapingToggle");
   if (shapingToggle) shapingToggle.checked = data.tag_shaping === true;   // NEW (1.5.0)
+  if (Array.isArray(data.tag_words)) { tagWordsState = data.tag_words; renderTagWords(); }   // NEW (1.5.0)
   const hold = $("holdAccentRadios");
   const holdNote = $("holdAccentNote");
   if (hold && Array.isArray(data.hold_accent_modes) && data.hold_accent_modes.length) {
@@ -9440,7 +9442,7 @@ function showShapingState() {
   const cleanUp = style === "echo";
   field.classList.toggle("is-dimmed", !cleanUp);
   if (hint) hint.textContent = cleanUp
-    ? "Clean up adds voice tags and may lightly change the words right next to them so they flow: dropping a \"haha\" when [laughs] performs it, adding an \"oh\" after [gasps]. Meaning stays yours."
+    ? "Clean up adds voice tags and may lightly change the words right next to them so they flow: dropping a \"haha\" when [laughs] performs it, adding an \"oh\" after [gasps]. Meaning stays yours. Words like \"lol\" become tags: the list is in Settings > Voices > Tag words."
     : "Only works with Clean up. Pick Clean up above to use it.";
 }
 
@@ -10486,4 +10488,112 @@ async function refreshAnchorStatus() {
     new MutationObserver(() => { if (settingsPanel && !settingsPanel.classList.contains("is-hidden")) refreshAnchorStatus(); })
       .observe(name, { childList: true, characterData: true, subtree: true });
   }
+})();
+
+// ---------------------------------------------------------------------------
+// NEW (1.5.0): Tag words (Settings > Voices). One list for every profile
+// with Shape words for tags on: a word or phrase, and the tag it becomes
+// (or "AI picks"). Saved as it's changed.
+// ---------------------------------------------------------------------------
+
+var tagWordsState = null;
+var TAG_WORD_DEFAULTS = ["lol", "haha", "lmao", "lmfao", "rofl", "hehe", "heh", "teehee", "omg", "ugh", "smh", "pfft"]
+  .map((word) => ({ word, tag: "" }));
+var TAG_SUGGESTIONS = ["laughs", "laughs hard", "chuckles", "giggles", "nervous laugh", "scoffs", "sighs", "groans",
+  "gasps", "whispers", "excited", "sarcastic", "sad", "pause", "clears throat"];
+
+function renderTagWords() {
+  const list = $("tagWordsList");
+  const note = $("tagWordsNote");
+  if (!list || !Array.isArray(tagWordsState)) return;
+  list.replaceChildren();
+  tagWordsState.forEach((entry, i) => {
+    const chip = document.createElement("span");
+    chip.className = "tag-word";
+    chip.setAttribute("role", "listitem");
+    const word = document.createElement("span");
+    word.className = "tag-word-word";
+    word.textContent = entry.word;
+    const arrow = document.createElement("span");
+    arrow.className = "tag-word-arrow";
+    arrow.textContent = "→";
+    const tag = document.createElement("span");
+    tag.className = "tag-word-tag" + (entry.tag ? "" : " is-auto");
+    tag.textContent = entry.tag ? `[${entry.tag}]` : "AI picks";
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "tag-word-remove";
+    remove.title = `Remove "${entry.word}": it'll be read out as typed`;
+    remove.setAttribute("aria-label", `Remove ${entry.word}`);
+    remove.textContent = "×";
+    remove.addEventListener("click", () => {
+      tagWordsState = tagWordsState.filter((_, j) => j !== i);
+      renderTagWords();
+      saveTagWords(`Removed "${entry.word}".`);
+    });
+    chip.append(word, arrow, tag, remove);
+    list.append(chip);
+  });
+  if (note && !note.dataset.flash) {
+    note.textContent = tagWordsState.length
+      ? `${tagWordsState.length} word${tagWordsState.length === 1 ? "" : "s"}.`
+      : "Empty: nothing typed becomes a tag.";
+  }
+}
+
+async function saveTagWords(message) {
+  const note = $("tagWordsNote");
+  try {
+    if (typeof saveAllSettings === "function") await saveAllSettings({ quiet: true });
+    if (note && message) {
+      note.dataset.flash = "1";
+      note.textContent = message;
+      setTimeout(() => { delete note.dataset.flash; renderTagWords(); }, 1800);
+    }
+  } catch (err) {
+    if (note) note.textContent = "Couldn't save: " + err.message;
+  }
+}
+
+(function wireTagWords() {
+  const form = $("tagWordsForm");
+  const wordIn = $("tagWordsWord");
+  const tagIn = $("tagWordsTag");
+  const reset = $("tagWordsReset");
+  const options = $("tagWordsTagList");
+  if (options) {
+    TAG_SUGGESTIONS.forEach((t) => { const o = document.createElement("option"); o.value = t; options.append(o); });
+  }
+  if (form && wordIn && tagIn) {
+    form.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const word = wordIn.value.replace(/\s+/g, " ").trim().toLowerCase();
+      const tag = tagIn.value.replace(/[\[\]]/g, "").replace(/\s+/g, " ").trim().toLowerCase();
+      const note = $("tagWordsNote");
+      if (!word) { wordIn.focus(); return; }
+      if (tag && !/^[a-z][a-z' \-]{0,37}$/.test(tag)) {
+        if (note) note.textContent = "A tag is a word or two of letters, like laughs or nervous laugh.";
+        tagIn.focus();
+        return;
+      }
+      if (!Array.isArray(tagWordsState)) tagWordsState = TAG_WORD_DEFAULTS.slice();
+      const existing = tagWordsState.findIndex((x) => x.word === word);
+      if (existing >= 0) tagWordsState[existing] = { word, tag };
+      else tagWordsState = tagWordsState.concat([{ word, tag }]);
+      wordIn.value = "";
+      tagIn.value = "";
+      renderTagWords();
+      saveTagWords(existing >= 0 ? `Updated "${word}".` : `Added "${word}".`);
+      wordIn.focus();
+    });
+    // Enter in the tag box adds, too; in the word box it moves to the tag.
+    wordIn.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && wordIn.value.trim()) { e.preventDefault(); tagIn.focus(); }
+    });
+  }
+  if (reset) reset.addEventListener("click", () => {
+    tagWordsState = TAG_WORD_DEFAULTS.map((x) => ({ ...x }));
+    renderTagWords();
+    saveTagWords("Defaults put back.");
+  });
 })();

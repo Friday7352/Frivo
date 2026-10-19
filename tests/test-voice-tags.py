@@ -251,6 +251,43 @@ check("new content is still caught: falls back to your words", data.get("kept_ex
 check("the looser check: drops and lead-ins pass", mod.tag_shaping_stays_on_message("haha thats so funny", "That's so funny")
       and mod.tag_shaping_stays_on_message("you beat it", "Oh, you beat it?"))
 check("... a rewrite doesn't", not mod.tag_shaping_stays_on_message("you beat it", "Congratulations on the incredible victory, friend"))
+check("Clean up is told text-speak becomes a tag, chosen by context", "TEXT-SPEAK BECOMES A TAG" in system
+      and "[nervous laugh]" in system and "[scoffs]" in system)
+print("--- text-speak ---")
+for typed, want in [("thats so funny lol", "thats so funny [laughs]"), ("LMAO no way", "[laughs hard] no way"),
+                    ("hahaha you fell", "[laughs hard] you fell"), ("hehe i took your fries", "[giggles] i took your fries"),
+                    ("heh nice", "[chuckles] nice"), ("omg you did it", "[gasps] you did it"), ("lol.", "[laughs]")]:
+    check(f"backstop: {typed!r}", mod.replace_text_speak(typed) == want, mod.replace_text_speak(typed))
+check("a laugh tag already there: the word is just dropped", mod.replace_text_speak("[laughs] haha that's good") == "[laughs] that's good")
+check("real words are left alone", mod.replace_text_speak("lollipop, hello, holla, ha") == "lollipop, hello, holla, ha")
+model_says["text"] = "[nervous laugh] Sorry, I forgot your birthday."
+status, data = chat("haha sorry i forgot your birthday", profile_id=shaper["id"])
+check("the AI's pick by context is kept", data.get("voiced") == "[nervous laugh] Sorry, I forgot your birthday.", data.get("voiced"))
+model_says["text"] = "That's so funny lol"
+status, data = chat("thats so funny lol", profile_id=shaper["id"])
+check("text-speak the AI left is never read out", "lol" not in data.get("voiced", "").lower() and "[laughs]" in data.get("voiced", ""), data.get("voiced"))
+check("... and the chatbox gets the words", data.get("reply") == "That's so funny", data.get("reply"))
+print("--- Tag words (the central list) ---")
+res = client.post("/api/settings", json={"tag_words": [
+    {"word": "BRB", "tag": "[sighs]"}, {"word": "im dead", "tag": "laughs hard"}, {"word": "lol", "tag": ""},
+    {"word": "lol", "tag": "giggles"}, {"word": "bad", "tag": "not a tag!!"}, {"word": "", "tag": "x"}, "junk"]})
+got = client.get("/api/settings").get_json().get("tag_words")
+check("saved, cleaned: lowercase, no brackets, no duplicates or blanks, a bad tag becomes AI picks",
+      got == [{"word": "brb", "tag": "sighs"}, {"word": "im dead", "tag": "laughs hard"}, {"word": "lol", "tag": ""},
+              {"word": "bad", "tag": ""}], got)
+check("a word you added becomes its tag", mod.replace_text_speak("gotta go brb") == "gotta go [sighs]", mod.replace_text_speak("gotta go brb"))
+check("a phrase, with any spacing", mod.replace_text_speak("you tripped im  dead") == "you tripped [laughs hard]", mod.replace_text_speak("you tripped im  dead"))
+check("stretched words still match", mod.replace_text_speak("that's funny loool") == "that's funny [laughs]", mod.replace_text_speak("that's funny loool"))
+check("a word taken off the list is read out", mod.replace_text_speak("omg you did it") == "omg you did it", mod.replace_text_speak("omg you did it"))
+check("a word you added on AI picks, with no guess, is left to the AI", mod.replace_text_speak("that was bad") == "that was bad")
+p_shape = mod.build_system_prompt("Fun.", 80, "English", "echo", voice_style={"expressive": False, "delivery": "natural", "shaping": True})
+check("the AI is told the list", '"brb": [sighs]' in p_shape and '"im dead": [laughs hard]' in p_shape
+      and '"lol"' in p_shape and '"omg"' not in p_shape, p_shape[p_shape.find("TEXT-SPEAK"):][:400])
+client.post("/api/settings", json={"tag_words": []})
+p_shape = mod.build_system_prompt("Fun.", 80, "English", "echo", voice_style={"expressive": False, "delivery": "natural", "shaping": True})
+check("an empty list: nothing becomes a tag", "TEXT-SPEAK" not in p_shape and mod.replace_text_speak("lol ok") == "lol ok")
+mod.CFG["tag_words"] = None
+check("never set: the defaults", [e["word"] for e in mod.tag_words()][:3] == ["lol", "haha", "lmao"])
 mod.CFG.update(response_style="reply")
 p = mod.build_system_prompt("Fun.", 80, "English", "reply", voice_style={"expressive": True, "delivery": "natural", "shaping": True})
 check("a Reply profile isn't shaped", "SHAPING" not in p)

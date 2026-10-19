@@ -4021,3 +4021,34 @@ html.motion-ready .stage { transition: transform var(--dur-smooth) var(--spring-
    menu looks like every other row's. */
 .voice-row.is-current .voice-mark { color: var(--accent); }
 .voice-menu button:has(svg.is-danger) { color: var(--alert); }
+
+/* NEW (1.5.0): Tag words in Settings > Voices. */
+#tagWordsRow { gap: 10px; }
+.tag-words { display: flex; flex-wrap: wrap; gap: 6px; max-width: 720px; }
+.tag-word {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 4px 4px 10px;
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  background: var(--surface-2);
+  font-size: var(--text-footnote);
+  line-height: 1.2;
+}
+@starting-style { .tag-word { opacity: 0; scale: 0.94; } }
+.tag-word { transition: opacity 160ms var(--ease), scale 160ms var(--ease); }
+.tag-word-word { font-weight: 600; color: var(--ink); }
+.tag-word-arrow { color: var(--ink-faint); }
+.tag-word-tag { font-style: italic; color: var(--accent); }
+.tag-word-tag.is-auto { font-style: normal; color: var(--ink-dim); }
+.tag-word-remove {
+  width: 22px; height: 22px; padding: 0;
+  border: 0; border-radius: 50%;
+  background: transparent; color: var(--ink-faint);
+  font-size: 15px; line-height: 1; cursor: pointer;
+}
+.tag-word-remove:hover { background: var(--fill); color: var(--alert); }
+.tag-words-add { display: flex; align-items: center; gap: 8px; max-width: 560px; }
+.tag-words-add input { flex: 1; min-width: 0; padding: 7px 10px; font-size: var(--text-footnote); }
+.tag-words-arrow { color: var(--ink-faint); flex: none; }
+.tag-words-add .btn-sm { flex: none; }
+.tag-words-foot { margin: 0; font-size: var(--text-caption); color: var(--ink-dim); }
