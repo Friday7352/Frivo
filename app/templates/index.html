@@ -1096,6 +1096,20 @@
                       <input type="text" id="ollamaModelBest" placeholder="qwen3.5:9b" autocomplete="off">
                     </span>
                   </div>
+                  <div class="srow"><!-- NEW (1.5.0) -->
+                    <label class="srow-main srow-main--flex" for="ollamaIdleUnload">
+                      <span class="srow-label">Free the graphics card when idle</span>
+                      <span class="srow-sub">After no replies for this long, the model leaves the graphics card's memory. The next reply takes a few seconds longer while it loads again.</span>
+                    </label>
+                    <span class="srow-control">
+                      <select id="ollamaIdleUnload" aria-label="Free the graphics card after">
+                        <option value="15m">After 15 minutes</option>
+                        <option value="1h" selected>After 1 hour</option>
+                        <option value="4h">After 4 hours</option>
+                        <option value="never">Never</option>
+                      </select>
+                    </span>
+                  </div>
                   <div class="srow">
                     <label class="srow-main srow-main--flex" for="ollamaTranslationModel">
                       <span class="srow-label">Translation model</span>

@@ -211,3 +211,12 @@ The rest of the iOS-style motion.
 - The chips glide to their new places when one appears, disappears or changes width (like "Use English").
 
 Everything holds 60 frames a second with the processor slowed four times, about a phone's speed. Windows' "reduce animations" setting still turns it all off.
+
+## Frees the graphics card when idle
+
+An Ollama model used to stay on the graphics card until Ollama stopped. Now it
+stays loaded while you're using Frivo and leaves the graphics card's memory
+after an hour with no replies. The next reply takes a few seconds longer
+while it loads again. Change it under **Settings > Providers > Free the
+graphics card when idle**: 15 minutes, 1 hour, 4 hours or Never. The local
+AI guide's settings step now sets Ollama's own default to an hour too.

@@ -177,7 +177,7 @@
     <p>Copy, paste and press Enter. The first time, the answer can take up to a minute while the model loads.</p>
     <div class="cmd"><pre id="cmdCheck"></pre><button class="copy" type="button" data-copy="cmdCheck">Copy</button></div>
     <div class="expect">You should get a short hello, then a table where <b>PROCESSOR</b> says <code>100% GPU</code>
-      and <b>UNTIL</b> says <code>Forever</code>.</div>
+      and <b>UNTIL</b> says <code>About an hour from now</code>.</div>
     <p class="hint">Typed <code>ollama</code> on its own and got a menu? Press <b>Esc</b>; you don't need it.</p>
   </section>
 
@@ -223,8 +223,9 @@
         <b>Expose Ollama to the network</b>, and run step 3 once more.</p>
     </details>
     <details>
-      <summary>UNTIL says "4 minutes from now", not "Forever"</summary>
-      <p>The same cause: run step 3 again. (Frivo also asks Ollama to keep the model loaded, so replies from Frivo stay quick either way.)</p>
+      <summary>UNTIL says "4 minutes from now", not about an hour</summary>
+      <p>The same cause: run step 3 again. (Frivo also tells Ollama how long to keep the model loaded, so replies from Frivo stay quick either way.
+        That's set in Frivo under <b>Settings › Providers › Free the graphics card when idle</b>: an hour unless you change it.)</p>
     </details>
     <details>
       <summary>PROCESSOR shows a split, like "30%/70% CPU/GPU"</summary>
@@ -337,7 +338,7 @@
       '# Frivo: settings for Ollama',
       '$settings = @{',
       other ? '  OLLAMA_HOST            = "0.0.0.0:11434"   # other PCs can connect' : null,
-      '  OLLAMA_KEEP_ALIVE      = "-1"              # stay loaded',
+      '  OLLAMA_KEEP_ALIVE      = "1h"              # free the graphics card after an hour idle',
       '  OLLAMA_FLASH_ATTENTION = "1"               # with the next line, less memory',
       '  OLLAMA_KV_CACHE_TYPE   = "q8_0"',
       '}',

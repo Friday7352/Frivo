@@ -139,6 +139,7 @@ const ollamaUrl = $("ollamaUrl");
 const ollamaModel = $("ollamaModel");
 const ollamaModelBalanced = $("ollamaModelBalanced");   // NEW (1.5.0)
 const ollamaModelBest = $("ollamaModelBest");           // NEW (1.5.0)
+const ollamaIdleUnload = $("ollamaIdleUnload");         // NEW (1.5.0)
 const ollamaTranslationModel = $("ollamaTranslationModel");
 const ollamaTestNote = $("ollamaTestNote");
 const testOllamaBtn = $("testOllamaBtn");
@@ -503,6 +504,7 @@ function buildProviderPickers(settings) {
   if (ollamaModel) ollamaModel.value = settings.ollama_model || "";
   if (ollamaModelBalanced) ollamaModelBalanced.value = settings.ollama_model_balanced || "";   // NEW (1.5.0)
   if (ollamaModelBest) ollamaModelBest.value = settings.ollama_model_best || "";               // NEW (1.5.0)
+  if (ollamaIdleUnload) ollamaIdleUnload.value = settings.ollama_idle_unload || "1h";        // NEW (1.5.0)
   if (typeof setAiChipTier === "function") setAiChipTier(settings.ollama_tier || "fast");     // NEW (1.5.0)
   if (ollamaTranslationModel) {
     ollamaTranslationModel.value = settings.ollama_translation_model || "";
@@ -1856,6 +1858,7 @@ async function saveAllSettings({ close = false, quiet = false } = {}) {
     ollama_model: ollamaModel ? ollamaModel.value.trim() : "",
     ollama_model_balanced: ollamaModelBalanced ? ollamaModelBalanced.value.trim() : "",   // NEW (1.5.0)
     ollama_model_best: ollamaModelBest ? ollamaModelBest.value.trim() : "",               // NEW (1.5.0)
+    ollama_idle_unload: ollamaIdleUnload ? ollamaIdleUnload.value : "1h",                  // NEW (1.5.0)
     ollama_translation_model: ollamaTranslationModel
       ? ollamaTranslationModel.value.trim()
       : "",

@@ -122,7 +122,14 @@ code, data = say()
 chat = [p for kind, p in ollama["posts"] if kind == "chat"][-1]
 check("works with no OpenAI key", code == 200 and data.get("reply") == ollama["reply"], (code, data.get("error")))
 check("written by the Fast model", chat["model"] == "gemma3:4b", chat["model"])
-check("asks for no thinking, and to stay loaded", chat.get("think") is False and chat.get("keep_alive") == -1, chat)
+check("asks for no thinking, and to stay loaded for an hour", chat.get("think") is False and chat.get("keep_alive") == "1h", chat)   # CHANGED (1.5.0)
+mod.CFG["ollama_idle_unload"] = "never"   # NEW (1.5.0)
+check("'Never' keeps it loaded for good", mod.ollama_keep_alive() == -1, mod.ollama_keep_alive())
+mod.CFG["ollama_idle_unload"] = "15m"
+check("15 minutes", mod.ollama_keep_alive() == "15m", mod.ollama_keep_alive())
+mod.CFG["ollama_idle_unload"] = "nonsense"
+check("anything else falls back to an hour", mod.ollama_keep_alive() == "1h", mod.ollama_keep_alive())
+mod.CFG["ollama_idle_unload"] = "1h"
 check("the reply says which AI wrote it", data.get("text_engine_name") == "Ollama · gemma3:4b", data.get("text_engine_name"))
 
 ollama["think_refused"] = True

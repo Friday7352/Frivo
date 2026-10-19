@@ -225,6 +225,11 @@ DEFAULT_OLLAMA_MODEL = "llama3.1:8b"
 # from before this keeps the model it had.
 OLLAMA_TIERS = [("fast", "Fast"), ("balanced", "Balanced"), ("best", "Best")]
 OLLAMA_TIER_KEYS = {"fast": "ollama_model", "balanced": "ollama_model_balanced", "best": "ollama_model_best"}
+# NEW (1.5.0): how long Ollama keeps a model on the graphics card after the
+# last reply, before handing the memory back. Ollama's own idle timer does
+# it, so it counts from the last request and every reply restarts it.
+OLLAMA_IDLE_UNLOAD = {"15m": "15 minutes", "1h": "1 hour", "4h": "4 hours", "never": "Never"}
+DEFAULT_OLLAMA_IDLE_UNLOAD = "1h"
 OLLAMA_TIER_DEFAULTS = {"fast": DEFAULT_OLLAMA_MODEL, "balanced": "qwen3.5:4b", "best": "qwen3.5:9b"}
 DEFAULT_WHISPER_URL = "http://localhost:9000"
 
@@ -688,6 +693,7 @@ def load_config():
         "ollama_model_balanced": OLLAMA_TIER_DEFAULTS["balanced"],
         "ollama_model_best": OLLAMA_TIER_DEFAULTS["best"],
         "ollama_tier": "fast",
+        "ollama_idle_unload": DEFAULT_OLLAMA_IDLE_UNLOAD,   # NEW (1.5.0)
         # Blank uses the chat model for translation.
         "ollama_translation_model": "",
         "whisper_url": DEFAULT_WHISPER_URL,
@@ -1490,6 +1496,17 @@ def tier_model(tier):
     return (CFG.get(OLLAMA_TIER_KEYS[tier]) or "").strip() or OLLAMA_TIER_DEFAULTS[tier]
 
 
+def ollama_keep_alive():
+    """
+    NEW (1.5.0): Ollama's keep_alive for Frivo's requests: "1h" and the
+    like, or -1 to stay loaded until Ollama stops.
+    """
+    choice = CFG.get("ollama_idle_unload") or DEFAULT_OLLAMA_IDLE_UNLOAD
+    if choice not in OLLAMA_IDLE_UNLOAD:
+        choice = DEFAULT_OLLAMA_IDLE_UNLOAD
+    return -1 if choice == "never" else choice
+
+
 def active_ollama_model():
     """NEW (1.5.0): the Ollama model replies use right now."""
     return tier_model(ollama_tier())
@@ -1712,10 +1729,12 @@ def ollama_chat(*, model, messages, max_tokens, temperature=None):
         # NEW (1.5.0): answer straight away. Models that "think" first would
         # spend the word allowance thinking and come back slow, or empty.
         "think": False,
-        # NEW (1.5.0): stay loaded. Ollama otherwise unloads the model after
-        # five idle minutes, and the next reply waits for it to load again.
-        # Switching to another of the three unloads this one (set_ollama_tier).
-        "keep_alive": -1,
+        # CHANGED (1.5.0): stay loaded while you're using it, and free the
+        # graphics card after the idle time set in Settings (an hour by
+        # default). Ollama's own default is five minutes, after which every
+        # reply waited for the model to load again. Switching to another of
+        # the three unloads this one (set_ollama_tier).
+        "keep_alive": ollama_keep_alive(),
     }
     if temperature is not None:
         payload["options"]["temperature"] = temperature
@@ -3008,6 +3027,8 @@ def settings():
                 CFG[key] = (data.get(key) or "").strip() or default
         if data.get("ollama_tier") in OLLAMA_TIER_KEYS:   # NEW (1.5.0)
             CFG["ollama_tier"] = data["ollama_tier"]
+        if data.get("ollama_idle_unload") in OLLAMA_IDLE_UNLOAD:   # NEW (1.5.0)
+            CFG["ollama_idle_unload"] = data["ollama_idle_unload"]
 
         if "allow_openai_fallback" in data:
             CFG["allow_openai_fallback"] = bool(data.get("allow_openai_fallback"))
@@ -3043,6 +3064,7 @@ def settings():
             "ollama_model_balanced": tier_model("balanced"),   # NEW (1.5.0)
             "ollama_model_best": tier_model("best"),           # NEW (1.5.0)
             "ollama_tier": ollama_tier(),                      # NEW (1.5.0)
+            "ollama_idle_unload": CFG.get("ollama_idle_unload") or DEFAULT_OLLAMA_IDLE_UNLOAD,   # NEW (1.5.0)
             "ollama_translation_model": CFG.get("ollama_translation_model", ""),
             "whisper_url": CFG.get("whisper_url", DEFAULT_WHISPER_URL),
             "allow_openai_fallback": bool(CFG.get("allow_openai_fallback", False)),
@@ -5062,7 +5084,7 @@ def _ollama_get(path):
 def _ollama_set_loaded(model, keep):
     """Loads (keep=True) or unloads a model, without asking it anything."""
     requests.post(f"{ollama_base_url()}/api/generate",
-                  json={"model": model, "keep_alive": -1 if keep else 0},
+                  json={"model": model, "keep_alive": ollama_keep_alive() if keep else 0},   # CHANGED (1.5.0)
                   timeout=(LOCAL_CONNECT_TIMEOUT, LOCAL_READ_TIMEOUT))
 
 
