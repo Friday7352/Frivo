@@ -451,3 +451,5 @@ Double-click `tests/check-windows-voices.bat` on a Windows PC. It runs the real 
 - `test-custom-voices.py`: downloads a small Piper voice once, then adds it as plain files, a zip, a tar.gz and a sherpa-onnx archive; checks that programs, broken files and duplicates are refused with nothing left behind, and that rename, remove and the language check work.
 
 - `test-voice-tags.py`: voice tags and Delivery. What ElevenLabs is sent for each setting, that the chatbox, word count and free voices never get tags, that Expressive voice tells the AI about them, that Suggest keeps every word, and that a refused v3 still speaks.
+
+- `test-personality-maker.py`: the personality maker. What the AI is asked for Create, Ideas to add and Add all; that answers are cleaned up and checked; that turned-down and already-written ideas aren't offered; that the conversation is used; and that a merge that loses your text falls back to adding at the end.

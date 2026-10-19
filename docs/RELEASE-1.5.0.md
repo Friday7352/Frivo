@@ -266,3 +266,12 @@ For ElevenLabs voices.
 - **Delivery**: Calm, Natural or Lively. Calm is steadier and tells the AI not to write in capitals or pile up exclamation marks, and it takes out `[shouts]`. Natural is exactly what Frivo sent before. Lively swings more.
 - Tags show as small marks in the conversation. The chatbox, the word count, the translation and the free voices never see them. The word highlight still follows the voice.
 - Anything with a tag, and every reply from an Expressive profile, is spoken with ElevenLabs' v3 model. It doesn't take the Speaking speed setting. If ElevenLabs refuses v3, the reply is spoken the usual way without the tags.
+
+## The personality maker
+
+Above the personality box, in the profile editor and in Settings > Replies. It uses the AI you've set up for chat replies, Ollama or OpenAI.
+
+- **Create**: describe a personality in a few words ("a sleepy pirate who loves his cat") and the AI writes the whole thing: who they are, how they talk, what they care about, how they react, and what they never do. It's written for how Frivo uses it (a Clean up profile gets delivery and tone, not opinions) and leaves reply length and language to the app. With something already in the box, it rewrites from your idea and keeps what fits.
+- **Ideas to add** appear above the box: things the personality doesn't cover yet, worked out from what's written and from how the profile has actually been talking in your conversation. Click one to put it in (at the end of the sentence your cursor is in). × turns it down, and it isn't suggested again for that profile. New ideas come a moment after you stop typing, or with ↻.
+- **Add all** has the AI work every idea in so it reads as one piece. If the AI drops anything you'd written, the ideas are added at the end instead.
+- **Undo** after anything the AI changed.

@@ -1720,7 +1720,13 @@ function addProfileDivider(label, { restoring = false } = {}) {
 async function loadSettings() {
   const res = await fetch("/api/settings");
   const data = await res.json();
-  systemPromptInput.value = data.system_prompt || "";
+  // CHANGED (1.5.0): only replaced when it's different, so a save (which
+  // reloads these) doesn't clear the personality maker's ideas mid-use.
+  const incomingPrompt = data.system_prompt || "";
+  if (systemPromptInput.value !== incomingPrompt) {
+    systemPromptInput.value = incomingPrompt;
+    if (window.frivoSettingsPersonality) window.frivoSettingsPersonality.reset({ fetch: false });   // NEW (1.5.0)
+  }
   openaiStatus.classList.toggle("is-lit", data.openai_key_set);
   elevenStatus.classList.toggle("is-lit", data.elevenlabs_key_set);
 
@@ -3699,6 +3705,7 @@ function openModal(profile) {
   profileLanguageSelect.value = profile ? (profile.language || "") : currentLanguage;
   overlay.classList.remove("is-hidden");
   profileNameInput.focus();
+  if (window.frivoProfilePersonality) window.frivoProfilePersonality.reset();   // NEW (1.5.0): the personality maker
 }
 
 function closeModal() {
@@ -9434,4 +9441,389 @@ function updateVoiceTagButton() {
     new MutationObserver(updateVoiceTagButton).observe(name, { childList: true, characterData: true, subtree: true });
   }
   updateVoiceTagButton();
+})();
+
+// ---------------------------------------------------------------------------
+// NEW (1.5.0): the personality maker
+//
+// Above each personality box (the profile editor's, and the default one in
+// Settings > Replies):
+//
+//   * a line to describe a personality in a few words; Create has the AI
+//     you've set up for replies (Ollama or OpenAI) write the whole thing
+//   * ideas to add, worked out from what's written so far and from how the
+//     profile has actually been talking in the conversation. Click one to
+//     put it in; × turns it down and it isn't suggested again; Add all has
+//     the AI weave every idea in at once
+//   * Undo for anything the AI wrote
+// ---------------------------------------------------------------------------
+
+function recentTurnsFor(speakerName, limit = 6) {
+  // The last few exchanges with this profile, from the kept conversation.
+  const out = [];
+  const records = typeof transcript !== "undefined" && Array.isArray(transcript) ? transcript : [];
+  for (let i = 0; i < records.length; i++) {
+    const r = records[i];
+    if (!r || r.kind !== "turn" || r.who !== speakerName) continue;
+    const prev = records[i - 1];
+    const you = prev && prev.kind === "turn" && prev.who === "You" ? prev.text : "";
+    out.push({ you, reply: (r.opts && r.opts.voiced) || r.text });
+  }
+  return out.slice(-limit);
+}
+
+function makePersonalityHelper(textarea, getContext, storageKey) {
+  if (!textarea) return null;
+  const root = document.createElement("div");
+  root.className = "pm";
+  root.innerHTML = `
+    <div class="pm-create">
+      <svg class="icon-16 pm-create-icon" aria-hidden="true"><use href="#i-sparkle"/></svg>
+      <input type="text" class="pm-idea" maxlength="600" autocomplete="off"
+             placeholder="Describe a personality, e.g. a sleepy pirate who loves cats" aria-label="Describe a personality">
+      <button type="button" class="btn btn-sm pm-create-btn">Create</button>
+    </div>
+    <div class="pm-ideas is-hidden">
+      <div class="pm-ideas-head">
+        <span class="pm-ideas-title">Ideas to add</span>
+        <span class="pm-ideas-actions">
+          <button type="button" class="link-btn pm-all">Add all</button>
+          <button type="button" class="pm-refresh" title="Other ideas" aria-label="Other ideas">
+            <svg class="icon-14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 5v6h-6"/></svg>
+          </button>
+        </span>
+      </div>
+      <div class="pm-chips" role="list"></div>
+    </div>
+    <p class="pm-status" aria-live="polite"></p>`;
+  textarea.parentNode.insertBefore(root, textarea);
+
+  const idea = root.querySelector(".pm-idea");
+  const createBtn = root.querySelector(".pm-create-btn");
+  const ideasBox = root.querySelector(".pm-ideas");
+  const chipsEl = root.querySelector(".pm-chips");
+  const allBtn = root.querySelector(".pm-all");
+  const refreshBtn = root.querySelector(".pm-refresh");
+  const status = root.querySelector(".pm-status");
+
+  let suggestions = [];
+  let lastAsked = null;      // the text the current ideas are for
+  let controller = null;
+  let typingTimer = null;
+  let caret = null;          // where you last were in the box
+  let busy = false;
+
+  // Turned-down and already-added ideas, remembered per profile so they
+  // aren't offered again.
+  function skipKey() { return "frivo_pm_skip_" + (storageKey() || "default"); }
+  function loadSkip() {
+    try { return JSON.parse(localStorage.getItem(skipKey()) || "[]"); } catch (e) { return []; }
+  }
+  function remember(label) {
+    const list = loadSkip().filter((x) => x !== label);
+    list.push(label);
+    try { localStorage.setItem(skipKey(), JSON.stringify(list.slice(-30))); } catch (e) { /* not kept */ }
+  }
+
+  function say(text, { error = false, undo = null } = {}) {
+    status.classList.toggle("is-error", error);
+    status.replaceChildren(text || "");
+    if (undo) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "link-btn";
+      b.textContent = "Undo";
+      b.addEventListener("click", () => {
+        setText(undo, { quiet: true });
+        say("Put back.");
+        askForIdeas({ force: true });
+      });
+      status.append(" ", b);
+    }
+  }
+
+  function setText(value, { quiet = false } = {}) {
+    textarea.value = value;
+    // So Settings saves it, and anything else listening hears it.
+    textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    if (!quiet) textarea.scrollTop = textarea.scrollHeight;
+  }
+
+  function context() {
+    const c = getContext() || {};
+    return {
+      name: c.name || "",
+      response_style: c.style || "echo",
+      language: c.language || "",
+      recent: recentTurnsFor(c.speaker || c.name || "Voice"),
+    };
+  }
+
+  function renderChips() {
+    chipsEl.replaceChildren();
+    suggestions.forEach((s) => {
+      const chip = document.createElement("span");
+      chip.className = "pm-chip";
+      chip.setAttribute("role", "listitem");
+      const add = document.createElement("button");
+      add.type = "button";
+      add.className = "pm-chip-add";
+      add.title = s.text;
+      add.innerHTML = '<span class="pm-chip-plus" aria-hidden="true">+</span>';
+      add.append(s.label);
+      add.addEventListener("click", () => insertIdea(s, chip));
+      const no = document.createElement("button");
+      no.type = "button";
+      no.className = "pm-chip-no";
+      no.title = "Not this one";
+      no.setAttribute("aria-label", `Don't suggest "${s.label}"`);
+      no.textContent = "×";
+      no.addEventListener("click", () => {
+        remember(s.label);
+        dropChip(s, chip);
+      });
+      chip.append(add, no);
+      chipsEl.append(chip);
+    });
+    ideasBox.classList.toggle("is-hidden", !suggestions.length && !root.classList.contains("is-thinking"));
+    allBtn.disabled = suggestions.length < 2;
+  }
+
+  function dropChip(s, chip) {
+    suggestions = suggestions.filter((x) => x !== s);
+    chip.classList.add("is-leaving");
+    setTimeout(() => {
+      chip.remove();
+      if (!suggestions.length) ideasBox.classList.add("is-hidden");
+      allBtn.disabled = suggestions.length < 2;
+    }, 180);
+  }
+
+  // Where an idea goes: at the end of the sentence your cursor is in, or
+  // at the end if you haven't been in the box.
+  function insertIdea(s, chip) {
+    const value = textarea.value;
+    let at = value.length;
+    if (caret != null && caret < value.length) {
+      const rest = value.slice(caret);
+      const m = rest.match(/[.!?](?=\s)|\n/);
+      at = m ? caret + m.index + (m[0] === "\n" ? 0 : 1) : value.length;
+    }
+    const before = value.slice(0, at).replace(/[ \t]+$/, "");
+    const after = value.slice(at).replace(/^[ \t]+/, "");
+    const lead = before ? (/\n$/.test(before) ? "" : " ") : "";
+    const trail = after && !/^\s/.test(after) ? " " : "";
+    const next = before + lead + s.text + trail + after;
+    const previous = value;
+    setText(next, { quiet: true });
+    caret = (before + lead + s.text).length;
+    try { textarea.setSelectionRange(caret, caret); } catch (e) { /* not focused */ }
+    remember(s.label);
+    lastAsked = next;   // still fresh: the rest of the ideas still apply
+    dropChip(s, chip);
+    say(`Added "${s.label}".`, { undo: previous });
+  }
+
+  async function askForIdeas({ force = false } = {}) {
+    const text = textarea.value.trim();
+    const c = context();
+    if (c.response_style === "mimic") {
+      suggestions = [];
+      renderChips();
+      if (text.length >= 15) say("Word for word says exactly what you type, so this profile doesn't use a personality.");
+      return;
+    }
+    if (text.length < 15) {
+      suggestions = [];
+      lastAsked = null;
+      renderChips();
+      return;
+    }
+    if (!force && lastAsked === text) return;
+    if (controller) controller.abort();
+    controller = new AbortController();
+    const mine = controller;
+    lastAsked = text;
+    root.classList.add("is-thinking");
+    ideasBox.classList.remove("is-hidden");
+    if (!suggestions.length) chipsEl.innerHTML = '<span class="pm-thinking">Thinking of ideas…</span>';
+    try {
+      const res = await fetch("/api/personality/suggest", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text, ...c, skip: loadSkip() }),
+        signal: mine.signal,
+      });
+      const data = await res.json();
+      if (mine !== controller) return;
+      if (!res.ok) throw new Error(data.error || "Couldn't get ideas.");
+      suggestions = data.suggestions || [];
+      root.classList.remove("is-thinking");
+      renderChips();
+      if (!suggestions.length) say("No new ideas right now. It covers a lot already.");
+      else if (data.used_conversation) root.querySelector(".pm-ideas-title").textContent = "Ideas to add, from the personality and your conversation";
+      else root.querySelector(".pm-ideas-title").textContent = "Ideas to add";
+    } catch (err) {
+      if (err.name === "AbortError") return;
+      if (mine !== controller) return;
+      root.classList.remove("is-thinking");
+      suggestions = [];
+      renderChips();
+      lastAsked = null;
+      say(err.message, { error: true });
+    } finally {
+      if (mine === controller) controller = null;
+    }
+  }
+
+  async function create() {
+    const text = idea.value.trim();
+    if (text.length < 3) {
+      say("Describe it in a few words first, like \"a grumpy wizard who hates mornings\".", { error: true });
+      idea.focus();
+      return;
+    }
+    if (busy) return;
+    busy = true;
+    const previous = textarea.value;
+    const c = context();
+    createBtn.disabled = true;
+    createBtn.textContent = "Writing…";
+    root.classList.add("is-writing");
+    say("");
+    try {
+      const res = await fetch("/api/personality/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ idea: text, ...c, current: previous, build_on: Boolean(previous.trim()) }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Couldn't write it.");
+      setText(data.text, { quiet: true });
+      textarea.scrollTop = 0;   // read it from the start
+      if (typeof popOnce === "function") popOnce(textarea);
+      const by = data.engine ? ` by ${data.engine}` : "";
+      say(previous.trim() ? `Rewritten${by}, keeping what fit.` : `Written${by}.`, { undo: previous });
+      askForIdeas({ force: true });
+    } catch (err) {
+      say(err.message, { error: true });
+    } finally {
+      busy = false;
+      createBtn.disabled = false;
+      createBtn.textContent = "Create";
+      root.classList.remove("is-writing");
+    }
+  }
+
+  async function addAll() {
+    if (busy || suggestions.length < 2) return;
+    busy = true;
+    const previous = textarea.value;
+    const taking = suggestions.slice();
+    allBtn.disabled = true;
+    root.classList.add("is-writing");
+    say("Working them in…");
+    try {
+      const res = await fetch("/api/personality/merge", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: previous, additions: taking.map((s) => s.text) }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Couldn't add them.");
+      setText(data.text);
+      taking.forEach((s) => remember(s.label));
+      suggestions = [];
+      renderChips();
+      say(data.woven ? `Worked in ${taking.length} ideas.` : `Added ${taking.length} ideas at the end.`, { undo: previous });
+      lastAsked = null;
+      askForIdeas({ force: true });
+    } catch (err) {
+      say(err.message, { error: true });
+    } finally {
+      busy = false;
+      allBtn.disabled = suggestions.length < 2;
+      root.classList.remove("is-writing");
+    }
+  }
+
+  createBtn.addEventListener("click", create);
+  idea.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); create(); }
+  });
+  allBtn.addEventListener("click", addAll);
+  refreshBtn.addEventListener("click", () => askForIdeas({ force: true }));
+  ["keyup", "click", "select", "blur"].forEach((type) =>
+    textarea.addEventListener(type, () => { caret = textarea.selectionStart; }));
+  // New ideas a moment after you stop typing, once you've changed enough.
+  textarea.addEventListener("input", (e) => {
+    if (!e.isTrusted) return;
+    clearTimeout(typingTimer);
+    typingTimer = setTimeout(() => {
+      const now = textarea.value.trim();
+      const before = lastAsked || "";
+      const changed = Math.abs(now.length - before.length) >= 25
+        || now.split(/\s+/).filter((w) => !before.includes(w)).length >= 6;
+      if (changed) askForIdeas();
+    }, 2500);
+  });
+
+  return {
+    el: root,
+    reset({ fetch = true } = {}) {
+      if (controller) controller.abort();
+      controller = null;
+      clearTimeout(typingTimer);
+      suggestions = [];
+      lastAsked = null;
+      caret = null;
+      idea.value = "";
+      say("");
+      root.classList.remove("is-thinking", "is-writing");
+      renderChips();
+      if (fetch) askForIdeas();
+    },
+    ask: askForIdeas,
+  };
+}
+
+(function wirePersonalityMakers() {
+  const profileBox = $("profileSystemPrompt");
+  window.frivoProfilePersonality = makePersonalityHelper(
+    profileBox,
+    () => {
+      const editing = typeof editingProfileId !== "undefined" && editingProfileId
+        ? allProfiles.find((p) => p.id === editingProfileId) : null;
+      return {
+        name: $("profileName") ? $("profileName").value.trim() : "",
+        speaker: editing ? editing.name : "",
+        style: getRadioValue(profileResponseStyleRadios, "echo"),
+        language: $("profileLanguageSelect") ? $("profileLanguageSelect").value : "",
+      };
+    },
+    () => (typeof editingProfileId !== "undefined" && editingProfileId) || "new",
+  );
+  const settingsBox = $("systemPrompt");
+  const helper = makePersonalityHelper(
+    settingsBox,
+    () => ({
+      name: "",
+      speaker: "Voice",
+      style: typeof responseStyleRadios !== "undefined" ? getRadioValue(responseStyleRadios, "echo") : "echo",
+      language: typeof currentLanguage !== "undefined" ? currentLanguage : "",
+    }),
+    () => "default",
+  );
+  window.frivoSettingsPersonality = helper;
+  // Settings asks for ideas when you get to the box, not on every page load
+  // (with Ollama, asking loads the model onto the graphics card).
+  if (helper && settingsBox && typeof IntersectionObserver === "function") {
+    let asked = false;
+    new IntersectionObserver((entries) => {
+      if (entries.some((e) => e.isIntersecting) && !asked) {
+        asked = true;
+        helper.ask();
+      }
+    }).observe(settingsBox);
+  }
 })();

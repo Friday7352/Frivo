@@ -3734,3 +3734,91 @@ html.motion-ready .stage { transition: transform var(--dur-smooth) var(--spring-
 }
 .voice-tag::before { content: attr(data-tag); }
 .bubble-text > .voice-tag:first-child { margin-left: 0; }
+
+/* ============================================================
+   NEW (1.5.0): the personality maker, above each personality box
+   ============================================================ */
+
+.pm { display: grid; gap: 8px; margin: 6px 0 8px; }
+.srow--stacked .pm { max-width: 620px; width: 100%; }
+.pm-create {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 4px 4px 10px;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-line);
+  border-radius: var(--radius);
+}
+.pm-create-icon { flex: none; color: var(--accent); }
+.pm .pm-create .pm-idea {
+  flex: 1;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  padding: 6px 2px;
+}
+.pm .pm-create .pm-idea:focus { box-shadow: none; }
+.pm-create-btn { flex: none; }
+.pm.is-writing .pm-create-icon { animation: pm-spin 1.2s linear infinite; }
+@keyframes pm-spin { to { rotate: 360deg; } }
+
+.pm-ideas.is-hidden { display: none; }
+.pm-ideas-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 6px; }
+.pm-ideas-title { font-size: var(--text-caption); color: var(--ink-faint); }
+.pm-ideas-actions { display: inline-flex; align-items: center; gap: 10px; flex: none; }
+.pm-all:disabled { opacity: 0.35; cursor: default; text-decoration: none; }
+.pm-refresh {
+  display: grid; place-items: center;
+  width: 24px; height: 24px; padding: 0;
+  border: 0; border-radius: 7px;
+  background: transparent; color: var(--ink-dim); cursor: pointer;
+}
+.pm-refresh:hover { background: var(--fill); color: var(--ink); }
+.pm.is-thinking .pm-refresh svg { animation: pm-spin 1s linear infinite; }
+
+.pm-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.pm-chip {
+  display: inline-flex;
+  align-items: stretch;
+  max-width: 100%;
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  background: var(--surface-2);
+  overflow: hidden;
+  transition: opacity 170ms var(--ease), scale 170ms var(--ease), border-color var(--dur) var(--ease);
+}
+@starting-style { .pm-chip { opacity: 0; scale: 0.92; } }
+.pm-chip.is-leaving { opacity: 0; scale: 0.9; }
+.pm-chip:hover { border-color: var(--accent-line); }
+.pm-chip button {
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--text-footnote);
+  cursor: pointer;
+}
+.pm-chip-add {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 5px 4px 5px 10px;
+  min-width: 0;
+  text-align: left;
+}
+.pm-chip-add:hover { background: var(--accent-soft); }
+.pm-chip-add:active { scale: 0.97; }
+.pm-chip-plus { color: var(--accent); font-weight: 600; }
+.pm-chip-no { padding: 5px 9px 5px 5px; color: var(--ink-faint) !important; }
+.pm-chip-no:hover { color: var(--ink) !important; background: var(--fill); }
+.pm-thinking {
+  font-size: var(--text-footnote);
+  color: var(--ink-faint);
+  animation: pm-breathe 1.4s ease-in-out infinite;
+}
+@keyframes pm-breathe { 50% { opacity: 0.45; } }
+.pm-status { margin: 0; font-size: var(--text-caption); color: var(--ink-dim); }
+.pm-status:empty { display: none; }
+.pm-status.is-error { color: var(--alert); }
+@media (prefers-reduced-motion: reduce) {
+  .pm.is-writing .pm-create-icon, .pm.is-thinking .pm-refresh svg, .pm-thinking { animation: none; }
+}

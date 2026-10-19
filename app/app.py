@@ -3508,6 +3508,266 @@ def suggest_voice_tags():
     })
 
 
+# ---------------------------------------------------------------------------
+# NEW (1.5.0): the personality maker
+#
+# Writing a personality that works well is a skill, so the AI you've set up
+# for chat replies (Ollama or OpenAI) helps:
+#
+#   /api/personality/create    a one-line idea becomes a full personality
+#   /api/personality/suggest   ideas to add, from what's written so far and
+#                              from how the profile has actually been
+#                              talking in your conversation
+#   /api/personality/merge     "Add all": the ideas woven into the text
+#
+# Each is one request, written for small local models as much as big ones,
+# and what comes back is checked rather than trusted.
+# ---------------------------------------------------------------------------
+
+PERSONALITY_MAX_CHARS = 4000
+
+# What the writer is told about how Frivo uses a personality, so what it
+# writes works with the rules Frivo adds and doesn't fight them.
+PERSONALITY_STYLE_NOTES = {
+    "reply": ("This profile REPLIES: people say things to the user, the user types them in, and the "
+              "character answers out loud in its own words. So the personality should say how it reacts, "
+              "what it cares about, its opinions and humour, and how it talks."),
+    "echo": ("This profile CLEANS UP the user's own words before they're spoken: the character never adds "
+             "words of its own, and its personality shows only in tone, punctuation and emphasis. So the "
+             "personality should be about delivery: mood, energy, pacing and attitude, not opinions or "
+             "catchphrases."),
+    "mimic": ("This profile says the user's words exactly, so a personality isn't used. Write one anyway, "
+              "about tone and delivery, in case the style changes."),
+}
+
+
+def ask_writing_ai(prompt, max_tokens, temperature=0.7):
+    """One request to the AI set up for chat replies. Returns (text, seconds)."""
+    if not CFG.get("openai_api_key") and resolve_provider("chat_provider", CHAT_PROVIDERS) == "openai":
+        raise ValueError("This needs an AI to write with: add your OpenAI key in Settings, "
+                         "or choose Ollama for chat replies.")
+    started = time.perf_counter()
+    response = create_chat_completion(
+        make_openai_client(),
+        provider=resolve_provider("chat_provider", CHAT_PROVIDERS),
+        model=CFG.get("model", RECOMMENDED_TEXT_MODEL),
+        ollama_model=active_ollama_model(),
+        messages=[{"role": "user", "content": prompt}],
+        max_tokens=max_tokens,
+        temperature=temperature,
+    )
+    text = (response.choices[0].message.content or "").strip()
+    # Reasoning models (some on Ollama) think out loud first.
+    text = re.sub(r"<think>.*?</think>", "", text, flags=re.S | re.I).strip()
+    return text, time.perf_counter() - started
+
+
+def _clean_personality_text(text):
+    """What a model wraps its answer in, taken off: fences, a preface, quotes."""
+    text = (text or "").strip()
+    first, _, rest = text.partition("\n")
+    if rest and re.match(r"^(here(?:'s| is)|sure|okay|certainly)\b.*:\s*$", first.strip(), re.I):
+        text = rest.strip()
+    text = re.sub(r"(?m)^\s*```[a-z]*\s*$\n?", "", text).strip()
+    text = re.sub(r"</?PERSONALITY>", "", text, flags=re.I).strip()
+    if len(text) > 1 and text[0] == text[-1] == '"':
+        text = text[1:-1].strip()
+    # Markdown headings and bold read as clutter in the box; the model
+    # follows plain text just as well.
+    text = re.sub(r"(?m)^#{1,6}\s*", "", text)
+    text = re.sub(r"\*\*(.+?)\*\*", r"\1", text)
+    return text[:PERSONALITY_MAX_CHARS].strip()
+
+
+def _personality_context(data):
+    name = str(data.get("name") or "").strip()[:80]
+    style = normalize_response_style(data.get("response_style"), DEFAULT_RESPONSE_STYLE)
+    language = normalize_language(data.get("language")) or ""
+    return name, style, language
+
+
+def _conversation_memory(data, limit=6):
+    """
+    How the profile has been talking: the last few exchanges the page kept
+    for it ([{"you": ..., "reply": ...}]), tags and all taken out. Empty
+    when there are none.
+    """
+    lines = []
+    for turn in (data.get("recent") or [])[-limit:]:
+        if not isinstance(turn, dict):
+            continue
+        said = strip_audio_tags(str(turn.get("you") or "")).strip()[:300]
+        reply = strip_audio_tags(str(turn.get("reply") or "")).strip()[:400]
+        if reply:
+            if said:
+                lines.append(f"User: {said}")
+            lines.append(f"Character: {reply}")
+    return "\n".join(lines)
+
+
+def build_personality_create_prompt(idea, name, style, language, current=""):
+    who = f' called "{name}"' if name else ""
+    lang = (f"\nThe character usually speaks {language}; write the personality in English anyway, and "
+            f"mention any {language}-speaking flavour that fits.") if language and language != "English" else ""
+    base = (f"\nThe current personality, to build on rather than throw away where it fits the idea:\n"
+            f"<CURRENT>\n{current}\n</CURRENT>\n") if current.strip() else ""
+    return (
+        "You write personality descriptions for voice characters in Frivo, an app that speaks a character's "
+        "lines aloud with a text-to-speech voice, often in VRChat. The description you write becomes part of "
+        f"the character's instructions.\n\n"
+        f"{PERSONALITY_STYLE_NOTES[style]}{lang}\n\n"
+        f"Write the personality for a character{who}, from this idea:\n<IDEA>\n{idea}\n</IDEA>\n{base}\n"
+        "Write it as instructions to the character, in the second person (\"You are...\", \"You speak...\"). "
+        "Cover, in this order:\n"
+        "1. Who they are, in one or two sentences.\n"
+        "2. How they talk: vocabulary, sentence length and rhythm, verbal habits, one or two signature phrases "
+        "to use rarely.\n"
+        "3. Their attitude and what they care about.\n"
+        "4. How they react: to compliments, teasing, questions, bad news, things they don't know.\n"
+        "5. What they never do.\n"
+        "Make it specific and vivid, not generic. Everything must work when spoken aloud: no emojis, no "
+        "actions in asterisks, nothing to read off a screen.\n"
+        "Don't set a reply length or a language, and don't mention AI or these instructions: the app handles "
+        "those.\n"
+        "Plain text, short paragraphs, 150 to 260 words. Output only the personality."
+    )
+
+
+def build_personality_suggest_prompt(text, name, style, memory, skip):
+    who = f' "{name}"' if name else ""
+    seen = ""
+    if memory:
+        seen = (
+            "\nHere is how the character has actually been talking lately:\n<CONVERSATION>\n"
+            f"{memory}\n</CONVERSATION>\n"
+            "Use it: suggest things that fit what people talk about with it, and fix what didn't work "
+            "(too long-winded, too formal, repeating itself, out of character).\n"
+        )
+    avoid = ("\nDon't suggest these again (already added or turned down): " + "; ".join(skip) + "\n") if skip else ""
+    return (
+        "You improve personality descriptions for voice characters in Frivo, an app that speaks a character's "
+        f"lines aloud with a text-to-speech voice.\n{PERSONALITY_STYLE_NOTES[style]}\n\n"
+        f"The personality of the character{who} so far:\n<PERSONALITY>\n{text}\n</PERSONALITY>\n{seen}{avoid}\n"
+        "Suggest 5 specific additions that would make the character more vivid and consistent when it "
+        "speaks. Each must add something the personality doesn't already cover: a speech habit, a signature "
+        "phrase, how it reacts to something, what it refuses to do, a detail of its life, its humour. "
+        "Match the personality's own wording style (second person, like \"You ...\").\n"
+        "Never suggest rules about reply length, language, emojis or being an AI.\n"
+        "Format: one per line, exactly like this, nothing else:\n"
+        "short label of 2 to 5 words | the sentence to add, under 30 words\n"
+    )
+
+
+def parse_personality_suggestions(raw, existing, limit=6):
+    out, seen = [], set()
+    known = (existing or "").lower()
+    for line in (raw or "").splitlines():
+        line = re.sub(r"^\s*(?:[-*•]|\d+[.)])\s*", "", line).strip()
+        if "|" not in line:
+            continue
+        label, _, text = line.partition("|")
+        label = label.strip(" *\"'`:").strip()
+        text = _clean_personality_text(text.strip(" \"'`"))
+        if not label or not text or len(label) > 48 or len(text) > 320:
+            continue
+        key = label.lower()
+        if key in seen or text.lower() in known:
+            continue
+        seen.add(key)
+        if text[-1] not in ".!?\"'":
+            text += "."
+        out.append({"id": uuid.uuid4().hex[:10], "label": label[:1].upper() + label[1:], "text": text})
+        if len(out) >= limit:
+            break
+    return out
+
+
+def build_personality_merge_prompt(text, additions):
+    listed = "\n".join(f"- {a}" for a in additions)
+    return (
+        "Here is a personality description for a voice character, and some additions to work into it.\n"
+        f"<PERSONALITY>\n{text}\n</PERSONALITY>\n<ADDITIONS>\n{listed}\n</ADDITIONS>\n\n"
+        "Rewrite the personality with every addition worked in where it belongs, so it reads as one piece. "
+        "Keep everything that's already there, its meaning and its voice; only reword where an addition has "
+        "to fit in. Plain text, the same style. Output only the personality."
+    )
+
+
+def _merged_keeps_original(original, merged):
+    """True when a merge kept the personality rather than replacing it."""
+    a = set(re.findall(r"[a-z']{4,}", original.lower()))
+    if not a:
+        return bool(merged.strip())
+    b = set(re.findall(r"[a-z']{4,}", merged.lower()))
+    return len(merged) >= len(original) * 0.8 and len(a & b) / len(a) >= 0.6
+
+
+@app.route("/api/personality/create", methods=["POST"])
+def personality_create():
+    data = request.get_json(force=True) or {}
+    idea = str(data.get("idea") or "").strip()[:600]
+    if len(idea) < 3:
+        return jsonify({"error": "Describe the personality in a few words first."}), 400
+    name, style, language = _personality_context(data)
+    current = str(data.get("current") or "").strip()[:PERSONALITY_MAX_CHARS] if data.get("build_on") else ""
+    try:
+        raw, seconds = ask_writing_ai(build_personality_create_prompt(idea, name, style, language, current),
+                                      max_tokens=900, temperature=0.8)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        return jsonify({"error": f"Couldn't reach the AI: {e}"}), 502
+    text = _clean_personality_text(raw)
+    if len(text) < 40:
+        return jsonify({"error": "The AI didn't write a usable personality. Try again, or describe it differently."}), 502
+    return jsonify({"text": text, "seconds": round(seconds, 2), "engine": ", ".join(g.get("text_engines", []))})
+
+
+@app.route("/api/personality/suggest", methods=["POST"])
+def personality_suggest():
+    data = request.get_json(force=True) or {}
+    text = str(data.get("text") or "").strip()[:PERSONALITY_MAX_CHARS]
+    if len(text) < 15:
+        return jsonify({"suggestions": [], "reason": "short"})
+    name, style, _ = _personality_context(data)
+    skip = [str(x)[:60] for x in (data.get("skip") or [])][:30]
+    memory = _conversation_memory(data)
+    try:
+        raw, seconds = ask_writing_ai(build_personality_suggest_prompt(text, name, style, memory, skip),
+                                      max_tokens=600, temperature=0.9)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        return jsonify({"error": f"Couldn't reach the AI: {e}"}), 502
+    skipped = {s.lower() for s in skip}
+    suggestions = [s for s in parse_personality_suggestions(raw, text) if s["label"].lower() not in skipped]
+    return jsonify({"suggestions": suggestions, "used_conversation": bool(memory), "seconds": round(seconds, 2)})
+
+
+@app.route("/api/personality/merge", methods=["POST"])
+def personality_merge():
+    data = request.get_json(force=True) or {}
+    text = str(data.get("text") or "").strip()[:PERSONALITY_MAX_CHARS]
+    additions = [str(a).strip()[:320] for a in (data.get("additions") or []) if str(a).strip()][:10]
+    if not additions:
+        return jsonify({"error": "There's nothing to add."}), 400
+    appended = (text + ("\n\n" if text else "") + " ".join(additions)).strip()
+    if not text:
+        return jsonify({"text": appended, "woven": False})
+    try:
+        raw, seconds = ask_writing_ai(build_personality_merge_prompt(text, additions),
+                                      max_tokens=1200, temperature=0.4)
+        merged = _clean_personality_text(raw)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception:
+        merged = ""
+    # A merge that lost what you wrote isn't a merge: add them at the end instead.
+    if not merged or not _merged_keeps_original(text, merged):
+        return jsonify({"text": appended, "woven": False})
+    return jsonify({"text": merged, "woven": True})
+
+
 def get_tts_audio_timed(text, voice_id, language, plan):
     """
     NEW (1.5.0): speaks `text`, and says exactly when the voice finishes
