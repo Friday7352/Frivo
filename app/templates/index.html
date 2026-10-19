@@ -525,22 +525,34 @@
                    put in where the cursor is; Suggest asks the AI to add
                    some to what you've typed. -->
               <span class="chip-wrap voice-tag-wrap is-hidden" id="voiceTagWrap">
-                <button id="voiceTagBtn" class="btn-mic" type="button" aria-haspopup="dialog"
-                        aria-expanded="false" aria-controls="voiceTagPop"
-                        aria-label="Voice tags" title="Voice tags: how the next words are said">
-                  <svg class="icon-18"><use href="#i-sparkle"/></svg>
-                </button>
+                <!-- CHANGED (1.5.0): one split pill. The main part is Suggest;
+                     the small arrow opens the menu (tags, Auto tags, Ideas). -->
+                <span class="tag-split" id="tagSplit">
+                  <button id="voiceTagSuggestQuick" class="tag-split-main" type="button"
+                          title="The AI adds voice tags that fit what you've typed. Your words stay the same.">
+                    <svg class="icon-14" aria-hidden="true"><use href="#i-sparkle"/></svg><span id="tagSplitLabel">Suggest</span>
+                  </button>
+                  <button id="voiceTagBtn" class="tag-split-more" type="button" aria-haspopup="dialog"
+                          aria-expanded="false" aria-controls="voiceTagPop"
+                          aria-label="Voice tag options" title="Voice tags: pick one, Auto tags, Ideas as I type">
+                    <svg class="icon-14" aria-hidden="true"><use href="#i-chevron"/></svg>
+                  </button>
+                </span>
                 <div id="voiceTagPop" class="popover voice-tag-pop is-hidden" role="dialog" aria-label="Voice tags">
                   <div class="voice-tag-head">
                     <span class="eyebrow">Voice tags</span>
                     <button type="button" class="btn btn-ghost btn-sm" id="voiceTagSuggest"
                             title="The AI adds tags that fit what you've typed. Your words stay the same.">
-                      <svg class="icon-14" aria-hidden="true"><use href="#i-sparkle"/></svg> Suggest for my message
+                      <svg class="icon-14" aria-hidden="true"><use href="#i-sparkle"/></svg> Suggest
                     </button>
                   </div>
                   <div id="voiceTagGroups"></div>
                   <label class="voice-tag-auto">
-                    <span>Suggest tags as I type</span>
+                    <span>Auto tags <span class="field-hint">— the AI tags every message you send, and its replies, as they're spoken</span></span>
+                    <span class="switch"><input type="checkbox" id="autoTagsToggle"><span class="switch-track" aria-hidden="true"></span></span>
+                  </label>
+                  <label class="voice-tag-auto voice-tag-auto--sub">
+                    <span>Ideas as I type <span class="field-hint">— after a pause, above the words</span></span>
                     <span class="switch"><input type="checkbox" id="tagIdeasToggle" checked><span class="switch-track" aria-hidden="true"></span></span>
                   </label>
                   <p class="voice-tag-note" id="voiceTagNote">Goes in where your cursor is. The voice acts it out; it isn't read aloud or sent to the chatbox.</p>
@@ -817,6 +829,17 @@
                     </span>
                     <div class="radio-row" id="voiceDeliveryRadios" role="radiogroup" aria-label="Delivery"></div>
                   </div>
+                  <!-- NEW (1.5.0): continuity between v3 lines. -->
+                  <label class="srow">
+                    <span class="srow-main srow-main--flex">
+                      <span class="srow-label">Hold the accent</span>
+                      <span class="srow-sub">Each expressive line is matched to the voice's last few, so a short reply can't drift into another accent. It also pulls each line toward how the last ones sounded, which can soften the tags. Off: every line is spoken fresh.</span>
+                    </span>
+                    <span class="switch">
+                      <input type="checkbox" id="holdAccentToggle" checked>
+                      <span class="switch-track" aria-hidden="true"></span>
+                    </span>
+                  </label>
                   <div class="srow">
                     <span class="srow-main srow-main--flex">
                       <span class="srow-label">Volume</span>
@@ -1369,6 +1392,11 @@
     <div class="voice-dialog sheet saved-dialog" role="dialog" aria-modal="true" aria-labelledby="savedDialogTitle">
       <header class="voice-dialog-head">
         <h2 class="voice-dialog-title" id="savedDialogTitle">Saved <span class="voice-dialog-for">play again, no credits</span></h2>
+        <!-- NEW (1.5.0): every clip as a zip, with a text list. -->
+        <a id="savedExportBtn" class="btn btn-ghost btn-sm saved-export" href="/api/saved/export.zip" download
+           title="Download every saved reply as audio files, with a list of what each one says">
+          <svg class="icon-14" aria-hidden="true"><use href="#i-download"/></svg> Export all
+        </a>
         <button id="savedCloseBtn" class="voice-close" type="button" aria-label="Close">
           <svg class="icon-18"><use href="#i-close"/></svg>
         </button>

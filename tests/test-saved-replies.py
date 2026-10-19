@@ -106,6 +106,21 @@ mod.CFG["audio_keep_days"] = 7
 mod.prune_audio_cache()
 check("saved replies are left alone", os.path.isfile(saved_file))
 
+print("--- exporting ---")
+import io, zipfile
+res = client.get(f"/api/saved/{item['id']}/download")
+disp = res.headers.get("Content-Disposition", "")
+check("one clip downloads as a file named by who said it and its words",
+      res.status_code == 200 and "attachment" in disp and res.data == open(saved_file, "rb").read()
+      and item["text"].split()[0] in disp, disp)
+res = client.get("/api/saved/export.zip")
+check("export all: a zip", res.status_code == 200 and res.mimetype == "application/zip")
+z = zipfile.ZipFile(io.BytesIO(res.data))
+names = z.namelist()
+check("... with every clip and a text list", "saved.txt" in names and len(names) == 3, names)
+check("... that says what each one says", item["text"] in z.read("saved.txt").decode("utf-8"))
+check("an unknown clip: not found", client.get("/api/saved/" + "f" * 32 + "/download").status_code == 404)
+
 print("--- deleting ---")
 check("deleting one", client.delete(f"/api/saved/{item['id']}").status_code == 200)
 check("removes its audio", not os.path.exists(saved_file))

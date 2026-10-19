@@ -63,7 +63,7 @@ check("Natural, no tags: exactly as before",
                 "voice_settings": {"stability": 0.5, "similarity_boost": 0.75}}, plain)
 tagged = mod._elevenlabs_payload("[laughs] Hello there.")
 check("a tag: v3, with the tag", tagged["model_id"] == "eleven_v3" and tagged["text"].startswith("[laughs]"), tagged)
-check("v3 is told the language, so the accent holds", tagged.get("language_code") == "en" and "seed" in tagged, tagged)
+check("v3 is told the language, so the accent holds", tagged.get("language_code") == "en", tagged)
 mod.CFG.update(speaking_speed=1.1)
 check("v3 has no speed setting", "speed" not in mod._elevenlabs_payload("[laughs] Hi.")["voice_settings"])
 check("v2 still gets the speed", mod._elevenlabs_payload("Hi.")["voice_settings"].get("speed") == 1.1)
@@ -142,9 +142,35 @@ check("... and is told to match what the voice just said",
 status, data = chat("A third one.")
 status, data = chat("A fourth one.")
 check("at most the last three", len(posts[-1][1].get("previous_request_ids") or []) == 3, posts[-1][1].get("previous_request_ids"))
+mod.CFG.update(hold_accent=False)
+status, data = chat("With Hold the accent off.")
+check("Hold the accent off: every line spoken fresh", "previous_request_ids" not in posts[-1][1] and "previous_text" not in posts[-1][1]
+      and posts[-1][1]["model_id"] == "eleven_v3", posts[-1][1])
+mod.CFG.update(hold_accent=True)
 status, data = chat("Another, from a different page.", session_id="other")
 check("... but another conversation starts on the usual model, with no stitching",
       posts[-1][1]["model_id"] == "eleven_multilingual_v2" and "previous_request_ids" not in posts[-1][1], posts[-1][1])
+print("--- Auto tags ---")
+sent_prompts = []
+model_says = {"text": ""}
+
+
+def fake_completion(client, **kw):
+    sent_prompts.append(kw["messages"])
+    return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=model_says["text"]),
+                                                    finish_reason="stop")])
+
+
+model_says["text"] = "[softly] Don't tell anyone, okay?"
+mod.create_chat_completion = fake_completion
+mod.make_openai_client = lambda: None
+status, data = chat("Don't tell anyone, okay?", auto_tags=True)
+check("your message is tagged on its way to the voice",
+      status == 200 and data.get("auto_tagged") is True and data.get("voiced", "").startswith("[softly]")
+      and data.get("reply") == "Don't tell anyone, okay?", data)
+check("the voice got the tag, the chatbox didn't", "[softly]" in posts[-1][1]["text"] and "[" not in data["chatbox_pages"][0]["text"])
+status, data = chat("Don't tell anyone, okay?", auto_tags=False)
+check("off: as typed", data.get("auto_tagged") is False and data.get("voiced") == "Don't tell anyone, okay?", data)
 spoken_free = []
 mod.CFG.update(voice_id="piper:alba")
 mod.piper_problem = lambda *a, **k: None
@@ -156,16 +182,6 @@ check("a free voice never hears a tag", status == 200 and spoken_free and "[" no
 check("... and none are shown as voiced", data.get("voiced") == data.get("reply"), data)
 mod.get_tts_audio = orig_get_tts
 mod.CFG.update(voice_id="EL1")
-
-sent_prompts = []
-model_says = {"text": ""}
-
-
-def fake_completion(client, **kw):
-    sent_prompts.append(kw["messages"])
-    return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=model_says["text"]),
-                                                    finish_reason="stop")])
-
 
 mod.create_chat_completion = fake_completion
 mod.make_openai_client = lambda: None

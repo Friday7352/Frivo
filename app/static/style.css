@@ -3926,14 +3926,50 @@ html.motion-ready .stage { transition: transform var(--dur-smooth) var(--spring-
 .tag-pill.is-leaving, .tag-mark.is-leaving { opacity: 0; pointer-events: none; }
 .tag-mark { transition: left 220ms var(--spring-smooth, var(--ease)), width 220ms var(--spring-smooth, var(--ease)),
                         background 160ms var(--ease), box-shadow 160ms var(--ease), opacity 170ms var(--ease); }
-.voice-tag-wrap.is-thinking #voiceTagBtn svg { animation: pm-breathe 1.2s ease-in-out infinite; }
+.voice-tag-wrap.is-thinking .tag-split-main svg { animation: pm-breathe 1.2s ease-in-out infinite; }
 @media (prefers-reduced-motion: reduce) {
   .tag-pill, .tag-mark { transition-duration: 0ms; }
-  .voice-tag-wrap.is-thinking #voiceTagBtn svg { animation: none; }
+  .voice-tag-wrap.is-thinking .tag-split-main svg, .tag-split button.is-busy svg { animation: none; }
 }
-/* CHANGED (1.5.0): Frivo's quick guesses are dashed until the AI's ideas
-   replace them; the edge arrows count ideas for words scrolled away. */
-.tag-pill.is-instant { border-style: dashed; color: var(--ink-dim); }
-.tag-pill.is-instant::after { border-style: dashed; }
+/* CHANGED (1.5.0): the edge arrows count ideas for words scrolled away. */
 .tag-pill--edge { font-style: normal; font-weight: 600; color: var(--ink-dim); padding: 0 8px; border-style: solid; }
 .tag-pill--edge::before, .tag-pill--edge::after { display: none; }
+
+/* CHANGED (1.5.0): one split pill for the voice tags: Suggest, and a
+   small arrow for the menu. "Auto" when Auto tags is on. */
+.voice-tag-wrap { align-items: center; }
+.tag-split {
+  display: inline-flex; align-items: stretch;
+  height: 30px;
+  border: 1px solid var(--accent-line);
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  overflow: hidden;
+  transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease);
+}
+.tag-split button {
+  display: inline-flex; align-items: center; gap: 5px;
+  border: 0; background: transparent; color: inherit;
+  font: inherit; font-size: var(--text-caption); font-weight: 600;
+  cursor: pointer;
+  transition: background var(--dur) var(--ease);
+}
+.tag-split-main { padding: 0 8px 0 9px; }
+.tag-split-more { padding: 0 6px 0 4px; border-left: 1px solid var(--accent-line) !important; }
+.tag-split-more svg { rotate: 90deg; }
+.tag-split button:hover { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.tag-split button:disabled, .tag-split button.is-busy { opacity: 0.6; cursor: default; }
+.tag-split button.is-busy svg { animation: pm-breathe 1.2s ease-in-out infinite; }
+.tag-split.is-auto { background: var(--accent); border-color: var(--accent); color: #fff; }
+.tag-split.is-auto .tag-split-more { border-left-color: rgba(255, 255, 255, 0.35) !important; }
+.tag-split.is-auto button:hover { background: rgba(255, 255, 255, 0.14); }
+@media (max-width: 760px) { .tag-split-main span { display: none; } .tag-split-main { padding: 0 7px 0 9px; } }
+.voice-tag-auto--sub { border-top: 0; margin-top: 2px; padding-top: 4px; }
+.voice-tag-wrap.is-thinking .tag-split-main svg { animation: pm-breathe 1.2s ease-in-out infinite; }
+
+/* NEW (1.5.0): saved clips: download one, or export all. */
+.saved-download { flex: none; opacity: 0; display: inline-grid; place-items: center; color: inherit; text-decoration: none; }
+.saved-row:hover .saved-download, .saved-download:focus-visible { opacity: 1; }
+@media (hover: none) { .saved-download { opacity: 1; } }
+.saved-export { margin-left: auto; margin-right: 8px; display: inline-flex; align-items: center; gap: 5px; text-decoration: none; }

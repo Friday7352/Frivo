@@ -1635,6 +1635,14 @@ function addTurn(who, text, opts = {}) {
     flag.title = "The clean-up added things you didn't say, so Frivo used your own wording instead.";
     stack.appendChild(flag);
   }
+  if (!isYou && opts.autoTagged) {
+    // NEW (1.5.0): Auto tags added the voice tags shown in the bubble.
+    const flag = document.createElement("span");
+    flag.className = "turn-flag";
+    flag.textContent = "Auto tags";
+    flag.title = "The AI added the voice tags, because Auto tags is on (✦ menu).";
+    stack.appendChild(flag);
+  }
 
   // Under the bubble, in the margin — present when you look for it, out of
   // the way when you're reading.
@@ -1905,6 +1913,7 @@ async function saveAllSettings({ close = false, quiet = false } = {}) {
     speaking_speed: speakingSpeedSlider ? parseInt(speakingSpeedSlider.value, 10) / 100 : 1,
     // NEW (1.5.0): Expressive voice and Delivery, for the default profile.
     expressive_voice: $("expressiveVoiceToggle") ? $("expressiveVoiceToggle").checked : false,
+    hold_accent: $("holdAccentToggle") ? $("holdAccentToggle").checked : true,   // NEW (1.5.0)
     voice_delivery: $("voiceDeliveryRadios") ? getRadioValue($("voiceDeliveryRadios"), "natural") : "natural",
     temperature: temperatureSlider ? parseInt(temperatureSlider.value, 10) / 100 : 0.7,
     max_tokens: readMaxTokensSetting(),
@@ -6211,6 +6220,7 @@ async function send() {
         max_words: parseInt(lengthSlider.value, 10),
         language: currentLanguage,
         speak: speakEnabled(),
+        auto_tags: typeof autoTagsOn === "function" ? autoTagsOn() : false,   // NEW (1.5.0)
       }),
     });
     const data = await res.json();
@@ -6254,6 +6264,7 @@ async function send() {
       voiceEngine: data.voice_engine,  // NEW (1.5.0)
       wordTimes: data.word_times,  // NEW (1.5.0): exact word timings, or null
       voiced: data.voiced && data.voiced !== data.reply ? data.voiced : undefined,  // NEW (1.5.0): with its voice tags
+      autoTagged: data.auto_tagged === true,   // NEW (1.5.0)
       footer: pager ? pager.el : null,  // NEW (1.5.0)
       // NEW (1.5.0): what the Save button keeps, so it can be played again.
       saveData: data.audio_url ? {
@@ -9024,13 +9035,23 @@ function savedRowNode(item) {
     }
   });
 
+  // NEW (1.5.0): keep the clip as a file on your computer.
+  const dl = document.createElement("a");
+  dl.className = "voice-menu-btn saved-download";
+  dl.href = `/api/saved/${item.id}/download`;
+  dl.setAttribute("download", "");
+  dl.title = "Download this clip";
+  dl.setAttribute("aria-label", "Download this clip");
+  dl.appendChild(iconNode("i-download", "icon-16"));
+  dl.addEventListener("click", (event) => event.stopPropagation());
+
   const go = (event) => {
     event.stopPropagation();
     playSaved(item);
   };
   play.addEventListener("click", go);
   body.addEventListener("click", go);
-  row.append(play, body, del);
+  row.append(play, body, dl, del);
   return row;
 }
 
@@ -9277,6 +9298,8 @@ function applyVoiceStyleSettings(data) {
   if (Array.isArray(data.audio_tag_groups) && data.audio_tag_groups.length) audioTagGroups = data.audio_tag_groups;
   const toggle = $("expressiveVoiceToggle");
   if (toggle) toggle.checked = data.expressive_voice === true;
+  const hold = $("holdAccentToggle");
+  if (hold) hold.checked = data.hold_accent !== false;
   const radios = $("voiceDeliveryRadios");
   const note = $("voiceDeliveryNote");
   if (radios) {
@@ -9388,18 +9411,22 @@ function updateVoiceTagButton() {
 (function wireVoiceTags() {
   renderVoiceTagGroups();
   const suggest = $("voiceTagSuggest");
+  const quick = $("voiceTagSuggestQuick");   // CHANGED (1.5.0): the same, outside the menu
   const note = $("voiceTagNote");
   const input = $("messageInput");
   if (suggest && input) {
-    suggest.addEventListener("click", async () => {
+    const buttons = [suggest, quick].filter(Boolean);
+    const run = async () => {
       const before = input.value;
       if (!before.replace(VOICE_TAG_RE, "").trim()) {
         if (note) { note.classList.add("is-error"); note.textContent = "Type your message first, then Suggest adds tags to it."; }
+        setStatus("Type your message first, then Suggest adds tags to it.", true);
+        input.focus();
         return;
       }
-      suggest.disabled = true;
-      suggest.classList.add("is-busy");
+      buttons.forEach((b) => { b.disabled = true; b.classList.add("is-busy"); });
       if (note) { note.classList.remove("is-error"); note.dataset.busy = "1"; note.textContent = "Finding the right places…"; }
+      setStatus("Finding the right places for tags…");
       try {
         const res = await fetch("/api/voice-tags/suggest", {
           method: "POST",
@@ -9411,12 +9438,15 @@ function updateVoiceTagButton() {
         if (input.value !== before) return;   // you kept typing; don't overwrite it
         if (!data.added) {
           if (note) note.textContent = "Nothing to add: it reads fine as it is.";
+          setStatus("Nothing to add: it reads fine as it is.");
           return;
         }
         input.value = data.text;
         if (typeof cancelAutoSend === "function") cancelAutoSend();
         if (typeof setTypedByHand === "function") setTypedByHand(true);
         input.dispatchEvent(new Event("input", { bubbles: true }));
+        if (typeof tagIdeasState === "object" && tagIdeasState) { tagIdeasState.ideas = []; renderTagIdeas({ now: true }); }
+        setStatus(`Added ${data.added} voice tag${data.added === 1 ? "" : "s"}. Press Suggest again for a different take, or edit them in the box.`);
         if (note) {
           note.replaceChildren(`Added ${data.added} tag${data.added === 1 ? "" : "s"}. `);
           const undo = document.createElement("button");
@@ -9433,12 +9463,21 @@ function updateVoiceTagButton() {
         }
       } catch (err) {
         if (note) { note.classList.add("is-error"); note.textContent = err.message; }
+        setStatus(err.message, true);
       } finally {
-        suggest.disabled = false;
-        suggest.classList.remove("is-busy");
+        buttons.forEach((b) => { b.disabled = false; b.classList.remove("is-busy"); });
         if (note) delete note.dataset.busy;
       }
-    });
+    };
+    buttons.forEach((b) => b.addEventListener("click", (e) => {
+      if (b === quick && typeof autoTagsOn === "function" && autoTagsOn()) {
+        // With Auto tags on there's nothing to suggest: show the options.
+        const more = $("voiceTagBtn");
+        if (more) more.click();
+        return;
+      }
+      run(e);
+    }));
   }
   // Shown only for an ElevenLabs voice: the voice chip's name changes
   // whenever the voice or the profile does.
@@ -9848,14 +9887,13 @@ function makePersonalityHelper(textarea, getContext, storageKey) {
 // ---------------------------------------------------------------------------
 
 var TAG_IDEAS_KEY = "frivo_tag_ideas";
-// CHANGED (1.5.0): live and instant. The moment you type, Frivo's own quick
-// rules put up ideas for the words that plainly call for one ("haha",
-// "ugh", "guess what...!"); the AI is asked as you finish each word and
-// its answer replaces them. Every idea keeps the words it was made for, so
-// it lands in the right place however late it arrives, goes away when you
-// put that tag in yourself, and follows its word when the box scrolls.
+// CHANGED (1.5.0): live. The AI is asked when a sentence ends or after a
+// short pause, with the whole message in view. Every idea keeps the words
+// it was made for, so it lands in the right place however late it
+// arrives, goes away when you put that tag in yourself, and follows its
+// word when the box scrolls.
 var tagIdeasState = {
-  ideas: [],            // [{ tag, at, words, key, instant }]
+  ideas: [],            // [{ tag, at, words, key }]
   nodes: new Map(),     // key -> { pill, mark, idea }
   asked: "",            // the words last asked of the AI
   answered: "",         // the words the AI's current answer is for
@@ -9886,57 +9924,6 @@ function spokenWords(text) {
   }
   out.endsWithTag = /\]\s*$/.test(text);
   return out;
-}
-
-// Frivo's own quick ideas, for words that plainly call for a tag. Each
-// rule: the words that trigger it (case-insensitive, punctuation ignored)
-// and the tag, put before that word; "sentence" rules go before the start
-// of the sentence the word is in.
-var INSTANT_TAG_RULES = [
-  { words: /^(haha+|hehe+|lol|lmao|rofl|lmfao)$/i, tag: "laughs" },
-  { words: /^(ugh+|sigh|meh|welp)$/i, tag: "sighs" },
-  { words: /^(wow+|whoa+|woah+|omg|gasp)$/i, tag: "gasps" },
-  { words: /^(shh+|psst|secret|secretly)$/i, tag: "whispers", sentence: true },
-  { words: /^(yay+|woohoo+|yesss+|finally|hooray)$/i, tag: "excited", sentence: true },
-  { words: /^(sorry|apologies)$/i, tag: "softly", sentence: true },
-  { words: /^(sadly|unfortunately|miss)$/i, tag: "sad", sentence: true },
-  { words: /^(seriously|riiight|suuure)$/i, tag: "sarcastic", sentence: true },
-  { words: /^(um+|uh+|hmm+|erm+|well)$/i, tag: "pause" },
-];
-
-function instantTagIdeas(words) {
-  const out = [];
-  const taken = new Set();
-  const bare = (w) => w.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "");
-  // Where each sentence starts.
-  const starts = [];
-  let sentenceStart = 0;
-  words.forEach((w, i) => { starts.push(sentenceStart); if (/[.!?]+["')\]]*$/.test(w.word)) sentenceStart = i + 1; });
-  words.forEach((w, i) => {
-    const plain = bare(w.word);
-    if (!plain) return;
-    for (const rule of INSTANT_TAG_RULES) {
-      if (!rule.words.test(plain)) continue;
-      const at = rule.sentence ? starts[i] : i;
-      if (taken.has(at) || words[at].tagged) break;
-      taken.add(at);
-      out.push({ tag: rule.tag, at, instant: true });
-      break;
-    }
-  });
-  // "Guess what...!" and the like: excitement from the start of a sentence
-  // that ends in an exclamation mark and sounds like good news.
-  words.forEach((w, i) => {
-    if (!/!+["')\]]*$/.test(w.word)) return;
-    const at = starts[i];
-    if (taken.has(at) || words[at].tagged) return;
-    const sentence = words.slice(at, i + 1).map((x) => bare(x.word).toLowerCase()).join(" ");
-    if (/\b(guess what|can't believe|cannot believe|we did it|i did it|let's go|lets go|so happy|awesome|amazing|best day|i won|we won|beat)\b/.test(sentence)) {
-      taken.add(at);
-      out.push({ tag: "excited", at, instant: true });
-    }
-  });
-  return out.slice(0, 3);
 }
 
 function clearTagIdeas() {
@@ -10116,9 +10103,7 @@ function renderTagIdeas({ now = false } = {}) {
       st.nodes.set(key, node);
     }
     node.idea = idea;
-    node.pill.classList.toggle("is-instant", Boolean(idea.instant));
-    node.pill.title = (word ? `Put [${idea.tag}] before “${word.word}”` : `Put [${idea.tag}] at the end`)
-      + (idea.instant ? " (Frivo's quick guess; the AI's ideas replace it)" : "");
+    node.pill.title = word ? `Put [${idea.tag}] before “${word.word}”` : `Put [${idea.tag}] at the end`;
     if (node.mark) {
       node.mark.style.left = `${box.x - 3}px`;
       node.mark.style.width = `${box.w + 6}px`;
@@ -10183,30 +10168,12 @@ function tagIdeaKey(idea) {
 
 function withWords(list, words) {
   return list.map((idea) => {
-    const full = { tag: idea.tag, at: idea.at, words, instant: Boolean(idea.instant) };
+    const full = { tag: idea.tag, at: idea.at, words };
     full.key = tagIdeaKey(full);
     return full;
   });
 }
 
-// Frivo's quick ideas for the message as it is now, kept only where the
-// AI hasn't answered for these words yet (its answer wins).
-function refreshInstantIdeas() {
-  const input = $("messageInput");
-  const st = tagIdeasState;
-  if (!input || st.paused) return;
-  const spoken = spokenWords(input.value);
-  const words = spoken.map((w) => w.word);
-  const key = words.join(" ");
-  const fromAi = st.ideas.filter((i) => !i.instant);
-  if (key === st.answered && !st.aiDown) {
-    st.ideas = fromAi;   // the AI has spoken for exactly this text
-    return;
-  }
-  const quick = withWords(instantTagIdeas(spoken), words)
-    .filter((q) => !fromAi.some((a) => a.at === q.at && tagIdeaPlace(a)));
-  st.ideas = fromAi.concat(quick);
-}
 
 async function askTagIdeas() {
   const input = $("messageInput");
@@ -10236,7 +10203,6 @@ async function askTagIdeas() {
         // The AI's view replaces the last one and Frivo's quick guesses;
         // an idea that's the same keeps its pill.
         st.ideas = withWords((data.ideas || []).slice(0, 4), words);
-        refreshInstantIdeas();   // quick ideas for anything typed since
         renderTagIdeas();
       } else {
         st.aiDown = true;   // the quick ideas stay up
@@ -10262,21 +10228,45 @@ function messageBoxChanged() {
   if (!input) return;
   if (!input.value.trim()) { clearTagIdeas(); return; }
   const wrap = $("voiceTagWrap");
-  if (!tagIdeasOn() || !wrap || wrap.classList.contains("is-hidden")) return;
-  refreshInstantIdeas();
+  if (!tagIdeasOn() || autoTagsOn() || !wrap || wrap.classList.contains("is-hidden")) return;   // Auto tags: no need
   renderTagIdeas();   // moves the ideas along, and drops any whose word changed
   clearTimeout(st.timer);
-  // The AI is asked the moment a word is finished (one question at a
-  // time; anything typed meanwhile is asked about as soon as the answer
-  // is in), a little later mid-word, and at least every two seconds while
-  // you keep typing.
-  const finished = /[\s.,!?;:]$/.test(input.value);
-  const overdue = Date.now() - st.lastAskAt > 2000;
-  st.timer = setTimeout(askTagIdeas, overdue || finished ? 40 : 600);
+  // CHANGED (1.5.0): asked when a sentence ends, or after a short pause,
+  // so the AI sees whole thoughts rather than half a sentence (one
+  // question at a time; anything typed meanwhile is asked about as soon
+  // as the answer is in).
+  const sentenceEnd = /[.!?]["')\]]*\s*$/.test(input.value);
+  st.timer = setTimeout(askTagIdeas, sentenceEnd ? 120 : 800);
+}
+
+var AUTO_TAGS_KEY = "frivo_auto_tags";
+function autoTagsOn() {
+  try { return localStorage.getItem(AUTO_TAGS_KEY) === "on"; } catch (e) { return false; }
+}
+function showAutoTagsState() {
+  const on = autoTagsOn();
+  const split = $("tagSplit");
+  const label = $("tagSplitLabel");
+  const main = $("voiceTagSuggestQuick");
+  if (split) split.classList.toggle("is-auto", on);
+  if (label) label.textContent = on ? "Auto" : "Suggest";
+  if (main) main.title = on
+    ? "Auto tags is on: the AI tags every message as it's spoken. Click for the options."
+    : "The AI adds voice tags that fit what you've typed. Your words stay the same.";
 }
 
 (function wireTagIdeas() {
   const input = $("messageInput");
+  const auto = $("autoTagsToggle");
+  if (auto) {
+    auto.checked = autoTagsOn();
+    showAutoTagsState();
+    auto.addEventListener("change", () => {
+      try { localStorage.setItem(AUTO_TAGS_KEY, auto.checked ? "on" : "off"); } catch (e) { /* not kept */ }
+      showAutoTagsState();
+      if (auto.checked) clearTagIdeas(); else messageBoxChanged();
+    });
+  }
   const toggle = $("tagIdeasToggle");
   if (toggle) {
     toggle.checked = tagIdeasOn();

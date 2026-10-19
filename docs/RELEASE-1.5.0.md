@@ -293,3 +293,15 @@ Above the personality box, in the profile editor and in Settings > Replies. It u
 - **Scrolled away.** When a long message has scrolled, ideas for words out of view are counted on a small arrow at that edge (‹ 2); click it to scroll to them.
 - **Dictation** and a click in the dictation history now update the ideas too, and switching to a free voice clears them.
 - **The accent, properly.** ElevenLabs' own guidance says v3 is "more likely to produce variable results" on text under about 250 characters, which is most replies, and the API has continuity fields for exactly that. Each v3 request now carries the ids and words of the last three things the voice said in this conversation (previous_request_ids / previous_text), which the API uses to match the new line to them, plus the language and a fixed seed. Natural and Lively are back on v3's Natural setting (Robust muted the tags); Calm stays Robust.
+
+### Suggest up front, Hold the accent, and exporting clips
+
+- **Suggest** is now its own button in the message box, next to ✦. It adds the AI's tags to the whole message in one go, as before; the status line says what it added.
+- The live ideas above the words now come after a pause or at the end of a sentence, with the whole message in view, instead of after every word; Frivo's own quick guesses are gone. **Ideas as I type** in the ✦ menu turns them off.
+- **Hold the accent** (Settings > Voices) is the continuity between expressive lines that keeps a short reply from drifting into another accent. It also pulls each line toward how the last ones sounded, which can soften the tags, so it's a switch: off, every line is spoken fresh, the way it was before. The fixed seed is gone.
+- **Saved** clips can be kept on your computer: a download arrow on each one (named by who said it and its first words), and **Export all** for every clip as a zip with a text list of what each one says.
+
+### Auto tags, and a quieter message box
+
+- The voice-tag controls are one split pill: **✦ Suggest** tags the message, the small arrow opens the menu (the tag picker, Auto tags, Ideas as I type). Speak and Chatbox can still be hidden from the box in Settings > Appearance.
+- **Auto tags** (in that menu): the AI tags every message you send on its way to the voice, and a Reply profile's replies too, with no clicking. The pill shows **Auto** while it's on, the live ideas step aside, and a reply the AI tagged says "Auto tags" under it. It's one extra AI call per message.

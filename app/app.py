@@ -678,6 +678,8 @@ def load_config():
         # default profile. Each profile has its own.
         "expressive_voice": False,
         "voice_delivery": "natural",
+        # NEW (1.5.0): continuity between v3 lines (see _elevenlabs_payload).
+        "hold_accent": True,
         # Sampling temperature for the reply. 0.7 is the long-standing
         # OpenAI default and what this app used implicitly before the
         # setting was exposed, so an existing config behaves identically.
@@ -3019,7 +3021,6 @@ def warm_free_voices():
 AUDIO_TAG_RE = re.compile(r"\[([A-Za-z][A-Za-z' \-]{0,38})\]")
 ELEVEN_V2_MODEL = "eleven_multilingual_v2"
 ELEVEN_V3_MODEL = "eleven_v3"
-ELEVEN_V3_SEED = 4242   # NEW (1.5.0): any fixed number; see _elevenlabs_payload
 # NEW (1.5.0): accent tags ([british accent]) change who the voice is. Only
 # kept when you typed them yourself.
 ACCENT_TAG_RE = re.compile(r"\[[^\]\n]*\baccent\b[^\]\n]*\]\s*", re.I)
@@ -3283,19 +3284,20 @@ def _elevenlabs_payload(text, force_v2=False):
             "text": text,
             "model_id": ELEVEN_V3_MODEL,
             "voice_settings": {"stability": delivery["v3"]},
-            # NEW (1.5.0): v3 works out the language from each line by
-            # itself, and on a short or tagged line it guesses differently,
-            # so the same voice came out American, Scottish, Russian... Told
-            # the language, it keeps one accent. The fixed seed keeps it from
-            # rolling a new delivery each time.
-            "seed": ELEVEN_V3_SEED,
         }
+        # NEW (1.5.0): v3 works out the language from each line by itself,
+        # and on a short or tagged line it guesses differently, so the same
+        # voice came out American, Scottish, Russian... Told the language,
+        # it keeps one accent.
         code = language_iso(style.get("language") or CFG.get("language") or "English")
         if code:
             payload["language_code"] = code
-        # Continuity with what this voice just said (see above).
+        # Continuity with what this voice just said (see above). It's what
+        # holds the accent on short lines, and it also pulls each line
+        # toward how the last ones were delivered, which can soften the
+        # tags: "Hold the accent" in Settings > Voices turns it off.
         from flask import has_request_context
-        if has_request_context() and getattr(g, "speech_thread", None):
+        if CFG.get("hold_accent", True) and has_request_context() and getattr(g, "speech_thread", None):
             with SPEECH_THREADS_LOCK:
                 thread = SPEECH_THREADS.get(g.speech_thread)
             if thread and time.time() - thread.get("at", 0) < V3_STICKY_SECONDS:
@@ -3558,19 +3560,14 @@ def build_tag_suggestion_prompt(text, delivery):
     )
 
 
-@app.route("/api/voice-tags/suggest", methods=["POST"])
-def suggest_voice_tags():
-    data = request.get_json(force=True) or {}
-    text = tidy_audio_tags(str(data.get("text") or "").strip())[:2000]
-    if not strip_audio_tags(text):
-        return jsonify({"error": "Type your message first, then Suggest adds tags to it."}), 400
+def tag_message_with_ai(text, delivery):
+    """
+    NEW (1.5.0): `text` with the AI's audio tags added and nothing else
+    changed. Used by Suggest, and by Auto tags on every message you send.
+    Raises ValueError when there's no AI to ask, RuntimeError when it failed.
+    """
     if not CFG.get("openai_api_key") and resolve_provider("chat_provider", CHAT_PROVIDERS) == "openai":
-        return jsonify({"error": "Suggesting tags needs an AI: add your OpenAI key, or pick Ollama for chat replies."}), 400
-    profile = None
-    if data.get("profile_id"):
-        profile = next((p for p in load_profiles() if p["id"] == data.get("profile_id")), None)
-    delivery = voice_style_of(profile)["delivery"]
-    started = time.perf_counter()
+        raise ValueError("Suggesting tags needs an AI: add your OpenAI key, or pick Ollama for chat replies.")
     try:
         response = create_chat_completion(
             make_openai_client(),
@@ -3583,11 +3580,32 @@ def suggest_voice_tags():
         )
         raw = (response.choices[0].message.content or "").strip()
     except Exception as e:
-        return jsonify({"error": f"Couldn't ask the AI: {e}"}), 502
+        raise RuntimeError(f"Couldn't ask the AI: {e}")
+    raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.S | re.I)
     raw = re.sub(r"</?MESSAGE>", "", raw).strip()
     suggested = transplant_audio_tags(strip_audio_tags(text), tidy_audio_tags(raw if ACCENT_TAG_RE.search(text) else ACCENT_TAG_RE.sub("", raw)))
     if delivery == "calm":
         suggested = re.sub(r"\[(?:shouts|shouting|yells|yelling|screams)\]\s*", "", suggested, flags=re.I)
+    return suggested
+
+
+@app.route("/api/voice-tags/suggest", methods=["POST"])
+def suggest_voice_tags():
+    data = request.get_json(force=True) or {}
+    text = tidy_audio_tags(str(data.get("text") or "").strip())[:2000]
+    if not strip_audio_tags(text):
+        return jsonify({"error": "Type your message first, then Suggest adds tags to it."}), 400
+    profile = None
+    if data.get("profile_id"):
+        profile = next((p for p in load_profiles() if p["id"] == data.get("profile_id")), None)
+    delivery = voice_style_of(profile)["delivery"]
+    started = time.perf_counter()
+    try:
+        suggested = tag_message_with_ai(text, delivery)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except RuntimeError as e:
+        return jsonify({"error": str(e)}), 502
     added = len(AUDIO_TAG_RE.findall(suggested)) - len(AUDIO_TAG_RE.findall(text))
     # NEW (1.5.0): the new tags one by one, for the ideas that pop up as you
     # type: each with the word it goes before ("at", counting said words only).
@@ -4058,6 +4076,8 @@ def settings():
             CFG["expressive_voice"] = data.get("expressive_voice") is True
         if "voice_delivery" in data:
             CFG["voice_delivery"] = normalize_voice_delivery(data.get("voice_delivery"), CFG.get("voice_delivery", DEFAULT_VOICE_DELIVERY))
+        if "hold_accent" in data:
+            CFG["hold_accent"] = data.get("hold_accent") is not False
         if "response_style" in data:
             CFG["response_style"] = normalize_response_style(
                 data.get("response_style"), CFG.get("response_style", DEFAULT_RESPONSE_STYLE)
@@ -4159,6 +4179,7 @@ def settings():
             # NEW (1.5.0)
             "expressive_voice": CFG.get("expressive_voice") is True,
             "voice_delivery": normalize_voice_delivery(CFG.get("voice_delivery")),
+            "hold_accent": CFG.get("hold_accent", True) is not False,
             "voice_deliveries": VOICE_DELIVERIES,
             "audio_tag_groups": AUDIO_TAG_GROUPS,
             "min_speaking_speed": MIN_SPEAKING_SPEED,
@@ -6603,6 +6624,9 @@ def chat():
     # Absent means yes: an older page, or anything else calling this
     # endpoint, keeps the original speak-everything behaviour.
     speak = data.get("speak", True) is not False
+    # NEW (1.5.0): Auto tags (the ✦ menu): the AI adds voice tags to every
+    # message you send, and to its own replies, before the voice gets it.
+    auto_tags = data.get("auto_tags") is True
 
     if not message:
         return jsonify({"error": "Type something first."}), 400
@@ -6669,6 +6693,25 @@ def chat():
         prompt_voice_style = None
         message = strip_audio_tags(message) or message
     message = tidy_audio_tags(message)
+    auto_tagged = False
+    tag_seconds = 0.0
+    if auto_tags and speak and voice_engine == "elevenlabs" and response_style != "reply" and strip_audio_tags(message):
+        # Your own words, tagged on their way to the voice. One extra AI
+        # call; if it can't, the message goes as typed.
+        tag_start = time.perf_counter()
+        try:
+            tagged = tag_message_with_ai(message, voice_style["delivery"])
+            if has_audio_tags(tagged):
+                message = tagged
+                auto_tagged = True
+        except Exception as e:
+            log_server_event(f"Auto tags: {e}")
+        tag_seconds = time.perf_counter() - tag_start
+    if auto_tags and voice_engine == "elevenlabs" and response_style == "reply" and prompt_voice_style:
+        # For a Reply profile, Auto tags is Expressive voice for this message.
+        prompt_voice_style = dict(prompt_voice_style, expressive=True)
+        g.voice_style["expressive"] = True
+        auto_tagged = True
 
     system_prompt = build_system_prompt(base_prompt, max_words, language, response_style,
                                         voice_style=prompt_voice_style)
@@ -6857,6 +6900,8 @@ def chat():
             # NEW (1.5.0): the reply with its audio tags, for the page to
             # show; the same as "reply" when it has none.
             "voiced": voiced,
+            # NEW (1.5.0): Auto tags added some (your message, or its reply).
+            "auto_tagged": auto_tagged and has_audio_tags(voiced),
             # NEW (1.5.0): which ElevenLabs model spoke it, when one did.
             "voice_model": (_elevenlabs_payload(voiced)["model_id"]
                             if speak and voice_engine == "elevenlabs" else ""),
@@ -6891,9 +6936,9 @@ def chat():
             # page highlights the word being spoken from these.
             "word_times": word_times,
             # Measured text and audio generation times for the UI.
-            "text_seconds": round(text_seconds, 2),
+            "text_seconds": round(text_seconds + tag_seconds, 2),
             "audio_seconds": round(audio_seconds, 2),
-            "total_seconds": round(text_seconds + audio_seconds, 2),
+            "total_seconds": round(text_seconds + tag_seconds + audio_seconds, 2),
         }
     )
 
@@ -7098,6 +7143,70 @@ def saved_play(ident):
         if key in SESSIONS:
             SESSIONS[key].append({"role": "assistant", "content": item["text"]})
     return jsonify({"ok": True, "item": saved_public(item)})
+
+
+def _saved_download_name(item, used=None):
+    """A file name for a saved reply: who said it and its first words."""
+    words = re.sub(r"[^\w\s'-]", "", strip_audio_tags(item.get("text", "")), flags=re.U).split()
+    head = " ".join(words[:7]) or "reply"
+    who = (item.get("profile_name") or item.get("voice_name") or "").strip()
+    name = f"{who} - {head}" if who else head
+    name = re.sub(r"[\\/:*?\"<>|]+", "", name).strip()[:90] or "reply"
+    ext = os.path.splitext(item.get("file", ""))[1] or ".mp3"
+    full = name + ext
+    if used is not None:
+        n = 2
+        while full in used:
+            full = f"{name} ({n}){ext}"
+            n += 1
+        used.add(full)
+    return full
+
+
+@app.route("/api/saved/<ident>/download")
+def saved_download(ident):
+    """NEW (1.5.0): one saved reply's audio, as a file to keep."""
+    if not _SAVED_ID_RE.match(ident or ""):
+        return jsonify({"error": "Not found."}), 404
+    with SAVED_LOCK:
+        item = next((i for i in load_saved() if i["id"] == ident), None)
+    if not item or not _SAVED_FILE_RE.match(item.get("file", "")) \
+            or not os.path.isfile(os.path.join(SAVED_DIR, item["file"])):
+        return jsonify({"error": "That saved reply's audio is missing."}), 404
+    return send_from_directory(SAVED_DIR, item["file"], as_attachment=True,
+                               download_name=_saved_download_name(item))
+
+
+@app.route("/api/saved/export.zip")
+def saved_export():
+    """
+    NEW (1.5.0): every saved reply in one zip: the audio files, named by who
+    said them and their first words, and a saved.txt listing each one's full
+    text, voice and date.
+    """
+    import io
+    import zipfile
+    with SAVED_LOCK:
+        items = list(load_saved())
+    items = [i for i in items if _SAVED_FILE_RE.match(i.get("file", ""))
+             and os.path.isfile(os.path.join(SAVED_DIR, i["file"]))]
+    if not items:
+        return jsonify({"error": "Nothing saved yet."}), 404
+    buf = io.BytesIO()
+    used = set()
+    lines = []
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        for item in sorted(items, key=lambda i: i.get("saved_at", 0)):
+            name = _saved_download_name(item, used)
+            z.write(os.path.join(SAVED_DIR, item["file"]), name)
+            when = time.strftime("%Y-%m-%d %H:%M", time.localtime(item.get("saved_at", 0))) if item.get("saved_at") else ""
+            lines.append(f"{name}\n  {item.get('voiced') or item.get('text', '')}\n  "
+                         + " · ".join(x for x in (item.get("voice_name"), item.get("profile_name"), when) if x))
+        z.writestr("saved.txt", "Frivo saved replies\n\n" + "\n\n".join(lines) + "\n")
+    buf.seek(0)
+    from flask import send_file
+    return send_file(buf, mimetype="application/zip", as_attachment=True,
+                     download_name=time.strftime("Frivo saved replies %Y-%m-%d.zip"))
 
 
 @app.route("/saved-audio/<filename>")
