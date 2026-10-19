@@ -4679,6 +4679,9 @@ async function startLocalLiveDictation() {
   liveLocal = {
     stream,
     ctx,
+    source,             // NEW (1.5.0): for the level worklet
+    workletLevel: null, // NEW (1.5.0): the latest level from it
+    levelNode: null,    // NEW (1.5.0)
     analyser,
     data: new Uint8Array(analyser.fftSize),
     recorder: null,
@@ -4704,10 +4707,69 @@ async function startLocalLiveDictation() {
     : "Listening — text appears as you speak.");
 
   liveLocal.timer = setInterval(pollLocalLevel, 50);
+  // NEW (1.5.0): hand the listening over to the audio thread. A timer only
+  // runs about once a second while Frivo's tab is in the background, so
+  // speech was noticed late and its first words were never recorded. The
+  // audio thread keeps its pace in any tab. The timer stays if this fails.
+  useLevelWorklet(liveLocal);
   if (typeof micRing !== "undefined") micRing.fromAnalyser(analyser);   // NEW (1.5.0): the level ring
 }
 
+// NEW (1.5.0): measures the microphone's level on the audio thread, every
+// 20 ms, and posts it back. Loaded from a string, so there's no extra file.
+const LEVEL_WORKLET_SOURCE = `
+class FrivoLevel extends AudioWorkletProcessor {
+  constructor() { super(); this.sum = 0; this.count = 0; this.every = Math.round(sampleRate * 0.02); }
+  process(inputs) {
+    const channel = inputs[0] && inputs[0][0];
+    if (channel) {
+      for (let i = 0; i < channel.length; i++) this.sum += channel[i] * channel[i];
+      this.count += channel.length;
+      if (this.count >= this.every) {
+        this.port.postMessage(Math.sqrt(this.sum / this.count));
+        this.sum = 0;
+        this.count = 0;
+      }
+    }
+    return true;
+  }
+}
+registerProcessor("frivo-level", FrivoLevel);
+`;
+
+async function useLevelWorklet(s) {
+  try {
+    if (!s || !s.ctx.audioWorklet || typeof AudioWorkletNode !== "function") return;
+    const url = URL.createObjectURL(new Blob([LEVEL_WORKLET_SOURCE], { type: "application/javascript" }));
+    try {
+      await s.ctx.audioWorklet.addModule(url);
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+    if (liveLocal !== s || !isDictating) return;   // stopped while it loaded
+    const node = new AudioWorkletNode(s.ctx, "frivo-level");
+    // It only runs while connected through to the speakers; a gain of zero
+    // keeps that silent.
+    const mute = s.ctx.createGain();
+    mute.gain.value = 0;
+    s.source.connect(node);
+    node.connect(mute);
+    mute.connect(s.ctx.destination);
+    node.port.onmessage = (event) => {
+      s.workletLevel = event.data;
+      if (liveLocal === s) pollLocalLevel();
+    };
+    s.levelNode = node;
+    clearInterval(s.timer);
+    s.timer = null;
+  } catch (err) {
+    // No worklet (an older browser): the 50 ms timer carries on as before.
+  }
+}
+
 function currentRms() {
+  // NEW (1.5.0): the audio thread's measurement, when it's running.
+  if (liveLocal.levelNode && liveLocal.workletLevel != null) return liveLocal.workletLevel;
   const { analyser, data } = liveLocal;
   analyser.getByteTimeDomainData(data);
   let sum = 0;
@@ -4888,6 +4950,7 @@ function stopLocalLiveDictation() {
 
   if (!s) return;
   clearInterval(s.timer);
+  if (s.levelNode) s.levelNode.port.onmessage = null;   // NEW (1.5.0)
 
   if (s.recorder && s.recorder.state !== "inactive") {
     s.recorder.speechMs = Date.now() - s.startedAt;

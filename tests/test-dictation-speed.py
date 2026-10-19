@@ -179,6 +179,24 @@ function check(name, cond, got) {
   await p.click('#dictateBtn');
   await wait(300);
 
+  // NEW (1.5.0): the level is measured on the audio thread, not a timer, so
+  // a background tab (where timers run about once a second) still notices
+  // speech at once and records its first words.
+  console.log('--- listening on the audio thread ---');
+  const engine = await p.evaluate(() => ({ worklet: Boolean(liveLocal && liveLocal.levelNode), timer: liveLocal && liveLocal.timer }));
+  check('the level comes from the audio thread', engine.worklet, engine);
+  check('and the 50 ms timer is no longer needed', engine.timer === null, engine);
+  const rate = await p.evaluate(async () => {
+    let n = 0;
+    const port = liveLocal.levelNode.port;
+    const original = port.onmessage;
+    port.onmessage = (e) => { n++; original(e); };
+    await new Promise((r) => setTimeout(r, 1000));
+    port.onmessage = original;
+    return n;
+  });
+  check('about 50 level readings a second', rate >= 35 && rate <= 60, rate);
+
   console.log('--- the end of a sentence ---');
   await level(0.2); await wait(2000); await level(0);
   await wait(3500);
