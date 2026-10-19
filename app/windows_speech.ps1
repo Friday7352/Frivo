@@ -21,12 +21,19 @@
 #    "speed":1.0,"pages":["..."],"outs":["C:\\...wav"]}
 # Each page is spoken to its own wave file, so Frivo knows exactly where
 # each chatbox page ends. A plain reply is one page.
+#
+# NEW (1.5.0): the speak answer also says where each word starts, so the
+# reply can highlight the word being spoken:
+#   {"ok":true,"words":[[[charPos,charLen,seconds],...] per page]}
+# "words" is null when the voice didn't say. Collecting it never stops the
+# speech: any problem there just means no highlight.
 
 $ErrorActionPreference = 'Stop'
 try { [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false } catch { }
 Add-Type -AssemblyName System.Speech
 
 $script:sapi = $null
+$script:sapiWordsReady = $false
 $script:onecore = $null
 $script:asTask = $null
 $script:oneCoreError = ''
@@ -84,20 +91,74 @@ function Get-Voices {
     }
 }
 
+# NEW (1.5.0): the desktop voices report each word through an event that
+# can arrive on another thread, which a PowerShell script block can't
+# safely handle. A few lines of C# collect them instead.
+function Initialize-SapiWords {
+    if ($script:sapiWordsReady) { return $true }
+    try {
+        Add-Type -ReferencedAssemblies System.Speech -TypeDefinition @'
+using System;
+using System.Collections.Generic;
+using System.Speech.Synthesis;
+using System.Threading;
+public static class FrivoSapiWords {
+    public static List<double[]> Speak(SpeechSynthesizer synth, string text) {
+        var words = new List<double[]>();
+        EventHandler<SpeakProgressEventArgs> onWord = (sender, e) => {
+            lock (words) { words.Add(new double[] { e.CharacterPosition, e.CharacterCount, e.AudioPosition.TotalSeconds }); }
+        };
+        synth.SpeakProgress += onWord;
+        try {
+            synth.Speak(text);
+            // The last events can land just after Speak returns.
+            int seen = -1;
+            for (int i = 0; i < 20; i++) {
+                int now; lock (words) { now = words.Count; }
+                if (now == seen) break;
+                seen = now;
+                Thread.Sleep(25);
+            }
+        } finally {
+            synth.SpeakProgress -= onWord;
+        }
+        lock (words) {
+            var copy = new List<double[]>(words);
+            copy.Sort((a, b) => a[0].CompareTo(b[0]));
+            return copy;
+        }
+    }
+}
+'@
+        $script:sapiWordsReady = $true
+    } catch {
+        $script:sapiWordsReady = $false
+    }
+    return $script:sapiWordsReady
+}
+
 function Invoke-SapiSpeak($request) {
     $s = Get-Sapi
     $s.SelectVoice([string]$request.voice)
     $s.Rate = [int]$request.sapi_rate
     $pages = @($request.pages); $outs = @($request.outs)
+    $useWords = Initialize-SapiWords
+    $allWords = New-Object System.Collections.Generic.List[object]
     try {
         for ($i = 0; $i -lt $pages.Count; $i++) {
             $s.SetOutputToWaveFile([string]$outs[$i])
-            $s.Speak([string]$pages[$i])
+            if ($useWords) {
+                $allWords.Add([object[]]@([FrivoSapiWords]::Speak($s, [string]$pages[$i]).ToArray()))
+            } else {
+                $s.Speak([string]$pages[$i])
+            }
         }
     } finally {
         # Lets go of the last file, so Frivo can read it.
         $s.SetOutputToNull()
     }
+    if ($useWords) { return ,$allWords.ToArray() }
+    return $null
 }
 
 function Invoke-OneCoreSpeak($request) {
@@ -112,13 +173,38 @@ function Invoke-OneCoreSpeak($request) {
     # SpeakingRate came with Windows 10 1709. Without it the voice keeps its
     # normal pace rather than failing.
     try { $s.Options.SpeakingRate = [double]$request.speed } catch { }
+    # NEW (1.5.0): ask for word boundaries (Windows 10 1709 and later).
+    $useWords = $true
+    try { $s.Options.IncludeWordBoundaryMetadata = $true } catch { $useWords = $false }
+    $allWords = New-Object System.Collections.Generic.List[object]
     $pages = @($request.pages); $outs = @($request.outs)
     for ($i = 0; $i -lt $pages.Count; $i++) {
         $stream = Wait-Operation ($s.SynthesizeTextToStreamAsync([string]$pages[$i])) ([Windows.Media.SpeechSynthesis.SpeechSynthesisStream])
+        if ($useWords) {
+            try {
+                # Words and sentences come as separate tracks; the words
+                # are whichever has the most cues.
+                $words = New-Object System.Collections.Generic.List[object]
+                foreach ($track in $stream.TimedMetadataTracks) {
+                    $these = New-Object System.Collections.Generic.List[object]
+                    foreach ($cue in $track.Cues) {
+                        $from = [int]$cue.StartPositionInInput
+                        $to = [int]$cue.EndPositionInInput
+                        $these.Add([object[]]@($from, ($to - $from + 1), $cue.StartTime.TotalSeconds))
+                    }
+                    if ($these.Count -gt $words.Count) { $words = $these }
+                }
+                $allWords.Add([object[]]$words.ToArray())
+            } catch {
+                $useWords = $false
+            }
+        }
         $in = [System.IO.WindowsRuntimeStreamExtensions]::AsStreamForRead($stream)
         $out = [System.IO.File]::Create([string]$outs[$i])
         try { $in.CopyTo($out) } finally { $out.Dispose(); $in.Dispose(); $stream.Dispose() }
     }
+    if ($useWords) { return ,$allWords.ToArray() }
+    return $null
 }
 
 function Send-Answer($answer) {
@@ -139,8 +225,10 @@ while ($true) {
                 Send-Answer @{ ok = $true; voices = $voices; onecore_error = $script:oneCoreError }
             }
             'speak' {
-                if ([string]$request.kind -eq 'onecore') { Invoke-OneCoreSpeak $request } else { Invoke-SapiSpeak $request }
-                Send-Answer @{ ok = $true }
+                # CHANGED (1.5.0): the answer carries the word boundaries.
+                $words = $null
+                if ([string]$request.kind -eq 'onecore') { $words = Invoke-OneCoreSpeak $request } else { $words = Invoke-SapiSpeak $request }
+                Send-Answer @{ ok = $true; words = $words }
             }
             default { Send-Answer @{ ok = $false; error = "Unknown request: $($request.op)" } }
         }

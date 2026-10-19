@@ -67,6 +67,7 @@ mod.get_tts_audio = lambda text, voice_id, language="English": "x.mp3"  # CHANGE
 # NEW (1.5.0): a reply too long for one chatbox page is spoken through the
 # timed path, so that's replaced too.
 mod.get_tts_audio_timed = lambda text, voice_id, language, plan: ("x.mp3", None)
+mod.speak_reply = lambda text, voice_id, language, plan: ("x.mp3", None, None)   # NEW (1.5.0)
 mod.record_usage = lambda credits: None
 mod.CFG["elevenlabs_api_key"] = "el"
 

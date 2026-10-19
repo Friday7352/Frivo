@@ -2393,7 +2393,7 @@ def free_voice_problem(voice_id, language):
 def _windows_speak_request(voice_id, pages, outs):
     kind = "onecore" if voice_id.startswith(ONECORE_PREFIX) else "sapi"
     speed = clamp_speaking_speed(CFG.get("speaking_speed", 1.0))
-    WINDOWS_SPEECH.request({
+    answer = WINDOWS_SPEECH.request({   # CHANGED (1.5.0): keeps the answer
         "op": "speak",
         "kind": kind,
         "voice": voice_id.split(":", 1)[1],
@@ -2407,6 +2407,8 @@ def _windows_speak_request(voice_id, pages, outs):
     for out_path in outs:
         if not os.path.isfile(out_path) or os.path.getsize(out_path) == 0:
             raise RuntimeError("The Windows voice didn't make any audio.")
+    # NEW (1.5.0): where each word starts, per page, when Windows said.
+    return answer.get("words") if isinstance(answer, dict) else None
 
 
 def windows_speak(text, voice_id, path):
@@ -2424,7 +2426,7 @@ def windows_speak_pages(pages, voice_id, path):
     stem = os.path.join(AUDIO_DIR, uuid.uuid4().hex)
     outs = [f"{stem}-{i}.part.wav" for i in range(len(pages))]
     try:
-        _windows_speak_request(voice_id, pages, outs)
+        boundaries = _windows_speak_request(voice_id, pages, outs)   # CHANGED (1.5.0)
         frames, ends, total, params = [], [], 0, None
         for out_path in outs:
             with wave.open(out_path, "rb") as part:
@@ -2441,7 +2443,13 @@ def windows_speak_pages(pages, voice_id, path):
             joined.setsampwidth(params[1])
             joined.setframerate(params[2])
             joined.writeframes(b"".join(frames))
-        return ends
+        # CHANGED (1.5.0): and when each word is spoken, if Windows said.
+        try:
+            words = word_times_from_boundaries(pages, boundaries, ends)
+        except Exception as e:
+            log_server_event(f"Word timing (Windows): {e!r}")
+            words = None
+        return ends, words
     finally:
         for leftover in outs:
             try:
@@ -2660,41 +2668,136 @@ def elevenlabs_tts_timed(text, voice_id, pages):
         f.write(audio)
     ends = page_ends_from_alignment(pages, data.get("alignment")) \
         or page_ends_from_alignment(pages, data.get("normalized_alignment"))
-    return filename, ends
+    # NEW (1.5.0): and when each word is spoken, for the highlight.
+    words = word_times_from_alignment(text, data.get("alignment"))
+    return filename, ends, words
+
+
+def word_times_from_alignment(text, alignment):
+    """
+    NEW (1.5.0): when each word of `text` is spoken, from ElevenLabs'
+    per-character timings: [[start, end], ...], one per word (split on
+    spaces), in seconds. None unless the timings follow the text exactly,
+    because the reply only highlights words when the timing is exact.
+    """
+    try:
+        chars = alignment["characters"]
+        starts = alignment["character_start_times_seconds"]
+        finishes = alignment["character_end_times_seconds"]
+    except (KeyError, TypeError):
+        return None
+    if not (len(chars) == len(starts) == len(finishes)):
+        return None
+    timed = [(str(c), s, e) for c, s, e in zip(chars, starts, finishes) if not str(c).isspace()]
+    words = text.split()
+    if "".join(c for c, _, _ in timed) != "".join(words) or any(len(c) != 1 for c, _, _ in timed):
+        return None
+    out, i = [], 0
+    for word in words:
+        part = timed[i:i + len(word)]
+        i += len(word)
+        out.append([round(float(part[0][1]), 3), round(float(part[-1][2]), 3)])
+    return out
+
+
+def word_times_from_boundaries(pages, boundaries, page_ends):
+    """
+    NEW (1.5.0): the same, from the word boundaries a Windows voice reports
+    while speaking: for each page, [[character position, length, seconds
+    into the page], ...]. Every word with a letter or digit in it must have
+    been reported; a word of punctuation alone shares the word before's
+    time. Otherwise None.
+    """
+    if not boundaries or len(boundaries) != len(pages) or len(page_ends) != len(pages):
+        return None
+    out, page_start = [], 0.0
+    for page, events, page_end in zip(pages, boundaries, page_ends):
+        spans = [(m.start(), m.end()) for m in re.finditer(r"\S+", page)]
+        starts = [None] * len(spans)
+        for event in events or []:
+            pos, length, at = int(event[0]), int(event[1]), float(event[2])
+            for k, (a, b) in enumerate(spans):
+                if a <= pos < b or (pos < a < pos + max(length, 1)):
+                    if starts[k] is None or at < starts[k]:
+                        starts[k] = at
+                    break
+        for k, (a, b) in enumerate(spans):
+            if starts[k] is None:
+                if re.search(r"\w", page[a:b]):
+                    return None
+                starts[k] = starts[k - 1] if k else 0.0
+        length_of_page = page_end - page_start
+        for k in range(len(spans)):
+            begin = starts[k]
+            finish = starts[k + 1] if k + 1 < len(spans) else length_of_page
+            out.append([round(page_start + begin, 3), round(page_start + max(begin, finish), 3)])
+        page_start = page_end
+    return out
+
+
+def speak_reply(text, voice_id, language, plan):
+    """
+    NEW (1.5.0): speaks a reply, and says as exactly as it can when things
+    happen in it. Returns (filename, page_ends, word_times):
+
+      page_ends   when the voice finishes the last word of each chatbox page
+                  in `plan`; None for a one-page reply or when unknown, and
+                  then the page estimates instead.
+      word_times  when each word is spoken, for the highlight that follows
+                  the voice; None unless exact (ElevenLabs, or a Windows
+                  voice that reported its words). Frivo's own free voices
+                  don't report words, so they get no highlight.
+    """
+    pages = [_CHATBOX_COUNTER_RE.sub("", p["text"]) for p in plan] or [text]
+    engine = tts_engine(voice_id)
+    if engine == "elevenlabs":
+        # The with-timestamps request costs the same credits as the plain
+        # one, so it's used for every reply. Only a refused request falls
+        # back: anything after ElevenLabs said yes may already be billed,
+        # and asking again would bill it twice.
+        try:
+            filename, ends, words = elevenlabs_tts_timed(text, voice_id, pages)
+            return filename, (ends if len(pages) > 1 else None), words
+        except TimedSpeechUnavailable as e:
+            log_server_event(f"Speech timing: falling back to the plain request: {e}")
+            return get_tts_audio(text, voice_id, language), None, None
+    if engine == "piper" and len(pages) <= 1:
+        return get_tts_audio(text, voice_id, language), None, None
+    if len(pages) <= 1:
+        # A one-page reply in a Windows voice: the same single request as
+        # before, now also asking for the words. Its errors are the reply's
+        # errors, as they always were; there's nothing to fall back to.
+        filename = f"{uuid.uuid4().hex}.wav"
+        _, words = windows_speak_pages([text], voice_id, os.path.join(AUDIO_DIR, filename))
+        if words is not None and len(words) != len(text.split()):
+            words = None
+        return filename, None, words
+    try:
+        filename = f"{uuid.uuid4().hex}.wav"
+        path = os.path.join(AUDIO_DIR, filename)
+        if engine == "piper":   # NEW (1.5.0)
+            ends, words = piper_speak_pages(pages, voice_id, path), None
+        else:
+            ends, words = windows_speak_pages(pages, voice_id, path)
+        if words is not None and len(words) != len(text.split()):
+            words = None   # the pages didn't cover the reply word for word
+        return filename, (ends if len(pages) > 1 else None), words
+    except Exception as e:
+        # Free voices cost nothing, so any problem here just means the reply
+        # is spoken the usual way and the pages use the estimate.
+        log_server_event(f"Speech timing: falling back to an estimate ({engine}): {e!r}")
+        return get_tts_audio(text, voice_id, language), None, None
 
 
 def get_tts_audio_timed(text, voice_id, language, plan):
     """
     NEW (1.5.0): speaks `text`, and says exactly when the voice finishes
     the last word of each chatbox page in `plan`. Returns (filename, ends).
-    ends is None when there's only one page or the timing couldn't be had,
-    and then the page estimates the timing instead.
+    CHANGED (1.5.0): now a wrapper for speak_reply(), which also returns
+    the word timings.
     """
-    pages = [_CHATBOX_COUNTER_RE.sub("", p["text"]) for p in plan]
-    if len(pages) <= 1:
-        return get_tts_audio(text, voice_id, language), None
-    engine = tts_engine(voice_id)
-    if engine == "elevenlabs":
-        # Only a refused request falls back. Anything after ElevenLabs said
-        # yes may already be billed, and asking again would bill it twice.
-        try:
-            return elevenlabs_tts_timed(text, voice_id, pages)
-        except TimedSpeechUnavailable as e:
-            log_server_event(f"Chatbox timing: falling back to an estimate: {e}")
-            return get_tts_audio(text, voice_id, language), None
-    try:
-        filename = f"{uuid.uuid4().hex}.wav"
-        path = os.path.join(AUDIO_DIR, filename)
-        if engine == "piper":   # NEW (1.5.0)
-            ends = piper_speak_pages(pages, voice_id, path)
-        else:
-            ends = windows_speak_pages(pages, voice_id, path)
-        return filename, ends
-    except Exception as e:
-        # Free voices cost nothing, so any problem here just means the reply
-        # is spoken the usual way and the pages use the estimate.
-        log_server_event(f"Chatbox timing: falling back to an estimate ({engine}): {e!r}")
-        return get_tts_audio(text, voice_id, language), None
+    filename, ends, _ = speak_reply(text, voice_id, language, plan)
+    return filename, ends
 
 
 # ---------- Routes ----------
@@ -2772,7 +2875,8 @@ def diagnose():
                        "masterVolumeSlider", "fillLanguages", "fillOptionList",
                        "loadUpdates", "whereWritten",    # NEW (updates); NEW (1.5.0) whereWritten
                        "renderGpu",                      # NEW (1.5.0): the graphics-card graph
-                       "growFrom"]:                      # NEW (1.5.0): motion, round 1
+                       "growFrom",                       # NEW (1.5.0): motion, round 1
+                       "makeSpeechVisuals"]:             # NEW (1.5.0): motion, round 2
             js_markers[marker] = marker in js
 
     try:
@@ -5515,10 +5619,12 @@ def chat():
         audio_seconds = 0.0
         chatbox_plan = chatbox_page_plan(spoken)   # NEW (1.5.0)
         page_ends = None                           # NEW (1.5.0)
+        word_times = None                          # NEW (1.5.0)
         if speak:
             audio_start = time.perf_counter()
             # CHANGED (1.5.0): also says when the voice finishes each page.
-            audio_filename, page_ends = get_tts_audio_timed(spoken, voice_id, language, chatbox_plan)
+            # CHANGED (1.5.0): speak_reply() also says when each word is spoken.
+            audio_filename, page_ends, word_times = speak_reply(spoken, voice_id, language, chatbox_plan)
             audio_seconds = time.perf_counter() - audio_start
     except Exception as e:
         if history and history[-1].get("role") == "user":
@@ -5568,6 +5674,10 @@ def chat():
             # the voice reaches it. Pages are only sent one at a time while
             # the reply is spoken. Text-only replies still go as one message.
             "chatbox_pages": chatbox_plan,   # CHANGED (1.5.0): may carry exact "at" times
+            # NEW (1.5.0): [[start, end], ...] seconds for each word of the
+            # reply (split on spaces), only when the timing is exact. The
+            # page highlights the word being spoken from these.
+            "word_times": word_times,
             # Measured text and audio generation times for the UI.
             "text_seconds": round(text_seconds, 2),
             "audio_seconds": round(audio_seconds, 2),

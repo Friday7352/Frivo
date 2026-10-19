@@ -1074,8 +1074,10 @@ function pauseOtherPlayers(except) {
   });
 }
 
-function attachBubbleAudio(wrap, url, onStart, onPlayback) {   // CHANGED (1.5.0): onPlayback
+function attachBubbleAudio(wrap, url, onStart, onPlayback, extras = {}) {   // CHANGED (1.5.0): onPlayback, extras
   wrap.classList.add("has-audio", "is-loading");
+  // NEW (1.5.0): the glow that follows the voice, and the word highlight.
+  const visuals = typeof makeSpeechVisuals === "function" ? makeSpeechVisuals(wrap, extras.wordTimes) : null;
   wrap.setAttribute("role", "button");
   wrap.setAttribute("tabindex", "0");
   wrap.setAttribute("aria-label", "Loading audio");
@@ -1144,11 +1146,13 @@ function attachBubbleAudio(wrap, url, onStart, onPlayback) {   // CHANGED (1.5.0
 
   function tick() {
     updateUI();
+    if (visuals && state.isPlaying) visuals.update(currentTime());   // NEW (1.5.0)
     if (state.isPlaying) state.rafId = requestAnimationFrame(tick);
   }
 
   function setPlayingUI(isPlaying) {
     wrap.classList.toggle("is-playing", isPlaying);
+    if (visuals && !isPlaying) visuals.stop();   // NEW (1.5.0)
     wrap.setAttribute("aria-label", isPlaying ? "Pause reply" : "Play reply");
   }
 
@@ -1238,6 +1242,7 @@ function attachBubbleAudio(wrap, url, onStart, onPlayback) {   // CHANGED (1.5.0
     .then((decoded) => {
       state.buffer = decoded;
       state.clipGain = computeClipGain(decoded.getChannelData(0));
+      if (visuals) visuals.setBuffer(decoded);   // NEW (1.5.0)
       wrap.classList.remove("is-loading");
       setPlayingUI(false);
       updateUI();
@@ -1558,8 +1563,12 @@ function addTurn(who, text, opts = {}) {
   // player row underneath was a second object saying the same thing, and it
   // was the only part of a message that didn't look like a message.
   if (opts.audioUrl) {
-    attachBubbleAudio(body, opts.audioUrl, opts.onAudioStart, opts.onPlayback);   // CHANGED (1.5.0)
+    attachBubbleAudio(body, opts.audioUrl, opts.onAudioStart, opts.onPlayback,
+      { wordTimes: opts.wordTimes });   // CHANGED (1.5.0)
   }
+  // NEW (1.5.0): the chatbox page dots, under a reply that goes to VRChat
+  // a page at a time.
+  if (opts.footer) stack.appendChild(opts.footer);
 
   if (opts.condensed) {
     const flag = document.createElement("span");
@@ -1584,9 +1593,14 @@ function addTurn(who, text, opts = {}) {
   // the way when you're reading.
   if (meta.childNodes.length) stack.appendChild(meta);
 
+  // NEW (1.5.0): a reply grows out of the typing dots it replaces.
+  const typingBubble = !isYou && typingNode ? typingNode.querySelector(".bubble") : null;
+  const typingRect = typingBubble ? typingBubble.getBoundingClientRect() : null;
+
   removeTypingBubble();
   logBody.appendChild(turn);
-  logEl.scrollTop = logEl.scrollHeight;
+  if (typingRect && typeof morphFromTyping === "function") morphFromTyping(body, typingRect);
+  scrollLogToEnd();   // CHANGED (1.5.0): glides rather than jumps
 }
 
 let typingNode = null;
@@ -1618,7 +1632,7 @@ function showTypingBubble() {
 
   stack.appendChild(bubble);
   logBody.appendChild(turn);
-  logEl.scrollTop = logEl.scrollHeight;
+  scrollLogToEnd();   // CHANGED (1.5.0)
   typingNode = turn;
 }
 
@@ -1985,7 +1999,10 @@ function showCreditsToday(value) {
 if (creditsToggle && creditsPanel) {
   creditsToggle.addEventListener("click", () => {
     const opening = creditsPanel.classList.contains("is-hidden");
-    creditsPanel.classList.toggle("is-hidden", !opening);
+    // CHANGED (1.5.0): the popover grows and shrinks to fit, not jumps.
+    const pop = creditsToggle.closest(".popover");
+    if (pop && typeof smoothResize === "function") smoothResize(pop, () => creditsPanel.classList.toggle("is-hidden", !opening));
+    else creditsPanel.classList.toggle("is-hidden", !opening);
     creditsToggle.setAttribute("aria-expanded", opening ? "true" : "false");
     // Opening it is a request to see current numbers, so it's also when a
     // stale balance is worth a round trip.
@@ -2364,7 +2381,7 @@ const CHATBOX_PAGE_LEAD_SECONDS = 0.4;
 // little earlier than that and land just as the word ends.
 const CHATBOX_PAGE_LEAD_EXACT_SECONDS = 0.15;
 
-function makeChatboxFollower(pages) {
+function makeChatboxFollower(pages, onPage) {   // CHANGED (1.5.0): onPage
   let next = 0;          // the first page not sent yet
   let timer = null;
   let clockAt = 0;       // performance.now() when playback last started
@@ -2402,6 +2419,7 @@ function makeChatboxFollower(pages) {
     // reply, and each page restarts their 30-second limit.
     if (!last) beginReplyTyping();
     sendToChatbox(pages[i].text, { speaking: true, keepTyping: !last });
+    if (typeof onPage === "function") { try { onPage(i); } catch (e) { /* only the dots */ } }   // NEW (1.5.0)
     if (last) {
       // The dots come down once sendToChatbox has queued the last page, not
       // before, the same as a one-page reply.
@@ -4230,6 +4248,7 @@ function appendToMessageInput(text) {
 function setDictateUI(active) {
   dictateBtn.classList.toggle("is-recording", active);
   dictateBtn.setAttribute("aria-label", active ? "Stop dictation" : "Dictate");
+  if (!active && typeof micRing !== "undefined") micRing.stop();   // NEW (1.5.0)
 }
 
 async function startDictation() {
@@ -4272,6 +4291,7 @@ async function startDictation() {
   mediaRecorder.start();
   isDictating = true;
   setDictateUI(true);
+  if (typeof micRing !== "undefined") micRing.fromStream(stream);   // NEW (1.5.0): the level ring
   setStatus(micFellBack
     ? "Listening on the default microphone — your saved one isn't connected. Click the mic again to stop."
     : "Listening… click the mic again to stop.");  // CHANGED (1.5.0)
@@ -4681,6 +4701,7 @@ async function startLocalLiveDictation() {
     : "Listening — text appears as you speak.");
 
   liveLocal.timer = setInterval(pollLocalLevel, 50);
+  if (typeof micRing !== "undefined") micRing.fromAnalyser(analyser);   // NEW (1.5.0): the level ring
 }
 
 function currentRms() {
@@ -6050,8 +6071,14 @@ async function send() {
     // NEW (1.5.0): a spoken reply too long for one chatbox page goes a page
     // at a time, each one as the voice reaches it. An app.py from before
     // this sends no pages and gets the old behaviour.
+    // CHANGED (1.5.0): with dots under the reply that tick along as each
+    // page goes to the chatbox.
+    const pager = data.audio_url && Array.isArray(data.chatbox_pages) && data.chatbox_pages.length > 1
+      && oscEnabled() && typeof makeChatboxPager === "function"
+      ? makeChatboxPager(data.chatbox_pages.length)
+      : null;
     const follower = data.audio_url && Array.isArray(data.chatbox_pages) && data.chatbox_pages.length > 1
-      ? makeChatboxFollower(data.chatbox_pages)
+      ? makeChatboxFollower(data.chatbox_pages, pager ? (i) => pager.show(i) : null)
       : null;
 
     addTurn(speaker, data.reply, {
@@ -6067,6 +6094,8 @@ async function send() {
       voiceEngineName: data.voice_engine_name,  // NEW (1.5.0)
       textEngineName: data.text_engine_name || (data.text_seconds ? "" : "No AI"),  // NEW (1.5.0)
       voiceEngine: data.voice_engine,  // NEW (1.5.0)
+      wordTimes: data.word_times,  // NEW (1.5.0): exact word timings, or null
+      footer: pager ? pager.el : null,  // NEW (1.5.0)
       credits: data.credits,  // NEW (1.5.0): what was actually billed
       spoke: data.spoke,
       totalSeconds: data.total_seconds,
@@ -6538,7 +6567,16 @@ function closeSettingsPage() {
   if (!openSettingsPageEl) return;
   openSettingsPageEl.classList.add("is-hidden");
   openSettingsPageEl = null;
-  if (settingsRoot) settingsRoot.classList.remove("is-hidden");
+  if (settingsRoot) {
+    settingsRoot.classList.remove("is-hidden");
+    // NEW (1.5.0): going back, the list slides in from the left.
+    if (typeof popOnce === "function") {
+      settingsRoot.classList.remove("is-popping");
+      void settingsRoot.offsetWidth;
+      settingsRoot.classList.add("is-returning");
+      settingsRoot.addEventListener("animationend", () => settingsRoot.classList.remove("is-returning"), { once: true });
+    }
+  }
   if (settingsTitle) settingsTitle.textContent = "Settings";
   if (settingsScroll) settingsScroll.scrollTop = 0;
   refreshSettingsSummaries();
@@ -7769,7 +7807,10 @@ window.addEventListener("pagehide", () => {
     const active = typeof activeProfile === "function" ? activeProfile() : null;
     if (avatar) {
       const name = active ? active.name : "Default";
-      avatar.textContent = (name.trim()[0] || "D").toUpperCase();
+      const letter = (name.trim()[0] || "D").toUpperCase();
+      // NEW (1.5.0): the letter pops when the profile changes.
+      if (avatar.textContent && avatar.textContent !== letter && typeof popOnce === "function") popOnce(avatar);
+      avatar.textContent = letter;
     }
     if (styleChipText) {
       const style = active
@@ -7954,6 +7995,7 @@ var GPU_SERIES = [
 var gpuTimer = null;
 var gpuData = null;
 var gpuGeometry = null;
+var gpuDrawIn = false;   // NEW (1.5.0)
 
 function gpuGb(mb) {
   if (mb == null || isNaN(mb)) return "—";
@@ -8037,6 +8079,14 @@ function drawGpuChart(data) {
   const cross = gpuSvgEl("line", { class: "gpu-cross", x1: 0, x2: 0, y1: 0, y2: height, visibility: "hidden" });
   svg.append(cross);
   gpuGeometry = { width, points, x, series, valueOf, now, cross, total };
+  // NEW (1.5.0): the first draw after opening sweeps in from the left.
+  if (gpuDrawIn) {
+    gpuDrawIn = false;
+    if (svg.animate && !reducedMotion()) {
+      svg.animate([{ clipPath: "inset(0 100% 0 0)" }, { clipPath: "inset(0 0 0 0)" }],
+        { duration: 700, easing: motionEasing("smooth") });
+    }
+  }
 
   const card = data.card;
   const parts = card.parts || {};
@@ -8184,6 +8234,7 @@ async function refreshGpu() {
   const sync = () => {
     const open = !pop.classList.contains("is-hidden");
     if (open && !gpuTimer) {
+      gpuDrawIn = true;   // NEW (1.5.0): the graph draws in on opening
       refreshGpu();
       gpuTimer = setInterval(refreshGpu, GPU_POLL_MS);
     } else if (!open && gpuTimer) {
@@ -8263,6 +8314,7 @@ function fitSessionStrip() {
       if (tooWide()) strip.classList.add("is-compact-more");
     }
     strip.classList.remove("is-measuring");
+    flipStrip(strip);   // NEW (1.5.0): chips glide to their new places
   });
 }
 (function watchSessionStrip() {
@@ -8273,8 +8325,316 @@ function fitSessionStrip() {
   // A chip appearing, disappearing or changing its words.
   new MutationObserver((records) => {
     // Its own is-compact / is-measuring flips don't count.
-    if (records.some((r) => r.target !== strip)) fitSessionStrip();
+    if (records.some((r) => r.target !== strip)) {
+      flipStrip(strip);
+      fitSessionStrip();
+    }
   })
     .observe(strip, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ["class"] });
   fitSessionStrip();
+})();
+
+
+// ---------------------------------------------------------------------------
+// NEW (1.5.0): Motion, round 2: the chat.
+// ---------------------------------------------------------------------------
+
+// Reads a spring from the stylesheet, for animations started from script.
+function motionEasing(name) {
+  const value = getComputedStyle(document.documentElement).getPropertyValue(`--spring-${name}`).trim();
+  return value || "cubic-bezier(0.32, 0.72, 0, 1)";
+}
+function motionDuration(name, fallback) {
+  const value = parseFloat(getComputedStyle(document.documentElement).getPropertyValue(`--dur-${name}`));
+  return Number.isFinite(value) ? value : fallback;
+}
+function reducedMotion() {
+  return window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
+// Scrolls the conversation to the newest message: smoothly when you're
+// already near the bottom, instantly when you'd scrolled far up (a long
+// glide through the whole history isn't the point).
+function scrollLogToEnd() {
+  const distance = logEl.scrollHeight - logEl.clientHeight - logEl.scrollTop;
+  if (distance <= 0) return;
+  const smooth = !reducedMotion() && distance < logEl.clientHeight * 1.5;
+  logEl.scrollTo({ top: logEl.scrollHeight, behavior: smooth ? "smooth" : "auto" });
+}
+
+// The reply grows out of the typing bubble: it starts clipped to the size
+// the dots had and opens to its own, while the words fade up. Clip-path is
+// painted by the graphics card, so nothing reflows.
+function morphFromTyping(bubble, from) {
+  if (reducedMotion() || !bubble.animate) return;
+  const to = bubble.getBoundingClientRect();
+  const right = Math.max(0, to.width - from.width);
+  const bottom = Math.max(0, to.height - from.height);
+  if (!right && !bottom) return;
+  const radius = getComputedStyle(bubble).borderRadius || "16px";
+  bubble.classList.add("is-from-typing");
+  const duration = motionDuration("smooth", 560);
+  bubble.animate(
+    [
+      { clipPath: `inset(0 ${right}px ${bottom}px 0 round ${radius})` },
+      { clipPath: `inset(0 0 0 0 round ${radius})` },
+    ],
+    { duration, easing: motionEasing("smooth") },
+  );
+  const words = bubble.querySelector(".bubble-text");
+  if (words) words.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 260, delay: 70, easing: "ease-out", fill: "backwards" });
+}
+
+// A one-shot pop (the profile letter, and anything else that changes in
+// place). Restarts cleanly if it's triggered again mid-pop.
+function popOnce(el) {
+  if (!el) return;
+  el.classList.remove("is-popping");
+  void el.offsetWidth;
+  el.classList.add("is-popping");
+  el.addEventListener("animationend", () => el.classList.remove("is-popping"), { once: true });
+}
+
+
+// ---------------------------------------------------------------------------
+// NEW (1.5.0): Motion, round 2: while a reply is spoken.
+// ---------------------------------------------------------------------------
+
+// The bubble's rim glows with the voice's loudness, and the word being said
+// glows. Both are driven from the player's own clock (the same one
+// the progress line uses), so pausing or replaying can't knock them out of
+// step. The loudness is worked out once from the audio, not listened to
+// live, so it costs nothing while playing.
+//
+// The highlight only appears with exact timings (ElevenLabs, or a Windows
+// voice that reported its words). Without them — Frivo's own voices — the
+// reply looks exactly as it always has: nothing is estimated.
+const SPEECH_LEVEL_RATE = 40;   // loudness samples per second
+
+function makeSpeechVisuals(bubble, wordTimes) {
+  let envelope = null;
+  let words = null;        // [{ el, start, end }], made on first play
+  let current = -1;
+  let level = 0;
+  let shownLevel = -1;
+  const textEl = bubble.querySelector(".bubble-text");
+
+  function prepareWords() {
+    if (words !== null) return;
+    words = [];
+    if (!Array.isArray(wordTimes) || !wordTimes.length || !textEl) return;
+    const parts = textEl.textContent.split(/(\s+)/).filter((p) => p.length);
+    const count = parts.filter((p) => !/^\s+$/.test(p)).length;
+    if (count !== wordTimes.length) return;   // not word for word: no highlight
+    const frag = document.createDocumentFragment();
+    let k = 0;
+    parts.forEach((part) => {
+      if (/^\s+$/.test(part)) { frag.append(part); return; }
+      const span = document.createElement("span");
+      span.className = "spoken-word";
+      span.textContent = part;
+      frag.append(span);
+      const [start, end] = wordTimes[k++];
+      words.push({ el: span, start: Number(start) || 0, end: Number(end) || 0 });
+    });
+    textEl.replaceChildren(frag);
+    bubble.classList.add("has-word-timing");
+  }
+
+  function wordAt(t) {
+    // The last word that has started; held through the pause after it.
+    if (current >= 0 && current < words.length && words[current].start <= t
+        && (current + 1 >= words.length || words[current + 1].start > t)) return current;
+    let lo = 0;
+    let hi = words.length - 1;
+    let found = -1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (words[mid].start <= t) { found = mid; lo = mid + 1; } else { hi = mid - 1; }
+    }
+    return found;
+  }
+
+  // CHANGED (1.5.0): the spoken word glows (Friday's pick) rather than
+  // getting a highlight behind it. The glow fades from word to word.
+  function moveMarker(index) {
+    const prev = current;
+    current = index;
+    if (prev >= 0 && words[prev]) words[prev].el.classList.remove("is-spoken");
+    if (index >= 0) words[index].el.classList.add("is-spoken");
+  }
+
+  return {
+    setBuffer(buffer) {
+      // Loudness, 40 times a second, scaled so ordinary speech reaches
+      // about 1. Every 4th sample is plenty for a glow.
+      try {
+        const data = buffer.getChannelData(0);
+        const step = Math.max(1, Math.floor(buffer.sampleRate / SPEECH_LEVEL_RATE));
+        const values = [];
+        for (let i = 0; i < data.length; i += step) {
+          let sum = 0;
+          let n = 0;
+          const end = Math.min(data.length, i + step);
+          for (let j = i; j < end; j += 4) { sum += data[j] * data[j]; n++; }
+          values.push(Math.sqrt(sum / Math.max(1, n)));
+        }
+        const sorted = values.slice().sort((a, b) => a - b);
+        const loud = sorted[Math.floor(sorted.length * 0.9)] || 1;
+        envelope = values.map((v) => Math.min(1, v / loud));
+      } catch (e) {
+        envelope = null;
+      }
+    },
+    update(t) {
+      if (envelope) {
+        const target = envelope[Math.min(envelope.length - 1, Math.max(0, Math.floor(t * SPEECH_LEVEL_RATE)))] || 0;
+        // Quick to rise, slower to fall, like a level meter.
+        level += (target - level) * (target > level ? 0.45 : 0.18);
+        if (Math.abs(level - shownLevel) > 0.015) {
+          shownLevel = level;
+          bubble.style.setProperty("--speak", level.toFixed(3));
+        }
+      }
+      prepareWords();
+      if (!words.length) return;
+      const index = wordAt(t);
+      if (index !== current) moveMarker(index);
+    },
+    stop() {
+      level = 0;
+      shownLevel = -1;
+      bubble.style.removeProperty("--speak");
+      if (words && words.length && current !== -1) moveMarker(-1);
+    },
+  };
+}
+
+// The chatbox page dots: one per page, the current one larger and red,
+// the ones already sent filled in.
+function makeChatboxPager(count) {
+  const el = document.createElement("div");
+  el.className = "chatbox-pager";
+  el.title = "VRChat chatbox pages, as the voice reaches them";
+  el.appendChild(iconNode("i-chat", "icon-12"));
+  const dots = [];
+  for (let i = 0; i < count; i++) {
+    const dot = document.createElement("span");
+    dot.className = "chatbox-pager-dot";
+    el.appendChild(dot);
+    dots.push(dot);
+  }
+  return {
+    el,
+    show(index) {
+      dots.forEach((dot, i) => {
+        dot.classList.toggle("is-current", i === index);
+        dot.classList.toggle("is-done", i < index);
+      });
+    },
+  };
+}
+
+
+// ---------------------------------------------------------------------------
+// NEW (1.5.0): Motion, round 3: sizes and places that change.
+// ---------------------------------------------------------------------------
+
+// Something inside `el` is about to change its height (`mutate`). Instead
+// of jumping, `el` eases from the old height to the new one.
+function smoothResize(el, mutate) {
+  const before = el.offsetHeight;
+  mutate();
+  if (reducedMotion() || !el.animate) return;
+  const after = el.offsetHeight;
+  if (Math.abs(after - before) < 2) return;
+  el.animate(
+    [{ height: `${before}px`, overflow: "hidden" }, { height: `${after}px`, overflow: "hidden" }],
+    { duration: motionDuration("snappy", 480), easing: motionEasing("snappy") },
+  );
+}
+
+// The chip row: when a chip appears, disappears or changes width, the others
+// glide to their new places (only transforms, measured from layout boxes).
+const stripPlaces = new WeakMap();
+function flipStrip(strip) {
+  if (!strip) return;
+  const moving = !reducedMotion();
+  Array.from(strip.children).forEach((chip) => {
+    if (!chip.offsetParent) { stripPlaces.delete(chip); return; }   // hidden
+    const now = chip.offsetLeft;
+    const was = stripPlaces.get(chip);
+    stripPlaces.set(chip, now);
+    if (!moving || was == null || Math.abs(was - now) < 1 || !chip.animate) return;
+    chip.animate(
+      [{ transform: `translateX(${was - now}px)` }, { transform: "none" }],
+      { duration: motionDuration("snappy", 480), easing: motionEasing("snappy") },
+    );
+  });
+}
+
+// NEW (1.5.0): entrance animations that shouldn't play on page load wait for this.
+requestAnimationFrame(() => requestAnimationFrame(() => document.documentElement.classList.add("motion-ready")));
+
+
+// NEW (1.5.0): a ring around the mic button that follows your voice while
+// dictating. It reads the microphone that dictation already opened (the
+// live mode's own meter, or the recording's stream), about 30 times a
+// second, and only moves a ring, never the button.
+var micRing = (function makeMicRing() {
+  let ctx = null;
+  let analyser = null;
+  let data = null;
+  let frame = 0;
+  let level = 0;
+
+  function loop() {
+    frame = requestAnimationFrame(loop);
+    if (!analyser) return;
+    analyser.getByteTimeDomainData(data);
+    let sum = 0;
+    for (let i = 0; i < data.length; i += 2) {
+      const v = (data[i] - 128) / 128;
+      sum += v * v;
+    }
+    const rms = Math.sqrt(sum / (data.length / 2));
+    const target = Math.min(1, rms * 6);
+    level += (target - level) * (target > level ? 0.5 : 0.15);
+    dictateBtn.style.setProperty("--mic-level", level.toFixed(3));
+  }
+
+  function begin(node) {
+    analyser = node;
+    data = new Uint8Array(analyser.fftSize);
+    dictateBtn.classList.add("has-level");
+    if (!frame) frame = requestAnimationFrame(loop);
+  }
+
+  return {
+    fromAnalyser(node) {
+      if (reducedMotion() || !node) return;
+      begin(node);
+    },
+    fromStream(stream) {
+      if (reducedMotion() || !stream) return;
+      try {
+        ctx = new (window.AudioContext || window.webkitAudioContext)();
+        const node = ctx.createAnalyser();
+        node.fftSize = 512;
+        ctx.createMediaStreamSource(stream).connect(node);
+        begin(node);
+      } catch (e) {
+        ctx = null;   // no ring; the pulse still shows it's listening
+      }
+    },
+    stop() {
+      if (frame) cancelAnimationFrame(frame);
+      frame = 0;
+      analyser = null;
+      level = 0;
+      if (ctx) { try { ctx.close(); } catch (e) { /* already closed */ } ctx = null; }
+      dictateBtn.classList.remove("has-level");
+      dictateBtn.style.removeProperty("--mic-level");
+    },
+  };
 })();

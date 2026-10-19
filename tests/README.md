@@ -433,3 +433,9 @@ Double-click `tests/check-windows-voices.bat` on a Windows PC. It runs the real 
 ## test-gpu-graph.py (1.5.0)
 
 `python3 tests/test-gpu-graph.py` runs Frivo against stand-in Evora and Ollama servers and checks the graphics-card graph in the status popover: it's off with no local service chosen; with Evora it reports the card and its Ollama / Evora / Other split; when Windows doesn't say who uses the card, Ollama's own figure splits it; Ollama on another PC isn't stacked onto Evora's card; an Evora too old for `/gpu`, an unreachable Evora, a PC with no NVIDIA card and a down Ollama each say what's wrong; history keeps ten minutes; and the page has the graph.
+
+## test-word-highlight.py (1.5.0)
+
+`python3 tests/test-word-highlight.py` checks the timings behind the glowing word: ElevenLabs' per-character timings become one start and end per word (and timings that don't match the text give none), a Windows voice's word boundaries do the same across pages (punctuation-only words share the previous word's time; a missing word gives none), and `/api/chat` sends `word_times` for ElevenLabs (one page or many) and none for Frivo's own voices.
+
+`check-windows-voices.bat` now also reports how many word boundaries each Windows voice gave for the three-page reply, which is what the glow needs on a real Windows PC.

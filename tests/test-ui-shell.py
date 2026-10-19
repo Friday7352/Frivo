@@ -112,7 +112,7 @@ const base = 'http://127.0.0.1:5093';
   check('grouped by engine: built into Windows', groups.includes('Free · built into Windows') && !groups.includes('Free · on this PC'), groups);
   const costs = await p.evaluate(() => [...document.querySelectorAll('#voiceList .voice-cost')].map(c => c.textContent));
   check('every voice carries a cost tag', costs.length > 10 && costs.every(c => c === 'free' || c === 'credits'), costs.slice(0, 3));
-  await p.keyboard.press('Escape'); await wait(300);
+  await p.keyboard.press('Escape'); await wait(500);   // CHANGED (1.5.0): the sheet slides out (300 ms)
   check('Escape closes it', !(await vis('#voicePop')));
 
   console.log('--- the chips and the status pill ---');

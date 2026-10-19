@@ -3358,3 +3358,221 @@ html[data-theme="light"] { --bubble-lift: 0 8px 22px rgba(15, 23, 42, 0.13), 0 0
   .voice-pick { grid-template-columns: minmax(0, 1fr) 120px; }   /* gender hidden on phones */
   .voice-cost { width: auto; }
 }
+
+
+/* =========================================================================
+   NEW (1.5.0): Motion, round 2: the chat
+   ========================================================================= */
+
+/* Your message lifts up out of the message box. */
+.turn.is-you .bubble {
+  transform-origin: 100% 100%;
+  animation: you-in var(--dur-snappy) var(--spring-snappy);
+}
+@keyframes you-in {
+  from { opacity: 0; transform: translateY(26px) scale(0.9); }
+  to   { opacity: 1; transform: none; }
+}
+/* A reply rises in softly. When it replaces the typing dots it grows out of
+   them instead (morphFromTyping() in app.js). */
+.turn.is-ai .bubble {
+  transform-origin: 0 0;
+  animation: reply-in var(--dur-smooth) var(--spring-smooth);
+}
+.turn.is-ai .bubble.is-from-typing { animation: none; }
+@keyframes reply-in {
+  from { opacity: 0; transform: translateY(10px) scale(0.97); }
+  to   { opacity: 1; transform: none; }
+}
+/* Notes under a reply ("Shortened to fit…") arrive just after it. */
+.turn-flag { animation: reply-in var(--dur-smooth) var(--spring-smooth) 120ms backwards; }
+
+/* The typing dots: a smooth travelling wave rather than three hops. */
+.typing-dot {
+  animation: typing-wave 1.25s infinite cubic-bezier(0.45, 0, 0.55, 1);
+}
+.typing-dot:nth-child(2) { animation-delay: 0.14s; }
+.typing-dot:nth-child(3) { animation-delay: 0.28s; }
+@keyframes typing-wave {
+  0%, 56%, 100% { transform: translateY(0) scale(0.82); opacity: 0.35; }
+  28%           { transform: translateY(-4px) scale(1); opacity: 1; }
+}
+
+/* Switching profile: the "now talking to" divider opens from the middle,
+   and the profile letter pops. */
+.turn-divider { animation: divider-in var(--dur-smooth) var(--spring-smooth); }
+@keyframes divider-in {
+  from { opacity: 0; transform: scaleX(0.6); }
+  to   { opacity: 1; transform: none; }
+}
+.profile-avatar.is-popping { animation: avatar-pop var(--dur-bouncy) var(--spring-bouncy); }
+@keyframes avatar-pop {
+  from { scale: 0.6; opacity: 0.4; }
+  to   { scale: 1; opacity: 1; }
+}
+
+
+/* --- While a reply is spoken ---------------------------------------------
+   The rim glows with the voice's loudness (--speak, 0 to 1, set by
+   makeSpeechVisuals() in app.js). Only the glow's opacity changes. */
+.bubble.has-audio::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  box-shadow:
+    inset 0 0 0 1.5px color-mix(in srgb, var(--accent) 60%, transparent),
+    inset 0 0 24px color-mix(in srgb, var(--accent) 24%, transparent);
+  opacity: 0;
+  transition: opacity 360ms var(--ease);
+}
+.bubble.has-audio.is-playing::after {
+  opacity: calc(0.12 + var(--speak, 0) * 0.6);   /* subtle: never the full rim */
+  transition: opacity 60ms linear;
+  will-change: opacity;
+}
+
+/* The word being spoken glows: brighter, with a soft accent glow around
+   the letters, fading in and out as the voice moves from word to word.
+   (CHANGED: Friday preferred this to a highlight behind the word.) */
+.spoken-word {
+  transition: color 180ms var(--ease), text-shadow 260ms var(--ease);
+}
+.spoken-word.is-spoken {
+  color: #fff;
+  text-shadow:
+    0 0 1px color-mix(in srgb, var(--accent) 80%, transparent),
+    0 0 8px color-mix(in srgb, var(--accent) 85%, transparent),
+    0 0 16px color-mix(in srgb, var(--accent) 45%, transparent);
+  transition: color 90ms var(--ease), text-shadow 120ms var(--ease);
+}
+html[data-theme="light"] .spoken-word.is-spoken {
+  color: var(--accent-press);
+  text-shadow:
+    0 0 6px color-mix(in srgb, var(--accent) 45%, transparent),
+    0 0 14px color-mix(in srgb, var(--accent) 25%, transparent);
+}
+
+/* The chatbox page dots under a paged reply. */
+.chatbox-pager {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin: 6px 2px 0;
+  color: var(--ink-faint);
+  animation: reply-in var(--dur-smooth) var(--spring-smooth) 120ms backwards;
+}
+.chatbox-pager .icon-12 { width: 12px; height: 12px; margin-right: 2px; }
+.chatbox-pager-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--fill-strong);
+  transition: background var(--dur) var(--ease), scale var(--dur-bouncy) var(--spring-bouncy);
+}
+.chatbox-pager-dot.is-done { background: var(--ink-faint); }
+.chatbox-pager-dot.is-current { background: var(--accent); scale: 1.45; }
+
+
+/* =========================================================================
+   NEW (1.5.0): Motion, round 3: panels, sheets and pages
+   ========================================================================= */
+
+/* Overlays fade; the sheet inside slides all the way in from the right, and
+   back out when closed. display is transitioned so the way out plays too. */
+.overlay {
+  animation: none;
+  transition: opacity 260ms var(--ease), display 300ms allow-discrete;
+}
+@starting-style { .overlay { opacity: 0; } }
+.overlay.is-hidden {
+  opacity: 0;
+  transition: opacity 220ms var(--ease-exit) 40ms, display 300ms allow-discrete;
+}
+.sheet,
+.voice-dialog.sheet {
+  animation: none;
+  transition: transform var(--dur-smooth) var(--spring-smooth);
+}
+@starting-style { .sheet, .voice-dialog.sheet { transform: translateX(100%); } }
+.overlay.is-hidden .sheet {
+  transform: translateX(100%);
+  transition: transform 260ms var(--ease-exit);
+}
+/* Centred dialogs (the language picker, updates) rise and scale in. */
+.overlay > .modal:not(.sheet),
+.overlay > .voice-dialog:not(.sheet) {
+  animation: none;
+  transition: transform var(--dur-snappy) var(--spring-snappy), opacity 220ms var(--ease);
+}
+@starting-style {
+  .overlay > .modal:not(.sheet),
+  .overlay > .voice-dialog:not(.sheet) { opacity: 0; transform: translateY(16px) scale(0.95); }
+}
+.overlay.is-hidden > .modal:not(.sheet),
+.overlay.is-hidden > .voice-dialog:not(.sheet) {
+  opacity: 0;
+  transform: scale(0.96);
+  transition: transform var(--dur-exit) var(--ease-exit), opacity var(--dur-exit) var(--ease-exit);
+}
+
+/* Settings comes in from the side it's opened from (the left rail); the
+   conversation comes back the same way when it closes. */
+.settings-panel {
+  animation: none;
+  transition: transform var(--dur-smooth) var(--spring-smooth), opacity 220ms var(--ease);
+}
+@starting-style { .settings-panel { opacity: 0; transform: translateX(-24px); } }
+/* Gated by html.motion-ready (added just after the first paint), so the
+   conversation doesn't slide in on every page load, only back from Settings. */
+html.motion-ready .stage { transition: transform var(--dur-smooth) var(--spring-smooth), opacity 220ms var(--ease); }
+@starting-style { html.motion-ready .stage { opacity: 0; transform: translateX(24px); } }
+
+/* Settings sections cross-fade; a page slides in from the right, and going
+   back slides the list in from the left. */
+.settings-section.is-shown { transition: opacity 220ms var(--ease), transform var(--dur-snappy) var(--spring-snappy); }
+@starting-style { .settings-section.is-shown { opacity: 0; transform: translateY(8px); } }
+.settings-page { animation: page-forward var(--dur-snappy) var(--spring-snappy); }
+@keyframes page-forward {
+  from { opacity: 0; transform: translateX(36px); }
+  to   { opacity: 1; transform: none; }
+}
+.settings-stack.is-returning { animation: page-back var(--dur-snappy) var(--spring-snappy); }
+@keyframes page-back {
+  from { opacity: 0; transform: translateX(-36px); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* The listening drawer slides in from the right. */
+.listen-panel { animation: drawer-spring var(--dur-smooth) var(--spring-smooth); }
+@keyframes drawer-spring {
+  from { opacity: 0; transform: translateX(48px); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* The credits panel's contents settle in as the popover grows. */
+.credit-panel { transition: opacity 220ms var(--ease), transform var(--dur-snappy) var(--spring-snappy); }
+@starting-style { .credit-panel { opacity: 0; transform: translateY(-6px); } }
+
+
+/* NEW (1.5.0): the mic's level ring while dictating (micRing in app.js).
+   Without a level to show (the browser's own speech recognition) the
+   steady pulse stays. Only the ring's scale and opacity change. */
+.btn-mic { position: relative; }
+.btn-mic::after {
+  content: "";
+  position: absolute;
+  inset: -3px;
+  border-radius: 13px;
+  border: 2px solid var(--accent);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 200ms var(--ease);
+}
+.btn-mic.is-recording.has-level { animation: none; }
+.btn-mic.is-recording.has-level::after {
+  opacity: calc(0.25 + var(--mic-level, 0) * 0.75);
+  scale: calc(1 + var(--mic-level, 0) * 0.32);
+  transition: none;
+}

@@ -183,3 +183,31 @@ the way.
 Everything animates only position, size and fade, which the graphics card
 does for almost nothing, and Windows' "reduce animations" setting turns it
 all off.
+
+## Animations, round 2
+
+The rest of the iOS-style motion.
+
+**The chat**
+- Your message lifts up out of the message box.
+- A reply grows out of the typing dots it replaces; a reply on its own rises in softly.
+- The typing dots move as a smooth wave.
+- Switching profile: the "now talking to" divider opens from the middle and the profile letter pops.
+- The conversation glides to the newest message instead of jumping.
+
+**While a reply is spoken**
+- The bubble's rim glows with the voice's loudness. It's worked out once from the audio, so it costs nothing while playing.
+- **The word being spoken glows.** Only when the timing is exact: ElevenLabs (every reply now uses its with-timestamps request, which costs the same credits) and Windows voices that report their words. Frivo's own free voices don't report words, so their replies show no glow; nothing is estimated.
+- Dots under a reply that goes to the VRChat chatbox a page at a time tick along as each page is sent.
+- While dictating, a ring around the mic follows your voice.
+
+**Panels**
+- The voice picker and profile editor slide all the way in from the right, and back out when closed.
+- The language picker and the update dialog rise and scale in, and shrink away.
+- Settings slides in from the left; the conversation comes back from the right.
+- Settings pages slide in from the right, and Back slides the list in from the left. Sections cross-fade.
+- The listening drawer slides in on a spring.
+- The status popover grows and shrinks to fit when Credits is opened; the GPU graph sweeps in from the left.
+- The chips glide to their new places when one appears, disappears or changes width (like "Use English").
+
+Everything holds 60 frames a second with the processor slowed four times, about a phone's speed. Windows' "reduce animations" setting still turns it all off.

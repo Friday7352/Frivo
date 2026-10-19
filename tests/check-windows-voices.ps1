@@ -82,7 +82,14 @@ try {
                            pages = @('Hi there! This is how I sound. Nice to meet you.'); outs = @($one) } "$kind one page, speed $speed"
         }
         $outs = @(0, 1, 2 | ForEach-Object { Join-Path $outDir "$kind-page-$_.wav" })
-        $null = Ask @{ op = 'speak'; kind = $kind; voice = $voice.id; sapi_rate = 0; speed = 1.0; pages = $pages; outs = $outs } "$kind three pages"
+        $three = Ask @{ op = 'speak'; kind = $kind; voice = $voice.id; sapi_rate = 0; speed = 1.0; pages = $pages; outs = $outs } "$kind three pages"
+        # NEW (1.5.0): the word boundaries the reply highlight uses.
+        if ($null -eq $three.words) { Note "   $kind words: none reported (no highlight for this voice)" }
+        else {
+            $counts = @($three.words | ForEach-Object { @($_).Count }) -join ', '
+            $first = @(@($three.words)[0])[0..2] | ForEach-Object { '[' + ($_ -join ', ') + ']' }
+            Note ("   $kind words per page: $counts   first: " + ($first -join ' '))
+        }
         $null = Ask @{ op = 'speak'; kind = $kind; voice = $voice.id; sapi_rate = 0; speed = 1.0
                        pages = @('Ünïcödé: café, naïve, 日本語.'); outs = @(Join-Path $outDir "$kind-unicode.wav") } "$kind non-English text"
     }
