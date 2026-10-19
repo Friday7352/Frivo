@@ -3140,7 +3140,7 @@ html[data-theme="light"] {
 .gpu-legend li { padding: 2px 0; color: var(--ink-dim); min-width: 0; }
 .gpu-legend .gpu-label { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .gpu-legend .gpu-label small { color: var(--ink-faint); font-size: inherit; }
-.gpu-foot { margin: 6px 0 0; font-size: var(--text-caption); color: var(--ink-faint); line-height: 1.45; }
+.gpu-foot { margin: 6px 0 0; font-size: var(--text-caption); color: var(--ink-faint); line-height: 1.45; white-space: pre-line; }   /* CHANGED (1.5.0): a line per note */
 .gpu-foot:empty { display: none; }
 
 /* =========================================================================

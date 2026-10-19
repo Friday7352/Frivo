@@ -5211,8 +5211,35 @@ def read_evora_gpu():
     return data, None
 
 
+def seconds_until_stamp(stamp):
+    """
+    NEW (1.5.0): seconds from now until an Ollama timestamp such as
+    "2026-10-18T23:27:01.123456789-05:00" (nanoseconds and all), or None.
+    """
+    import datetime
+    match = re.match(r"^(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d)(\.\d+)?(Z|[+-]\d\d:\d\d)?$", (stamp or "").strip())
+    if not match:
+        return None
+    zone = match.group(3) or "+00:00"
+    text = match.group(1) + (match.group(2) or "")[:7] + ("+00:00" if zone == "Z" else zone)
+    try:
+        when = datetime.datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    return (when - datetime.datetime.now(datetime.timezone.utc)).total_seconds()
+
+
+# NEW (1.5.0): "Never" asks Ollama to keep a model forever, which it reports
+# as a date centuries away. Anything past ten years counts as that.
+OLLAMA_FOREVER_SECONDS = 10 * 365 * 24 * 3600
+
+
 def read_ollama_gpu():
-    """([{name, vram_mb, size_mb}], problem) for the models Ollama has loaded."""
+    """
+    ([{name, vram_mb, size_mb, unload_in, forever}], problem) for the models
+    Ollama has loaded. CHANGED (1.5.0): unload_in is how many seconds until
+    Ollama frees the graphics card of it (None if Ollama didn't say).
+    """
     try:
         loaded = _ollama_get("/api/ps").get("models") or []
     except Exception:
@@ -5221,8 +5248,12 @@ def read_ollama_gpu():
     for model in loaded:
         size = int(model.get("size") or 0)
         vram = int(model.get("size_vram") or 0)
+        left = seconds_until_stamp(model.get("expires_at"))
+        forever = left is not None and left > OLLAMA_FOREVER_SECONDS
         models.append({"name": model.get("name") or model.get("model") or "model",
-                       "vram_mb": round(vram / 1048576), "size_mb": round(size / 1048576)})
+                       "vram_mb": round(vram / 1048576), "size_mb": round(size / 1048576),
+                       "unload_in": None if left is None or forever else max(0, round(left)),
+                       "forever": forever})
     return models, None
 
 

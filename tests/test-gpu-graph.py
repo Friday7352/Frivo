@@ -112,7 +112,8 @@ check("enabled", data.get("enabled") is True)
 check("card reported", card.get("total_mb") == 8192 and card.get("used_mb") == 5792, card)
 check("split kept", card.get("parts") == world["parts"], card.get("parts"))
 check("same card", data.get("same_card") is True)
-check("Ollama's models listed", data.get("ollama_models") == [{"name": "qwen3.5:4b", "vram_mb": 3954, "size_mb": 3954}],
+check("Ollama's models listed", [{k: m[k] for k in ("name", "vram_mb", "size_mb")} for m in data.get("ollama_models") or []]
+      == [{"name": "qwen3.5:4b", "vram_mb": 3954, "size_mb": 3954}],
       data.get("ollama_models"))
 point = (data.get("history") or [{}])[-1]
 check("history point", point.get("ollama") == 3954 and point.get("evora") == 1150 and point.get("other") == 688
@@ -151,6 +152,22 @@ data = get()
 check("Ollama alone and down: says so", "isn't reachable" in (data["ollama_problem"] or "") and data["card"] is None)
 check("Ollama alone and down: nothing to graph", data["history"] == [])
 
+print("The idle countdown")   # NEW (1.5.0)
+import datetime as _dt
+soon = (_dt.datetime.now(_dt.timezone.utc) + _dt.timedelta(minutes=42)).strftime("%Y-%m-%dT%H:%M:%S.123456789+00:00")
+left = mod.seconds_until_stamp(soon)
+check("reads Ollama's nanosecond timestamps", left is not None and 2500 < left <= 2520, left)
+check("a timestamp in another zone", abs(mod.seconds_until_stamp("2318-01-01T00:00:00-05:00")) > mod.OLLAMA_FOREVER_SECONDS)
+check("nonsense: none", mod.seconds_until_stamp("soon") is None and mod.seconds_until_stamp(None) is None)
+real_get = mod._ollama_get
+mod._ollama_get = lambda path: {"models": [
+    {"name": "a", "size": MB, "size_vram": MB, "expires_at": soon},
+    {"name": "b", "size": MB, "size_vram": MB, "expires_at": "2318-02-15T10:00:00.1-05:00"}]}
+models, _ = mod.read_ollama_gpu()
+check("seconds until each model leaves the card", 2500 < (models[0]["unload_in"] or 0) <= 2520 and not models[0]["forever"], models[0])
+check("'Never' reads as forever, not a countdown", models[1]["forever"] and models[1]["unload_in"] is None, models[1])
+mod._ollama_get = real_get
+
 print("History keeps ten minutes")
 reset_world()
 configure()
@@ -167,6 +184,7 @@ js = open(os.path.join(APP, "static", "app.js"), encoding="utf-8").read()
 check("graph in the status popover", 'id="gpuCard"' in html and html.index('id="gpuCard"') < html.index('id="creditsToggle"'))
 check("app.js draws it", "function renderGpu" in js and "/api/gpu" in js and "function drawGpuChart" in js)
 check("only polled while open", "watchGpuWhileStatusOpen" in js)
+check("shows the idle countdown", "function gpuIdleNote" in js and "Frees the graphics card in" in js)   # NEW (1.5.0)
 
 print()
 if failures:

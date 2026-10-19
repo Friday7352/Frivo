@@ -8153,6 +8153,28 @@ function ollamaModelNote(models) {
   return models.map((m) => m.name).join(", ");
 }
 
+// NEW (1.5.0): how long until Ollama frees the graphics card, from the
+// soonest-leaving loaded model. "" when Ollama didn't say.
+function gpuIdleText(seconds) {
+  if (seconds >= 3600) {
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    return m ? `${h} h ${m} min` : `${h} h`;
+  }
+  if (seconds >= 60) return `${Math.ceil(seconds / 60)} min`;
+  return `${Math.max(0, Math.round(seconds))} s`;
+}
+function gpuIdleNote(models) {
+  if (!models.length) return "";
+  if (models.every((m) => m.forever)) return "Ollama keeps its model on the graphics card (idle timer: Never).";
+  const timed = models.filter((m) => m.unload_in != null);
+  if (!timed.length) return "";
+  const soonest = Math.min(...timed.map((m) => m.unload_in));
+  return soonest <= 1
+    ? "Freeing the graphics card now."
+    : `Frees the graphics card in ${gpuIdleText(soonest)} if there are no more replies.`;
+}
+
 function renderGpu(data) {
   const box = $("gpuCard");
   if (!box) return;
@@ -8192,6 +8214,8 @@ function renderGpu(data) {
       notes.push(`Ollama is on another PC: ${models.map((m) => `${m.name} ${gpuGb(m.vram_mb)}`).join(", ")}.`);
     }
     if (data.uses_ollama && data.ollama_problem) notes.push(data.ollama_problem);
+    const idle = gpuIdleNote(models);   // NEW (1.5.0): the idle countdown
+    if (idle) notes.push(idle);
   } else {
     // No card report: show what Ollama says about its own models.
     plot.classList.add("is-hidden");
@@ -8205,13 +8229,15 @@ function renderGpu(data) {
       legend.append(gpuLegendRow("ollama", m.name, gpuGb(m.vram_mb), partial ? "part on the CPU" : ""));
     });
     if (data.uses_ollama && !models.length && !data.ollama_problem) notes.push("No Ollama model is loaded right now.");
+    const idle = gpuIdleNote(models);   // NEW (1.5.0): the idle countdown
+    if (idle) notes.push(idle);
     if (data.ollama_problem) notes.push(data.ollama_problem);
     if (data.card_problem) notes.push(data.card_problem);
     else if (!data.uses_evora) {
       notes.push("To graph the whole card, run Evora on the PC with the graphics card and choose it for Transcription.");
     }
   }
-  foot.textContent = notes.join(" ");
+  foot.textContent = notes.join("\n");   // CHANGED (1.5.0): one line each
 }
 
 async function refreshGpu() {
