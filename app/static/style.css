@@ -3142,3 +3142,179 @@ html[data-theme="light"] {
 .gpu-legend .gpu-label small { color: var(--ink-faint); font-size: inherit; }
 .gpu-foot { margin: 6px 0 0; font-size: var(--text-caption); color: var(--ink-faint); line-height: 1.45; }
 .gpu-foot:empty { display: none; }
+
+/* =========================================================================
+   NEW (1.5.0): Motion, round 1 — iOS-style springs
+   -------------------------------------------------------------------------
+   One set of timings for the whole app. Springs are CSS linear() curves
+   sampled from real spring physics (a bounce of 0, 0.15 and 0.3, the way
+   iOS names them smooth, snappy and bouncy), so there is no animation
+   library and nothing runs in JavaScript per frame.
+
+   Rules every animation here follows:
+   * only transform, scale and opacity move, so the graphics card does the
+     work and nothing reflows;
+   * transitions rather than keyframes for anything that opens and closes,
+     so closing half-way through reverses from where it is, never jumps;
+   * leaving is quicker than arriving.
+   Windows' "reduce animations" setting still switches all of it off (the
+   rule near the top of this file).
+   ========================================================================= */
+:root {
+  --dur-fast:   110ms;   /* a press going down */
+  --dur-exit:   170ms;   /* anything leaving */
+  --dur-smooth: 560ms;   /* panels: no bounce */
+  --dur-snappy: 480ms;   /* popovers, sheets: a hint of bounce */
+  --dur-bouncy: 500ms;   /* small things: knobs, presses, the hover bubble */
+
+  --ease-press: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-exit:  cubic-bezier(0.25, 0.6, 0.3, 1);   /* starts at once, no lingering */
+
+  /* Fallbacks for a browser without linear(); overridden just below. */
+  --spring-smooth: cubic-bezier(0.32, 0.72, 0, 1);
+  --spring-snappy: cubic-bezier(0.3, 0.9, 0.3, 1.02);
+  --spring-bouncy: cubic-bezier(0.3, 1.25, 0.5, 1);
+}
+@supports (transition-timing-function: linear(0, 1)) {
+  :root {
+    --spring-smooth: linear(0, 0.0494, 0.1578, 0.2857, 0.412, 0.5264, 0.6247, 0.7064, 0.7727, 0.8255, 0.867, 0.8993, 0.9241, 0.9431, 0.9575, 0.9683, 0.9765, 0.9826, 0.9872, 0.9905, 0.9931, 0.9949, 0.9963, 0.9973, 1);
+    --spring-snappy: linear(0, 0.0276, 0.0955, 0.1863, 0.2873, 0.3898, 0.4879, 0.5781, 0.6586, 0.7286, 0.7882, 0.8378, 0.8786, 0.9113, 0.9372, 0.9573, 0.9726, 0.984, 0.9922, 0.998, 1.0018, 1.0042, 1.0056, 1.0062, 1.0063, 1.006, 1.0055, 1.0049, 1.0043, 1.0036, 1.003, 1.0025, 1);
+    --spring-bouncy: linear(0, 0.0236, 0.0843, 0.1694, 0.2682, 0.3727, 0.4765, 0.5753, 0.6659, 0.7466, 0.8165, 0.8754, 0.9238, 0.9622, 0.9918, 1.0137, 1.0289, 1.0387, 1.044, 1.0459, 1.0453, 1.0428, 1.039, 1.0346, 1.0298, 1.025, 1.0204, 1.0162, 1.0123, 1.009, 1.0062, 1.0039, 1.0021, 1.0006, 0.9995, 0.9988, 0.9983, 0.998, 0.9979, 0.9979, 1);
+  }
+}
+
+/* --- Popovers grow out of the thing you clicked --------------------------
+   growFrom() in app.js points transform-origin at the chip's centre, so a
+   popover scales out of its chip and back into it. display is transitioned
+   (allow-discrete) so the closing animation plays before it's removed. */
+.popover,
+.pretty-select-pop,
+.voice-menu {
+  animation: none;
+  transform-origin: var(--grow-origin, 50% 0);
+  transition:
+    opacity 200ms var(--ease),
+    transform var(--dur-snappy) var(--spring-snappy),
+    display var(--dur-snappy) allow-discrete;
+}
+@starting-style {
+  .popover,
+  .pretty-select-pop,
+  .voice-menu { opacity: 0; transform: scale(0.82); }
+}
+.popover.is-hidden,
+.pretty-select-pop.is-hidden,
+.voice-menu.is-leaving {
+  opacity: 0;
+  transform: scale(0.9);
+  pointer-events: none;
+  transition:
+    opacity var(--dur-exit) var(--ease-exit),
+    transform var(--dur-exit) var(--ease-exit),
+    display var(--dur-exit) allow-discrete;
+}
+
+/* The voice and language pickers rise in on the same spring. */
+.voice-dialog { animation: picker-in var(--dur-snappy) var(--spring-snappy); }
+@keyframes picker-in {
+  from { opacity: 0; transform: translateY(14px) scale(0.96); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* --- Press feedback -------------------------------------------------------
+   Buttons dip quickly when pressed and spring back when let go. Uses the
+   separate `scale` property, so it never fights a component's own
+   transform. The transition list restates each component's colour
+   transitions, since a shorthand replaces the whole list. */
+.chip, .icon-btn, .rail-btn, .status-pill, .btn, .btn-ghost, .btn-send, .btn-mic,
+.radio-pill, .icon-switch-track, .update-chip, .voice-preview, .voice-menu-btn,
+.credit-card {
+  transition:
+    background var(--dur) var(--ease), background-color var(--dur) var(--ease),
+    color var(--dur) var(--ease), border-color var(--dur) var(--ease),
+    box-shadow var(--dur) var(--ease), opacity var(--dur) var(--ease),
+    scale var(--dur-bouncy) var(--spring-bouncy);
+}
+:is(.chip, .icon-btn, .rail-btn, .status-pill, .btn-send, .btn-mic, .icon-switch-track,
+    .update-chip, .voice-preview, .voice-menu-btn):active:not(:disabled),
+.icon-switch:active .icon-switch-track { scale: 0.9; }
+:is(.btn, .btn-ghost, .radio-pill, .credit-card):active:not(:disabled) { scale: 0.96; }
+:is(.chip, .icon-btn, .rail-btn, .status-pill, .btn, .btn-ghost, .btn-send, .btn-mic,
+    .radio-pill, .icon-switch-track, .update-chip, .voice-preview, .voice-menu-btn,
+    .credit-card):active:not(:disabled),
+.icon-switch:active .icon-switch-track {
+  transition-duration: var(--dur), var(--dur), var(--dur), var(--dur), var(--dur), var(--dur), var(--dur-fast);
+  transition-timing-function: var(--ease), var(--ease), var(--ease), var(--ease), var(--ease), var(--ease), var(--ease-press);
+}
+/* The old press effects, now done by `scale` above. */
+.btn:active, .btn-ghost:active, .btn-send:active { transform: none; }
+
+/* --- Toggles --------------------------------------------------------------
+   The knob springs across with a little overshoot, and stretches towards
+   the middle while held, like iOS. */
+.switch-track::after {
+  transform-origin: left center;
+  transition:
+    transform var(--dur-bouncy) var(--spring-bouncy),
+    scale var(--dur-bouncy) var(--spring-bouncy);
+}
+.switch input:checked ~ .switch-track::after { transform-origin: right center; }
+.switch:active .switch-track::after { scale: 1.28 1; }
+/* Speak, Chatbox, Auto: the icon pops when switched on (toggleSpring() in
+   app.js adds the class, so a page load or a sync never sets it off). */
+.icon-switch-track.is-popping svg { animation: icon-pop var(--dur-bouncy) var(--spring-bouncy); }
+@keyframes icon-pop {
+  0%   { scale: 0.7; }
+  100% { scale: 1; }
+}
+
+/* --- The hover bubble in pickers -----------------------------------------
+   The row under the pointer lifts out a little, rounded, with a soft
+   shadow; the one it left settles back. Only scale and shadow change, so
+   the rows around it never move. Arrow keys (.is-active) get the same. */
+.voice-list { padding: 4px 6px; }
+.voice-row, .lang-row, .pretty-select-option, .voice-menu button, .popover--ai .ai-tier {
+  position: relative;
+  border-radius: 12px;
+  transition:
+    background var(--dur) var(--ease), color var(--dur) var(--ease),
+    box-shadow var(--dur) var(--ease),
+    scale var(--dur-bouncy) var(--spring-bouncy);
+}
+.popover--ai .ai-tier { margin: 0 -8px; padding-left: 8px; padding-right: 8px; }
+:root { --bubble-lift: 0 8px 22px rgba(0, 0, 0, 0.38), 0 0 0 1px var(--rule); }
+html[data-theme="light"] { --bubble-lift: 0 8px 22px rgba(15, 23, 42, 0.13), 0 0 0 1px var(--rule-soft); }
+@media (hover: hover) {
+  .voice-row:hover, .lang-row:hover, .pretty-select-option:hover:not(:disabled),
+  .voice-menu button:hover, .popover--ai .ai-tier:hover {
+    z-index: 1;
+    scale: 1.025;
+    background: var(--surface-3);
+    box-shadow: var(--bubble-lift);
+  }
+  /* Wide rows travel further for the same scale; keep the lift the same size. */
+  .voice-row:hover, .lang-row:hover { scale: 1.012; }
+}
+.voice-row.is-active, .lang-row.is-active, .pretty-select-option:focus-visible {
+  z-index: 1;
+  scale: 1.012;
+  background: var(--surface-3);
+  box-shadow: var(--bubble-lift);
+  outline: none;
+}
+/* The voice in use keeps its red tint under the bubble, so "selected" and
+   "pointing at" stay different things. */
+.voice-row.is-current:hover, .lang-row.is-current:hover,
+.voice-row.is-current.is-active, .lang-row.is-current.is-active,
+.pretty-select-option.is-selected:hover {
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface-3));
+}
+/* Phones have no hover: the bubble shows while a finger is on the row. */
+@media (hover: none) {
+  .voice-row:active, .lang-row:active, .pretty-select-option:active, .voice-menu button:active {
+    z-index: 1;
+    scale: 1.02;
+    background: var(--surface-3);
+    box-shadow: var(--bubble-lift);
+  }
+}

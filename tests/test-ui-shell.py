@@ -122,12 +122,12 @@ const base = 'http://127.0.0.1:5093';
   check('the length chip opens its popover', await vis('#lengthPop') && await vis('#lengthSlider'));
   await p.click('#volumeChip'); await wait(200);
   check('opening another closes the first', await vis('#volumePop') && !(await vis('#lengthPop')));
-  await p.keyboard.press('Escape'); await wait(150);
+  await p.keyboard.press('Escape'); await wait(350);   // CHANGED (1.5.0): popovers now animate closed (170 ms)
   check('Escape closes popovers', !(await vis('#volumePop')));
   await p.click('#statusPillBtn'); await wait(200);
   check('the status pill opens services + credits', await vis('#statusPop') && await vis('#creditsToggle'));
   check('and reads Ready', (await text('#statusPillText')) === 'Ready');
-  await p.click('body', { position: { x: 300, y: 400 } }); await wait(150);
+  await p.click('body', { position: { x: 300, y: 400 } }); await wait(350);   // CHANGED (1.5.0): popovers now animate closed (170 ms)
   check('a click elsewhere closes it', !(await vis('#statusPop')));
   check('"Ready." is not shown as a status line', await cls('#status', 'is-quiet'));
   check('the profile avatar shows the initial', (await text('#profileAvatar')).trim() === 'D');
@@ -144,7 +144,7 @@ const base = 'http://127.0.0.1:5093';
   await p.evaluate(() => { oscQuickMuteSync.checked = true; oscQuickMuteSync.dispatchEvent(new Event('change', { bubbles: true })); });
   await wait(600);
   check('flipping one drives the Settings switch', await p.evaluate(() => oscMuteSyncToggle.checked && muteSyncEnabled));
-  await p.keyboard.press('Escape'); await wait(150);
+  await p.keyboard.press('Escape'); await wait(350);   // CHANGED (1.5.0): popovers now animate closed (170 ms)
   check('Escape closes it', !(await vis('#oscPop')));
   await p.evaluate(() => { frivoscConnected = false; syncOscSwitch(); });
   check('and it goes away when FrivOSC does', !(await vis('#oscChip')));

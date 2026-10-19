@@ -161,3 +161,25 @@ how much of each loaded Ollama model is on the graphics card instead, and
 says why it can't show the whole card. Frivo keeps the readings in the
 background, a couple of small requests every few seconds, so the graph
 already has history when you open it.
+
+## Animations, round 1
+
+Frivo now moves like an iOS app: on springs, quick and soft, and never in
+the way.
+
+- **Popovers grow out of their chip.** The AI model, length, volume, VRChat
+  and status popovers, and every dropdown, scale out of the button you
+  clicked and shrink back into it. Close one half-way open and it reverses
+  from where it is.
+- **Buttons respond to your finger.** Chips, buttons and icons dip when
+  pressed and spring back when you let go.
+- **Toggles.** Switches spring across with a little overshoot and stretch
+  while held; Speak, Chatbox and Auto pop when switched on.
+- **The hover bubble.** In the voice and language pickers, the dropdowns, the
+  AI model menu and a voice's menu, the row under your pointer lifts out a
+  little. On a phone it lifts while your finger is on it.
+- **The voice and language pickers** rise in on the same spring.
+
+Everything animates only position, size and fade, which the graphics card
+does for almost nothing, and Windows' "reduce animations" setting turns it
+all off.

@@ -2771,7 +2771,8 @@ def diagnose():
         for marker in ["reportMissingElements", "attachBubbleAudio",
                        "masterVolumeSlider", "fillLanguages", "fillOptionList",
                        "loadUpdates", "whereWritten",    # NEW (updates); NEW (1.5.0) whereWritten
-                       "renderGpu"]:                     # NEW (1.5.0): the graphics-card graph
+                       "renderGpu",                      # NEW (1.5.0): the graphics-card graph
+                       "growFrom"]:                      # NEW (1.5.0): motion, round 1
             js_markers[marker] = marker in js
 
     try:

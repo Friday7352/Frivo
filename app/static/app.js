@@ -3021,8 +3021,11 @@ let voiceMenuEl = null;
 
 function closeVoiceMenu() {
   if (voiceMenuEl) {
-    voiceMenuEl.remove();
+    // CHANGED (1.5.0): shrink back into its button before it's removed.
+    const menu = voiceMenuEl;
     voiceMenuEl = null;
+    menu.classList.add("is-leaving");
+    setTimeout(() => menu.remove(), 200);
   }
 }
 
@@ -3091,6 +3094,7 @@ function openVoiceMenu(anchor, v) {
   const margin = 8;
   menu.style.left = `${Math.max(margin, Math.min(r.right - m.width, window.innerWidth - m.width - margin))}px`;
   menu.style.top = `${Math.min(r.bottom + 6, window.innerHeight - m.height - margin)}px`;
+  if (typeof growFrom === "function") growFrom(menu, anchor);   // NEW (1.5.0)
 }
 
 document.addEventListener("click", (e) => {
@@ -6472,6 +6476,7 @@ function buildPrettySelect(select) {
     pop.classList.remove("is-hidden");
     trigger.setAttribute("aria-expanded", "true");
     position();
+    if (typeof growFrom === "function") growFrom(pop, trigger);   // NEW (1.5.0)
     openPrettySelect = { pop, trigger, close: closePrettySelect };
     requestAnimationFrame(() => {
       const target = list.querySelector(".pretty-select-option.is-selected")
@@ -7755,6 +7760,7 @@ window.addEventListener("pagehide", () => {
       const opening = pop.classList.contains("is-hidden");
       closePopovers(opening ? pop : null);
       pop.classList.toggle("is-hidden", !opening);
+      if (opening && typeof growFrom === "function") growFrom(pop, btn);   // NEW (1.5.0): grow out of the chip
       btn.setAttribute("aria-expanded", opening ? "true" : "false");
       if (opening && pop.id === "lengthPop" && typeof refreshPromptIfOpen === "function") refreshPromptIfOpen();
       if (opening && pop.id === "aiPop" && typeof refreshAiPop === "function") refreshAiPop();   // NEW (1.5.0)
@@ -8206,3 +8212,48 @@ async function refreshGpu() {
   new MutationObserver(sync).observe(pop, { attributes: true, attributeFilter: ["class"] });
   sync();
 })();
+
+
+// ---------------------------------------------------------------------------
+// NEW (1.5.0): Motion, round 1. The CSS does the animating; these only tell
+// it where things grow from, and when a toggle was flipped by a person.
+// ---------------------------------------------------------------------------
+
+// Points a popover's transform-origin at the centre of the thing that opened
+// it, so it scales out of that chip (and back into it when it closes).
+// Measured from layout boxes rather than getBoundingClientRect on the
+// popover, which a running animation would distort.
+function growFrom(pop, anchor) {
+  if (!pop || !anchor) return;
+  const a = anchor.getBoundingClientRect();
+  const parent = pop.offsetParent;
+  let left = 0;
+  let top = 0;
+  if (parent) {
+    const p = parent.getBoundingClientRect();
+    left = p.left + parent.clientLeft;
+    top = p.top + parent.clientTop;
+  }
+  const x = a.left + a.width / 2 - left - pop.offsetLeft;
+  const y = a.top + a.height / 2 - top - pop.offsetTop;
+  // A popover that opens upwards (the chip bar's) is anchored by its
+  // bottom, and its content can still be loading, so measure from the
+  // bottom: the origin stays on the chip however tall it ends up.
+  const below = y > pop.offsetHeight / 2;
+  const yValue = below ? `calc(100% + ${Math.round(y - pop.offsetHeight)}px)` : `${Math.round(y)}px`;
+  pop.style.setProperty("--grow-origin", `${Math.round(x)}px ${yValue}`);
+}
+
+// Speak, Chatbox and Auto: a little pop when you switch one on. Listening
+// for change (which only a person's click fires) keeps page loads and the
+// VRChat mute sync from setting it off.
+document.addEventListener("change", (event) => {
+  const input = event.target;
+  if (!(input instanceof HTMLInputElement) || !input.checked) return;
+  const track = input.closest(".icon-switch") && input.closest(".icon-switch").querySelector(".icon-switch-track");
+  if (!track) return;
+  track.classList.remove("is-popping");
+  void track.offsetWidth;   // restart the animation if it's flipped quickly
+  track.classList.add("is-popping");
+  track.addEventListener("animationend", () => track.classList.remove("is-popping"), { once: true });
+});
