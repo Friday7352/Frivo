@@ -248,3 +248,21 @@ Dragging the volume slider used to make it jump back and forth: as the number
 changed width ("95%", "100%"), the chip row re-fitted and moved the slider under
 the pointer. The chip keeps one width now, and the row waits for the popover to
 close before it re-fits.
+
+## Your own voices
+
+- **Add a voice** at the bottom of the voice list adds a Piper voice from your computer: the `.onnx` file with its `.onnx.json`, or a `.zip`, `.tar.gz` or `.tar.bz2` that holds them (sherpa-onnx voice archives work too).
+- Added voices are free and run on the processor, like the other free voices. They're listed under **Free · added by you** and kept in `%APPDATA%\Frivo\voices`.
+- Each voice's **…** menu can rename or remove it. A profile still set to a removed voice says so instead of going quiet.
+- Frivo tries every voice before keeping it, and refuses programs (`.exe`, `.vb`, `.bat` and the like). Adding the same voice twice is recognised.
+- A voice speaks its own language; picking a German voice for English replies is caught and explained.
+
+## Voice tags and Delivery
+
+For ElevenLabs voices.
+
+- **Voice tags** are a word or two in square brackets, like `[laughs]`, `[softly]`, `[whispers]` or `[sighs]`. The voice acts them out instead of reading them. The ✦ button in the message box puts one in where your cursor is, and **Suggest for my message** has the AI add a few that fit. It only adds tags; your words stay exactly as typed, and **Undo** puts it back.
+- **Expressive voice** (per profile, and in Settings > Voices for the default) lets the AI use tags in its own replies, and tells it how: sparingly, where they fit the persona, and with the tags carrying the emotion instead of capitals and exclamation marks. With Clean up it may add one or two; Word for word keeps yours and adds none.
+- **Delivery**: Calm, Natural or Lively. Calm is steadier and tells the AI not to write in capitals or pile up exclamation marks, and it takes out `[shouts]`. Natural is exactly what Frivo sent before. Lively swings more.
+- Tags show as small marks in the conversation. The chatbox, the word count, the translation and the free voices never see them. The word highlight still follows the voice.
+- Anything with a tag, and every reply from an Expressive profile, is spoken with ElevenLabs' v3 model. It doesn't take the Speaking speed setting. If ElevenLabs refuses v3, the reply is spoken the usual way without the tags.

@@ -60,6 +60,7 @@ import subprocess  # NEW (updates): schtasks and the relaunch watcher
 import sys
 import time
 import uuid
+import tempfile  # NEW (1.5.0): adding your own voices
 import threading
 
 from flask import Flask, request, jsonify, render_template, send_from_directory, redirect, g  # CHANGED (1.5.0): g
@@ -673,6 +674,10 @@ def load_config():
         "language": "English",
         # How fast the voice talks. 1.0 is ElevenLabs' natural pace.
         "speaking_speed": 1.0,
+        # NEW (1.5.0): Expressive voice (audio tags) and Delivery, for the
+        # default profile. Each profile has its own.
+        "expressive_voice": False,
+        "voice_delivery": "natural",
         # Sampling temperature for the reply. 0.7 is the long-standing
         # OpenAI default and what this app used implicitly before the
         # setting was exposed, so an existing config behaves identically.
@@ -855,6 +860,9 @@ def count_words(text, language=None):
     """
     if not text or not text.strip():
         return 0
+    text = strip_audio_tags(text)   # NEW (1.5.0): tags are performed, not said
+    if not text:
+        return 0
 
     total = 0
     remaining = text
@@ -928,7 +936,8 @@ EN_DELIMITER = "---EN---"
 MIMIC_PROFILE_TEXT = "(Word for word: no personality — your exact words, translated literally when needed.)"
 
 
-def build_system_prompt(base_prompt, max_words, language="English", response_style=DEFAULT_RESPONSE_STYLE):
+def build_system_prompt(base_prompt, max_words, language="English", response_style=DEFAULT_RESPONSE_STYLE,
+                        voice_style=None):
     """
     CHANGED (1.5.0): three response styles.
 
@@ -945,7 +954,19 @@ def build_system_prompt(base_prompt, max_words, language="English", response_sty
       "mimic" -> exactly what was typed. In English the model is never
       called at all; this prompt is only used to translate literally into
       another language, with no personality.
+
+    NEW (1.5.0): `voice_style` — Expressive voice and Delivery for an
+    ElevenLabs voice (None for any other voice): the rules for audio tags,
+    or for a calm delivery, are added.
     """
+    voice_rules = ""
+    if voice_style:
+        if voice_style.get("expressive") and response_style != "mimic":
+            voice_rules += expressive_voice_rules(response_style, language, voice_style.get("delivery"))
+        elif response_style != "reply":
+            voice_rules += audio_tag_keep_rule()
+        if voice_style.get("delivery") == "calm" and response_style != "mimic":
+            voice_rules += calm_delivery_rule()
     if response_style == "mimic":
         personality_text = MIMIC_PROFILE_TEXT
     else:
@@ -1095,6 +1116,7 @@ def build_system_prompt(base_prompt, max_words, language="English", response_sty
         + profile_label
         + f"{personality_text}\n\n"
         + rules_block
+        + voice_rules   # NEW (1.5.0)
         + "LANGUAGE RULE:\n"
         + f"The application selected {language}.\n"
         + f"The {'reply' if response_style == 'reply' else 'output'} MUST be entirely in {language}.\n"
@@ -1341,7 +1363,10 @@ def build_condense_prompt(text, max_words, language="English"):
         "Keep as much of the original content as possible while staying within "
         "the maximum word limit.\n"
         "If the source text is already within the limit, do not make it longer.\n"
-        "Reply with only the transformed text.\n\n"
+        # NEW (1.5.0)
+        + ("Keep the audio tags in square brackets, like [laughs], that belong with the words you keep.\n"
+           if has_audio_tags(text) else "")
+        + "Reply with only the transformed text.\n\n"
         f"{text}"
     )
 
@@ -2282,11 +2307,34 @@ def piper_package_problem():
 def piper_voice(voice_id):
     if VOICE_PACK is None or not (voice_id or "").startswith(PIPER_PREFIX):
         return None
-    return VOICE_PACK.VOICES_BY_KEY.get(voice_id[len(PIPER_PREFIX):])
+    key = voice_id[len(PIPER_PREFIX):]
+    if key.startswith(CUSTOM_VOICE_PREFIX):   # NEW (1.5.0): a voice you added
+        return custom_voice(key)
+    return VOICE_PACK.VOICES_BY_KEY.get(key)
+
+
+def piper_paths(voice):
+    """
+    NEW (1.5.0): where a voice's files are. Frivo's own are in the install
+    folder; ones you added are in %APPDATA%/Frivo/voices, and share the
+    pronunciation data that came with Frivo's.
+    """
+    if voice.get("custom"):
+        folder = os.path.join(CUSTOM_VOICES_DIR, voice["key"])
+        return {"folder": folder, "model": os.path.join(folder, "model.onnx"),
+                "tokens": os.path.join(folder, "tokens.txt"),
+                "espeak": os.path.join(PIPER_DIR, VOICE_PACK.ESPEAK)}
+    return VOICE_PACK.voice_paths(voice, PIPER_DIR)
 
 
 def piper_voice_ready(voice):
-    return VOICE_PACK is not None and VOICE_PACK.voice_ready(voice, PIPER_DIR)
+    if VOICE_PACK is None:
+        return False
+    if voice.get("custom"):   # NEW (1.5.0)
+        paths = piper_paths(voice)
+        return (VOICE_PACK.espeak_ready(PIPER_DIR) and os.path.isfile(paths["model"])
+                and os.path.isfile(paths["tokens"]))
+    return VOICE_PACK.voice_ready(voice, PIPER_DIR)
 
 
 def piper_problem(voice_id, language):
@@ -2295,10 +2343,22 @@ def piper_problem(voice_id, language):
         return problem
     voice = piper_voice(voice_id)
     if voice is None:
+        if (voice_id or "").startswith(PIPER_PREFIX + CUSTOM_VOICE_PREFIX):   # NEW (1.5.0)
+            return "That voice you added has been removed. Pick another voice in the Voice list."
         return "That voice isn't one of Frivo's voices. Pick another voice in the Voice list."
+    if voice.get("custom"):   # NEW (1.5.0): a voice you added speaks its own language
+        if not piper_voice_ready(voice):
+            if not VOICE_PACK.espeak_ready(PIPER_DIR):
+                return "Voices you add use the pronunciation data that comes with Frivo's voices. Run Frivo's setup again (Repair)."
+            return f"The {voice['name']} voice's files are missing. Remove it and add it again."
+        spoken = voice.get("language_name") or ""
+        if language and spoken and language != spoken:
+            return (f"{voice['name']} speaks {spoken}. Pick a voice for {language}, "
+                    f"switch the language to {spoken}, or turn Speak off.")
+        return None
     if not piper_voice_ready(voice):
         return f"The {voice['name']} voice isn't installed. Run Frivo's setup again (Repair) to put it back."
-    if language != "English":
+    if language and language != "English":   # CHANGED (1.5.0): no language = don't check (previews)
         return (f"Frivo's voices speak English. Pick a Windows voice or an ElevenLabs voice for {language}, "
                 "or turn Speak off.")
     return None
@@ -2318,7 +2378,7 @@ def piper_engine(voice):
         with PIPER_LOCK:
             PIPER_STATE["package_problem"] = problem
         raise RuntimeError(problem)
-    paths = VOICE_PACK.voice_paths(voice, PIPER_DIR)
+    paths = piper_paths(voice)   # CHANGED (1.5.0): Frivo's own, or one you added
     engine = sherpa_onnx.OfflineTts(sherpa_onnx.OfflineTtsConfig(model=sherpa_onnx.OfflineTtsModelConfig(
         num_threads=PIPER_THREADS, provider="cpu",
         vits=sherpa_onnx.OfflineTtsVitsModelConfig(model=paths["model"], tokens=paths["tokens"],
@@ -2370,7 +2430,7 @@ def piper_speak_pages(pages, voice_id, path):
 def piper_voice_entries():
     if VOICE_PACK is None or piper_package_problem():
         return []
-    entries = []
+    entries = custom_voice_entries()   # NEW (1.5.0): voices you added, listed first
     for voice in VOICE_PACK.VOICES:
         if not piper_voice_ready(voice):
             continue
@@ -2388,6 +2448,346 @@ def piper_voice_entries():
             "description": "Free voice included with Frivo. Runs on this PC with very little CPU and no graphics card.",
         })
     return entries
+
+
+# ---------------------------------------------------------------------------
+# NEW (1.5.0): voices you add yourself
+#
+# Any Piper voice works: there are hundreds, free, in dozens of languages
+# (the Piper voice library on Hugging Face, or the sherpa-onnx collection
+# on GitHub). Add one from the voice list ("Add a voice") as either
+#   * the voice's .onnx file and its .onnx.json, or
+#   * an archive with them in it (.zip, .tar.gz, .tar.bz2), including the
+#     sherpa-onnx ones, which already come in the form Frivo reads.
+# A plain Piper voice is converted on the way in: the list of sounds in its
+# .onnx.json becomes tokens.txt, and the few facts the speech library reads
+# (language, sample rate, that it's a Piper voice) are added to the model
+# file. No extra software is needed for that. Each one is tried out (it
+# says a word) before it's kept, so a file that isn't a working voice is
+# turned away with a reason.
+#
+# They're kept in %APPDATA%\Frivo\voices\<key>\, with your settings, so
+# updates and Repair leave them alone. Nothing is ever run from them: a
+# voice is data for the speech library, not a program.
+# ---------------------------------------------------------------------------
+
+CUSTOM_VOICE_PREFIX = "custom-"
+CUSTOM_VOICES_DIR = os.path.join(DATA_DIR, "voices")
+CUSTOM_VOICES_INDEX = os.path.join(CUSTOM_VOICES_DIR, "voices.json")
+CUSTOM_VOICES_LOCK = threading.Lock()
+CUSTOM_VOICE_MAX_BYTES = 400 * 1024 * 1024     # the biggest Piper voices are about 120 MB
+CUSTOM_VOICE_MAX_COUNT = 100
+_CUSTOM_KEY_RE = re.compile(r"^custom-[a-z0-9-]{1,40}-[0-9a-f]{6}$")
+
+
+def load_custom_voices():
+    try:
+        with open(CUSTOM_VOICES_INDEX, "r", encoding="utf-8") as f:
+            items = json.load(f)
+        return [v for v in items if isinstance(v, dict) and _CUSTOM_KEY_RE.match(str(v.get("key", "")))]
+    except (OSError, ValueError, TypeError):
+        return []
+
+
+def write_custom_voices(items):
+    os.makedirs(CUSTOM_VOICES_DIR, exist_ok=True)
+    temp = CUSTOM_VOICES_INDEX + ".tmp"
+    with open(temp, "w", encoding="utf-8") as f:
+        json.dump(items, f, ensure_ascii=False, indent=1)
+    os.replace(temp, CUSTOM_VOICES_INDEX)
+
+
+def custom_voice(key):
+    for voice in load_custom_voices():
+        if voice["key"] == key:
+            return dict(voice, custom=True)
+    return None
+
+
+def custom_voice_entries():
+    entries = []
+    for voice in load_custom_voices():
+        voice = dict(voice, custom=True)
+        if not piper_voice_ready(voice):
+            continue
+        voice_id = PIPER_PREFIX + voice["key"]
+        label = voice.get("language_name") or "Unknown language"
+        if voice.get("region"):
+            label += f" · {voice['region']}"
+        entries.append({
+            "voice_id": voice_id,
+            "name": voice["name"],
+            "category": "added by you",
+            "tags": ["custom", "free"],
+            "gender": voice.get("gender") or "",
+            "created_at": None,
+            "languages": [{"code": voice.get("language_code") or "en", "name": label}],
+            "language_source": "declared",
+            "preview_url": "/api/voices/preview?voice_id=" + quote(voice_id, safe=""),
+            "description": "A voice you added. Free, and runs on this PC with very little CPU and no graphics card.",
+            "custom": True,
+        })
+    return entries
+
+
+def _protobuf_varint(number):
+    out = bytearray()
+    while True:
+        byte = number & 0x7F
+        number >>= 7
+        if number:
+            out.append(byte | 0x80)
+        else:
+            out.append(byte)
+            return bytes(out)
+
+
+def _onnx_metadata_entry(key, value):
+    """One ModelProto.metadata_props entry (field 14), as protobuf bytes."""
+    k, v = key.encode("utf-8"), str(value).encode("utf-8")
+    body = b"\x0a" + _protobuf_varint(len(k)) + k + b"\x12" + _protobuf_varint(len(v)) + v
+    return b"\x72" + _protobuf_varint(len(body)) + body
+
+
+def _voice_name_from_file(stem):
+    """'en_US-amy-medium' or 'vits-piper-en_GB-alan-low' -> 'Amy'."""
+    stem = re.sub(r"\.onnx$", "", stem)
+    stem = re.sub(r"^vits-piper-", "", stem)
+    stem = re.sub(r"-(fp16|int8)$", "", stem)
+    parts = [p for p in re.split(r"[-_]", stem) if p]
+    skip = {"x", "low", "medium", "high", "en", "us", "gb", "uk"}
+    words = [p for p in parts if p.lower() not in skip and not re.fullmatch(r"[a-z]{2}", p.lower() if len(p) == 2 else "--")]
+    name = " ".join(words) or stem or "My voice"
+    return name.replace("_", " ").title()[:40]
+
+
+def _language_from_code(code):
+    """'en_US' -> ('en', 'English', 'United States') as far as is known."""
+    names = {"en": "English", "de": "German", "fr": "French", "es": "Spanish", "it": "Italian",
+             "pt": "Portuguese", "nl": "Dutch", "ru": "Russian", "pl": "Polish", "uk": "Ukrainian",
+             "zh": "Chinese", "ja": "Japanese", "ko": "Korean", "sv": "Swedish", "no": "Norwegian",
+             "da": "Danish", "fi": "Finnish", "tr": "Turkish", "cs": "Czech", "el": "Greek",
+             "hu": "Hungarian", "ro": "Romanian", "ar": "Arabic", "vi": "Vietnamese", "ca": "Catalan"}
+    regions = {"US": "US", "GB": "UK", "AU": "AU", "IN": "IN", "DE": "DE", "AT": "AT", "CH": "CH",
+               "FR": "FR", "ES": "ES", "MX": "MX", "BR": "BR", "PT": "PT", "NL": "NL", "BE": "BE"}
+    match = re.match(r"^([a-z]{2,3})(?:[_-]([A-Z]{2}))?$", code or "")
+    if not match:
+        return "", "", ""
+    return match.group(1), names.get(match.group(1), ""), regions.get(match.group(2) or "", match.group(2) or "")
+
+
+def _try_voice(model, tokens):
+    """Makes the voice say a word. Raises with a plain reason if it can't."""
+    import sherpa_onnx
+    try:
+        engine = sherpa_onnx.OfflineTts(sherpa_onnx.OfflineTtsConfig(model=sherpa_onnx.OfflineTtsModelConfig(
+            num_threads=PIPER_THREADS, provider="cpu",
+            vits=sherpa_onnx.OfflineTtsVitsModelConfig(model=model, tokens=tokens,
+                                                       data_dir=os.path.join(PIPER_DIR, VOICE_PACK.ESPEAK)))))
+        audio = engine.generate("Hello.", sid=0, speed=1.0)
+    except Exception as e:
+        raise ValueError(f"That file isn't a voice Frivo can use ({str(e)[:160]}).")
+    if not audio.samples:
+        raise ValueError("That voice didn't make any sound when tried.")
+
+
+def _unpack_voice_upload(paths, staging):
+    """Unpacks any archives among the uploaded files. Returns every file there now."""
+    import tarfile
+    import zipfile
+
+    found = []
+    for path in paths:
+        name = os.path.basename(path).lower()
+        target = os.path.join(staging, "x" + uuid.uuid4().hex[:8])
+        if name.endswith((".tar.bz2", ".tbz2", ".tar.gz", ".tgz", ".tar")):
+            os.makedirs(target)
+            with tarfile.open(path, "r:*") as archive:
+                for member in archive.getmembers():
+                    base = os.path.basename(member.name.replace("\\", "/"))
+                    if not member.isfile() or not base.lower().endswith((".onnx", ".json", ".txt")):
+                        continue   # only the voice's own files; pronunciation data is Frivo's
+                    out = os.path.join(target, uuid.uuid4().hex[:6] + "-" + base)
+                    with archive.extractfile(member) as src, open(out, "wb") as dst:
+                        shutil.copyfileobj(src, dst)
+                    found.append((out, base))
+        elif name.endswith(".zip"):
+            os.makedirs(target)
+            with zipfile.ZipFile(path) as archive:
+                for info in archive.infolist():
+                    base = os.path.basename(info.filename.replace("\\", "/"))
+                    if info.is_dir() or not base.lower().endswith((".onnx", ".json", ".txt")):
+                        continue
+                    out = os.path.join(target, uuid.uuid4().hex[:6] + "-" + base)
+                    with archive.open(info) as src, open(out, "wb") as dst:
+                        shutil.copyfileobj(src, dst)
+                    found.append((out, base))
+        else:
+            found.append((path, os.path.basename(path)))
+    return found
+
+
+def add_custom_voice(paths, name=""):
+    """
+    Turns uploaded files into a voice Frivo can use, and keeps it. Returns
+    the new voice's entry. Raises ValueError with a reason for the person.
+    """
+    if VOICE_PACK is None or piper_package_problem():
+        raise ValueError(piper_package_problem() or "Frivo's voices aren't set up. Run Frivo's setup again (Repair).")
+    if not VOICE_PACK.espeak_ready(PIPER_DIR):
+        raise ValueError("Voices you add use the pronunciation data that comes with Frivo's voices. Run Frivo's setup again (Repair).")
+    staging = tempfile.mkdtemp(prefix=".adding-", dir=CUSTOM_VOICES_DIR)
+    try:
+        files = _unpack_voice_upload(paths, staging)
+        models = [(p, b) for p, b in files if b.lower().endswith(".onnx")]
+        if not models:
+            raise ValueError("There's no voice in that. A Piper voice is an .onnx file (with its .onnx.json), "
+                             "or an archive with them in it. Programs (.exe, .vb, …) can't be voices.")
+        if len(models) > 1:
+            models.sort(key=lambda m: os.path.getsize(m[0]), reverse=True)   # the voice, not a helper model
+        model_path, model_name = models[0]
+        config = next((p for p, b in files if b.lower() in (model_name.lower() + ".json", "config.json")
+                       or b.lower().endswith(".onnx.json")), None)
+        tokens = next((p for p, b in files if b.lower() == "tokens.txt"), None)
+        if not config and not tokens:
+            raise ValueError("That voice is missing its .onnx.json file. Add the .onnx and the .onnx.json together.")
+        # The same voice added again is recognised by its model file.
+        fingerprint = VOICE_PACK._sha256(model_path)
+        with CUSTOM_VOICES_LOCK:
+            twin = next((v for v in load_custom_voices() if v.get("sha256") == fingerprint), None)
+        if twin:
+            raise ValueError(f"You've already added this voice: it's {twin['name']}.")
+        info = {}
+        if config:
+            with open(config, "r", encoding="utf-8") as f:
+                info = json.load(f)
+        stem = re.sub(r"\.onnx$", "", model_name, flags=re.I)
+        lang = info.get("language") or {}
+        # The language: stated in the .onnx.json by newer voices; older ones
+        # only give their eSpeak voice ("en-us") and their file name.
+        code = lang.get("code") or ""
+        if not code:
+            hint = (info.get("espeak") or {}).get("voice") or ""
+            found = re.match(r"^([a-z]{2,3})(?:[-_]([a-z]{2}))?$", hint, re.I) \
+                or re.search(r"(?:^|[-_])([a-z]{2})[-_]([a-z]{2})(?:[-_]|$)", stem, re.I)
+            if found:
+                code = found.group(1).lower() + (("_" + found.group(2).upper()) if found.group(2) else "")
+        lang_code, lang_name, region = _language_from_code(code)
+        if lang.get("name_english"):
+            lang_name = lang["name_english"]
+        if lang.get("country_english") and not region:
+            region = lang["country_english"]
+        label = (name or "").strip()[:40] or _voice_name_from_file(info.get("dataset") or stem)
+        slug = re.sub(r"[^a-z0-9]+", "-", label.lower()).strip("-")[:40] or "voice"
+        key = f"{CUSTOM_VOICE_PREFIX}{slug}-{uuid.uuid4().hex[:6]}"
+        made = os.path.join(staging, key)
+        os.makedirs(made)
+        out_model = os.path.join(made, "model.onnx")
+        out_tokens = os.path.join(made, "tokens.txt")
+        if config and "phoneme_id_map" in info:
+            # A plain Piper voice: write tokens.txt, and add what the speech
+            # library reads to the model file.
+            espeak_voice = (info.get("espeak") or {}).get("voice") or code.replace("_", "-").lower() or "en-us"
+            meta = {"model_type": "vits", "comment": "piper", "language": lang_name or "English",
+                    "voice": espeak_voice, "has_espeak": 1,
+                    "n_speakers": int(info.get("num_speakers") or 1),
+                    "sample_rate": int((info.get("audio") or {}).get("sample_rate") or 22050)}
+            with open(model_path, "rb") as src, open(out_model, "wb") as dst:
+                shutil.copyfileobj(src, dst)
+                for k, v in meta.items():
+                    dst.write(_onnx_metadata_entry(k, v))
+            with open(out_tokens, "w", encoding="utf-8") as f:
+                for symbol, ids in info["phoneme_id_map"].items():
+                    if ids:
+                        f.write(f"{symbol} {int(ids[0])}\n")
+        elif tokens:
+            # Already in the speech library's form (a sherpa-onnx archive).
+            shutil.copyfile(model_path, out_model)
+            shutil.copyfile(tokens, out_tokens)
+        else:
+            raise ValueError("That voice is missing its .onnx.json file. Add the .onnx and the .onnx.json together.")
+        _try_voice(out_model, out_tokens)
+        with CUSTOM_VOICES_LOCK:
+            items = load_custom_voices()
+            if len(items) >= CUSTOM_VOICE_MAX_COUNT:
+                raise ValueError(f"You've added {CUSTOM_VOICE_MAX_COUNT} voices. Remove some to add more.")
+            os.replace(made, os.path.join(CUSTOM_VOICES_DIR, key))
+            entry = {"key": key, "name": label, "gender": "", "language_code": lang_code,
+                     "language_name": lang_name, "region": region, "source": model_name[:120],
+                     "sha256": fingerprint,
+                     "added_at": time.time()}
+            items.append(entry)
+            write_custom_voices(items)
+        return entry
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
+
+
+@app.route("/api/voices/custom", methods=["POST"])
+def custom_voice_add():
+    uploads = request.files.getlist("files")
+    if not uploads:
+        return jsonify({"error": "Choose the voice's files to add."}), 400
+    os.makedirs(CUSTOM_VOICES_DIR, exist_ok=True)
+    holding = tempfile.mkdtemp(prefix=".upload-", dir=CUSTOM_VOICES_DIR)
+    try:
+        saved, total = [], 0
+        for upload in uploads[:10]:
+            base = re.sub(r"[^A-Za-z0-9._-]+", "_", os.path.basename(upload.filename or "file"))[:120] or "file"
+            path = os.path.join(holding, uuid.uuid4().hex[:6] + "-" + base)
+            with open(path, "wb") as out:
+                while True:
+                    chunk = upload.stream.read(1 << 20)
+                    if not chunk:
+                        break
+                    total += len(chunk)
+                    if total > CUSTOM_VOICE_MAX_BYTES:
+                        return jsonify({"error": "That's too big to be a voice (over 400 MB)."}), 400
+                    out.write(chunk)
+            saved.append(path)
+        # The uploaded names, without the prefix added above, decide what each file is.
+        named = []
+        for path in saved:
+            original = os.path.basename(path)[7:]
+            clean = os.path.join(holding, "n" + uuid.uuid4().hex[:6])
+            os.makedirs(clean)
+            target = os.path.join(clean, original)
+            os.replace(path, target)
+            named.append(target)
+        try:
+            entry = add_custom_voice(named, request.form.get("name") or "")
+        except ValueError as e:
+            return jsonify({"error": str(e)}), 400
+        except Exception as e:
+            log_server_event(f"Add a voice: {e!r}")
+            return jsonify({"error": f"That voice couldn't be added ({e})."}), 500
+        return jsonify({"ok": True, "voice_id": PIPER_PREFIX + entry["key"], "name": entry["name"]})
+    finally:
+        shutil.rmtree(holding, ignore_errors=True)
+
+
+@app.route("/api/voices/custom/<key>", methods=["DELETE", "PATCH"])
+def custom_voice_change(key):
+    if not _CUSTOM_KEY_RE.match(key or ""):
+        return jsonify({"error": "Not found."}), 404
+    with CUSTOM_VOICES_LOCK:
+        items = load_custom_voices()
+        voice = next((v for v in items if v["key"] == key), None)
+        if not voice:
+            return jsonify({"error": "Not found."}), 404
+        if request.method == "PATCH":
+            name = str((request.get_json(silent=True) or {}).get("name") or "").strip()[:40]
+            if not name:
+                return jsonify({"error": "Give it a name."}), 400
+            voice["name"] = name
+            write_custom_voices(items)
+            return jsonify({"ok": True, "name": name})
+        items = [v for v in items if v["key"] != key]
+        write_custom_voices(items)
+    with PIPER_LOCK:
+        PIPER_ENGINES.pop(key, None)
+    shutil.rmtree(os.path.join(CUSTOM_VOICES_DIR, key), ignore_errors=True)
+    return jsonify({"ok": True})
 
 
 def piper_status():
@@ -2595,9 +2995,236 @@ def warm_free_voices():
         log_server_event(f"Free voices: start-up check failed: {e!r}")
 
 
-def _elevenlabs_payload(text):
+# ---------------------------------------------------------------------------
+# NEW (1.5.0): Expressive voice — ElevenLabs audio tags — and Delivery
+#
+# ElevenLabs' v3 model follows audio tags: a word or two in square brackets,
+# like [whispers], [laughs] or [sighs], performed rather than read out. They
+# get into a reply three ways: you add them with the tag button (or ask the
+# AI to suggest some for your message), or a profile with Expressive voice
+# on lets the AI use them itself, and is told how.
+#
+# A reply keeps two versions: what the voice is given (with its tags,
+# "voiced") and what everything else sees (without them): the chatbox, the
+# word count, the free voices, the translation. Anything with a tag, or any
+# reply from an Expressive profile, is spoken with v3; everything else with
+# the same model as always.
+#
+# Delivery (Calm / Natural / Lively) sets how much the voice swings. Natural
+# is exactly what Frivo always sent. Calm is the cure for a voice that
+# sometimes yells: steadier voice settings, and the AI is told to stop
+# writing in capitals and exclamation marks.
+# ---------------------------------------------------------------------------
+
+AUDIO_TAG_RE = re.compile(r"\[([A-Za-z][A-Za-z' \-]{0,38})\]")
+ELEVEN_V2_MODEL = "eleven_multilingual_v2"
+ELEVEN_V3_MODEL = "eleven_v3"
+
+VOICE_DELIVERIES = [
+    {"id": "calm", "name": "Calm", "description": "Steady and even. Doesn't shout."},
+    {"id": "natural", "name": "Natural", "description": "The voice as it comes."},
+    {"id": "lively", "name": "Lively", "description": "Bigger ups and downs. Can get loud."},
+]
+VOICE_DELIVERY_IDS = {d["id"] for d in VOICE_DELIVERIES}
+DEFAULT_VOICE_DELIVERY = "natural"
+# v2 takes any stability (lower swings more) and a style boost; v3 takes
+# three settings only: 0 (Creative), 0.5 (Natural) and 1 (Robust).
+DELIVERY_SETTINGS = {
+    "calm": {"v2": {"stability": 0.75, "similarity_boost": 0.75}, "v3": 1.0},
+    "natural": {"v2": {"stability": 0.5, "similarity_boost": 0.75}, "v3": 0.5},
+    "lively": {"v2": {"stability": 0.3, "similarity_boost": 0.75, "style": 0.35}, "v3": 0.0},
+}
+
+# The tag button's choices. Any tag works; these are the dependable ones.
+AUDIO_TAG_GROUPS = [
+    {"name": "Feeling", "tags": ["happy", "excited", "sad", "nervous", "curious", "sarcastic", "annoyed", "warmly"]},
+    {"name": "Voice", "tags": ["softly", "whispers", "calm", "slowly", "quickly", "dramatically", "shouts"]},
+    {"name": "Sounds", "tags": ["laughs", "chuckles", "giggles", "sighs", "gasps", "clears throat", "pause"]},
+]
+
+
+def normalize_voice_delivery(value, fallback=DEFAULT_VOICE_DELIVERY):
+    value = str(value or "").strip().lower()
+    return value if value in VOICE_DELIVERY_IDS else fallback
+
+
+def has_audio_tags(text):
+    return bool(text) and bool(AUDIO_TAG_RE.search(text))
+
+
+def strip_audio_tags(text):
+    """The text without its audio tags, re-spaced as if they were never there."""
+    if not text or "[" not in text:
+        return text
+    out = AUDIO_TAG_RE.sub(" ", text)
+    out = re.sub(r"[ \t]{2,}", " ", out)
+    out = re.sub(r" +([.,!?;:…])", r"\1", out)
+    out = re.sub(r"(^|\n) +", r"\1", out)
+    return out.strip()
+
+
+def tidy_audio_tags(text):
+    """Tags as ElevenLabs likes them: lowercase, single-spaced, a space after."""
+    def fix(m):
+        return "[" + re.sub(r"\s+", " ", m.group(1)).strip().lower() + "]"
+    out = AUDIO_TAG_RE.sub(fix, text or "")
+    # A tag just before punctuation ("fine [sighs]. Okay") goes after it,
+    # so the words read the same with or without the tags.
+    out = re.sub(r"[ \t]*(\[[^\]\n]*\])[ \t]*([.,!?;:…]+)", r"\2 \1", out)
+    out = re.sub(r"\](?=[^\s\[\].,!?;:…])", "] ", out)
+    return out.strip()
+
+
+def transplant_audio_tags(original, tagged):
+    """
+    The words of `original`, with the tags from `tagged` put in the same
+    places. For a suggestion: the AI may only add tags, never change a
+    word, and anything else it changed is quietly put back.
+    """
+    words = original.split()
+    plan = {}   # word index -> tags that go before it
+    count = 0
+    for token in re.split(r"(\[[^\]]*\])|\s+", tagged or ""):
+        if not token:
+            continue
+        if AUDIO_TAG_RE.fullmatch(token):
+            plan.setdefault(min(count, len(words)), []).append(token.lower())
+        elif not token.isspace():
+            count += 1
+    if count != len(words):
+        # The AI reworded it. Place each tag at the same share of the way through.
+        scaled = {}
+        for index, tags in plan.items():
+            scaled.setdefault(round(index * len(words) / max(1, count)), []).extend(tags)
+        plan = scaled
+    out = []
+    for i, word in enumerate(words + [None]):
+        out.extend(plan.get(i, []))
+        if word is not None:
+            out.append(word)
+    return " ".join(out)
+
+
+def voice_style_of(profile=None):
+    """Expressive voice and Delivery, from a profile or the defaults in Settings."""
+    source = profile if profile is not None else CFG
+    return {
+        "expressive": source.get("expressive_voice") is True,
+        "delivery": normalize_voice_delivery(source.get("voice_delivery")),
+    }
+
+
+def current_voice_style():
+    """The style chat() set for this request, or the Settings defaults."""
+    from flask import has_request_context
+    if has_request_context() and getattr(g, "voice_style", None):
+        return g.voice_style
+    return voice_style_of(None)
+
+
+def alignment_without_tags(voiced, spoken, alignment):
+    """
+    ElevenLabs' per-character timings with any audio tags' characters taken
+    out, so they line up with the reply as everything else sees it. Returned
+    unchanged when the timings already skip the tags; None when they match
+    neither.
+    """
+    if voiced == spoken:
+        return alignment   # no tags: nothing to take out
+    try:
+        chars = [str(c) for c in alignment["characters"]]
+        starts = alignment.get("character_start_times_seconds") or [0.0] * len(chars)
+        ends = alignment["character_end_times_seconds"]
+    except (KeyError, TypeError, AttributeError):
+        return None
+    joined = "".join(chars)
+    if joined == spoken:
+        return alignment
+    def solid(t):
+        return "".join(t.split())
+    if joined != voiced:
+        return alignment if solid(joined) == solid(spoken) else None
+    inside = [False] * len(voiced)
+    for m in AUDIO_TAG_RE.finditer(voiced):
+        for i in range(m.start(), m.end()):
+            inside[i] = True
+    keep = [i for i in range(len(chars)) if not inside[i]]
+    return {
+        "characters": [chars[i] for i in keep],
+        "character_start_times_seconds": [starts[i] for i in keep],
+        "character_end_times_seconds": [ends[i] for i in keep],
+    }
+
+
+def expressive_voice_rules(response_style, language, delivery):
+    """What the AI is told when Expressive voice is on (ElevenLabs voices only)."""
+    examples = "[softly], [laughs], [sighs], [excited], [whispers], [sarcastic], [curious], [nervous], [chuckles], [pause]"
+    if delivery == "calm":
+        examples = "[softly], [warmly], [laughs], [sighs], [calm], [curious], [chuckles], [pause]"
+    common = (
+        "An audio tag is a word or two in square brackets placed right before the words it colours, "
+        f"for example {examples}. The voice performs it; it is never read out.\n"
+        "Write tags in English and lowercase"
+        + (f", even though the words are in {language}" if language != "English" else "")
+        + ".\nTags don't count toward the length.\n"
+    )
+    if delivery == "calm":
+        common += "Keep the delivery calm: never use [shouts] or [yells].\n"
+    if response_style == "reply":
+        return (
+            "VOICE TAGS:\n"
+            "Your reply is spoken by an expressive voice that follows audio tags.\n"
+            + common
+            + "Use them the way an actor uses stage directions: only where they genuinely fit your persona "
+            "and the moment. Usually none to two in a reply, never more than one per sentence.\n"
+            "Let the tags carry the emotion: no words in ALL CAPITALS and no strings of exclamation marks.\n\n"
+        )
+    if response_style == "echo":
+        return (
+            "VOICE TAGS:\n"
+            "The output is spoken by an expressive voice that follows audio tags.\n"
+            + common
+            + "Keep every tag already in the source text exactly as written, in the same place.\n"
+            "You may add at most one or two where the persona's delivery clearly calls for it. "
+            "Adding a tag is the only addition allowed; it never replaces punctuation or words.\n\n"
+        )
+    return ""
+
+
+def audio_tag_keep_rule():
+    """For Clean up and Word for word: tags you typed survive the AI."""
+    return (
+        "AUDIO TAGS:\n"
+        "Words in square brackets, like [whispers] or [laughs], are directions for the voice. "
+        "Keep each one exactly as written, in English, in the same place. Never translate, "
+        "explain or remove them.\n\n"
+    )
+
+
+def calm_delivery_rule():
+    return (
+        "DELIVERY:\n"
+        "The voice must stay calm and even. Never write words in ALL CAPITALS for emphasis, "
+        "and use at most one exclamation mark in the whole output.\n\n"
+    )
+
+
+def _elevenlabs_payload(text, force_v2=False):
     """CHANGED (1.5.0): shared by get_tts_audio() and elevenlabs_tts_timed()."""
-    voice_settings = {"stability": 0.5, "similarity_boost": 0.75}
+    # NEW (1.5.0): Delivery and Expressive voice (see above). Natural, with
+    # no tags, sends exactly what Frivo always sent.
+    style = current_voice_style()
+    delivery = DELIVERY_SETTINGS[normalize_voice_delivery(style.get("delivery"))]
+    if not force_v2 and (style.get("expressive") or has_audio_tags(text)):
+        # v3 has no speed setting; the reply speaks at its natural pace.
+        return {
+            "text": text,
+            "model_id": ELEVEN_V3_MODEL,
+            "voice_settings": {"stability": delivery["v3"]},
+        }
+    if force_v2:
+        text = strip_audio_tags(text)
+    voice_settings = dict(delivery["v2"])
     # Only sent when it isn't the natural pace. Older ElevenLabs models
     # reject an unknown key outright, and there's no reason to risk that on
     # a value that means "leave it alone".
@@ -2607,7 +3234,7 @@ def _elevenlabs_payload(text):
 
     return {
         "text": text,
-        "model_id": "eleven_multilingual_v2",
+        "model_id": ELEVEN_V2_MODEL,
         "voice_settings": voice_settings,
     }
 
@@ -2626,6 +3253,13 @@ def get_tts_audio(text, voice_id, language="English"):
     }
     payload = _elevenlabs_payload(text)   # CHANGED (1.5.0)
     resp = requests.post(url, headers=headers, json=payload, timeout=60)
+    # NEW (1.5.0): an account or voice that can't use v3 still gets spoken,
+    # by the usual model and without the tags. A refusal isn't billed.
+    if resp.status_code in (400, 403, 404, 422) and payload.get("model_id") == ELEVEN_V3_MODEL:
+        log_server_event(f"Expressive voice: v3 refused ({resp.status_code}: {resp.text[:160]}); "
+                         "speaking without tags instead")
+        payload = _elevenlabs_payload(text, force_v2=True)
+        resp = requests.post(url, headers=headers, json=payload, timeout=60)
     if resp.status_code != 200:
         raise RuntimeError(f"ElevenLabs error {resp.status_code}: {resp.text[:300]}")
 
@@ -2662,11 +3296,14 @@ def page_ends_from_alignment(pages, alignment):
     return ends
 
 
-def elevenlabs_tts_timed(text, voice_id, pages):
+def elevenlabs_tts_timed(text, voice_id, pages, voiced=None):
     """
     NEW (1.5.0): ElevenLabs' with-timestamps request. Same voice, same
     credits, and it also says when each character is spoken.
+    CHANGED (1.5.0): `voiced` is the reply with its audio tags, which is what
+    the voice is given; the timings are matched back to `text`.
     """
+    voiced = voiced or text
     import base64
 
     url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}/with-timestamps"
@@ -2675,7 +3312,7 @@ def elevenlabs_tts_timed(text, voice_id, pages):
         "Content-Type": "application/json",
         "Accept": "application/json",
     }
-    resp = requests.post(url, headers=headers, json=_elevenlabs_payload(text), timeout=60)
+    resp = requests.post(url, headers=headers, json=_elevenlabs_payload(voiced), timeout=60)
     if resp.status_code != 200:
         # Refused, so nothing was spoken or billed. The plain request is
         # tried next, and its error is the one you see if it fails too.
@@ -2685,10 +3322,13 @@ def elevenlabs_tts_timed(text, voice_id, pages):
     filename = f"{uuid.uuid4().hex}.mp3"
     with open(os.path.join(AUDIO_DIR, filename), "wb") as f:
         f.write(audio)
-    ends = page_ends_from_alignment(pages, data.get("alignment")) \
-        or page_ends_from_alignment(pages, data.get("normalized_alignment"))
+    # CHANGED (1.5.0): without the tags' characters, which aren't spoken.
+    alignment = alignment_without_tags(voiced, text, data.get("alignment"))
+    normalized = alignment_without_tags(voiced, text, data.get("normalized_alignment"))
+    ends = page_ends_from_alignment(pages, alignment) \
+        or page_ends_from_alignment(pages, normalized)
     # NEW (1.5.0): and when each word is spoken, for the highlight.
-    words = word_times_from_alignment(text, data.get("alignment"))
+    words = word_times_from_alignment(text, alignment)
     return filename, ends, words
 
 
@@ -2754,7 +3394,7 @@ def word_times_from_boundaries(pages, boundaries, page_ends):
     return out
 
 
-def speak_reply(text, voice_id, language, plan):
+def speak_reply(text, voice_id, language, plan, voiced=None):
     """
     NEW (1.5.0): speaks a reply, and says as exactly as it can when things
     happen in it. Returns (filename, page_ends, word_times):
@@ -2766,6 +3406,9 @@ def speak_reply(text, voice_id, language, plan):
                   the voice; None unless exact (ElevenLabs, or a Windows
                   voice that reported its words). Frivo's own free voices
                   don't report words, so they get no highlight.
+
+    CHANGED (1.5.0): `voiced` is the reply with its audio tags. Only
+    ElevenLabs is given it; every other voice says `text`.
     """
     pages = [_CHATBOX_COUNTER_RE.sub("", p["text"]) for p in plan] or [text]
     engine = tts_engine(voice_id)
@@ -2775,11 +3418,11 @@ def speak_reply(text, voice_id, language, plan):
         # back: anything after ElevenLabs said yes may already be billed,
         # and asking again would bill it twice.
         try:
-            filename, ends, words = elevenlabs_tts_timed(text, voice_id, pages)
+            filename, ends, words = elevenlabs_tts_timed(text, voice_id, pages, voiced)
             return filename, (ends if len(pages) > 1 else None), words
         except TimedSpeechUnavailable as e:
             log_server_event(f"Speech timing: falling back to the plain request: {e}")
-            return get_tts_audio(text, voice_id, language), None, None
+            return get_tts_audio(voiced or text, voice_id, language), None, None
     if engine == "piper" and len(pages) <= 1:
         return get_tts_audio(text, voice_id, language), None, None
     if len(pages) <= 1:
@@ -2806,6 +3449,63 @@ def speak_reply(text, voice_id, language, plan):
         # is spoken the usual way and the pages use the estimate.
         log_server_event(f"Speech timing: falling back to an estimate ({engine}): {e!r}")
         return get_tts_audio(text, voice_id, language), None, None
+
+
+# NEW (1.5.0): "Suggest tags" — the AI adds audio tags to a message you're
+# about to send. Only tags: every word stays yours (transplant_audio_tags
+# puts back anything else it changed).
+def build_tag_suggestion_prompt(text, delivery):
+    gentle = (" Keep it calm: no [shouts]." if delivery == "calm" else "")
+    return (
+        "Add ElevenLabs audio tags to the message below. It will be spoken aloud, as the writer's own words, "
+        "by an expressive voice that performs the tags instead of reading them.\n"
+        "An audio tag is a word or two of lowercase English in square brackets, placed right before the words "
+        "it colours. Good ones: [happy], [excited], [sad], [nervous], [curious], [sarcastic], [warmly], "
+        "[softly], [whispers], [slowly], [laughs], [chuckles], [sighs], [gasps], [pause]." + gentle + "\n"
+        "Add one to three, where they clearly fit the feeling of the message; one for a short message. "
+        "Keep any tags already there.\n"
+        "Do not change, add, remove or reorder any word or punctuation.\n"
+        "Output only the message with the tags added.\n\n"
+        f"<MESSAGE>\n{text}\n</MESSAGE>"
+    )
+
+
+@app.route("/api/voice-tags/suggest", methods=["POST"])
+def suggest_voice_tags():
+    data = request.get_json(force=True) or {}
+    text = tidy_audio_tags(str(data.get("text") or "").strip())[:2000]
+    if not strip_audio_tags(text):
+        return jsonify({"error": "Type your message first, then Suggest adds tags to it."}), 400
+    if not CFG.get("openai_api_key") and resolve_provider("chat_provider", CHAT_PROVIDERS) == "openai":
+        return jsonify({"error": "Suggesting tags needs an AI: add your OpenAI key, or pick Ollama for chat replies."}), 400
+    profile = None
+    if data.get("profile_id"):
+        profile = next((p for p in load_profiles() if p["id"] == data.get("profile_id")), None)
+    delivery = voice_style_of(profile)["delivery"]
+    started = time.perf_counter()
+    try:
+        response = create_chat_completion(
+            make_openai_client(),
+            provider=resolve_provider("chat_provider", CHAT_PROVIDERS),
+            model=CFG.get("model", RECOMMENDED_TEXT_MODEL),
+            ollama_model=active_ollama_model(),
+            messages=[{"role": "user", "content": build_tag_suggestion_prompt(text, delivery)}],
+            max_tokens=int(len(text.split()) * 3) + 80,
+            temperature=0.4,
+        )
+        raw = (response.choices[0].message.content or "").strip()
+    except Exception as e:
+        return jsonify({"error": f"Couldn't ask the AI: {e}"}), 502
+    raw = re.sub(r"</?MESSAGE>", "", raw).strip()
+    suggested = transplant_audio_tags(strip_audio_tags(text), tidy_audio_tags(raw))
+    if delivery == "calm":
+        suggested = re.sub(r"\[(?:shouts|shouting|yells|yelling|screams)\]\s*", "", suggested, flags=re.I)
+    added = len(AUDIO_TAG_RE.findall(suggested)) - len(AUDIO_TAG_RE.findall(text))
+    return jsonify({
+        "text": suggested,
+        "added": max(0, added),
+        "seconds": round(time.perf_counter() - started, 2),
+    })
 
 
 def get_tts_audio_timed(text, voice_id, language, plan):
@@ -2995,6 +3695,11 @@ def settings():
             )
         if "language" in data:
             CFG["language"] = normalize_language(data["language"]) or CFG.get("language", "English")
+        # NEW (1.5.0)
+        if "expressive_voice" in data:
+            CFG["expressive_voice"] = data.get("expressive_voice") is True
+        if "voice_delivery" in data:
+            CFG["voice_delivery"] = normalize_voice_delivery(data.get("voice_delivery"), CFG.get("voice_delivery", DEFAULT_VOICE_DELIVERY))
         if "response_style" in data:
             CFG["response_style"] = normalize_response_style(
                 data.get("response_style"), CFG.get("response_style", DEFAULT_RESPONSE_STYLE)
@@ -3093,6 +3798,11 @@ def settings():
             "personality_presets": PERSONALITY_PRESETS,
             "max_words": CFG.get("max_words", 80),
             "speaking_speed": clamp_speaking_speed(CFG.get("speaking_speed", 1.0)),
+            # NEW (1.5.0)
+            "expressive_voice": CFG.get("expressive_voice") is True,
+            "voice_delivery": normalize_voice_delivery(CFG.get("voice_delivery")),
+            "voice_deliveries": VOICE_DELIVERIES,
+            "audio_tag_groups": AUDIO_TAG_GROUPS,
             "min_speaking_speed": MIN_SPEAKING_SPEED,
             "max_speaking_speed": MAX_SPEAKING_SPEED,
             "temperature": clamp_temperature(CFG.get("temperature", 0.7)),
@@ -3690,7 +4400,7 @@ def free_voice_preview():
     voice_id = request.args.get("voice_id") or ""
     if tts_engine(voice_id) not in ("windows", "piper"):   # CHANGED (1.5.0): piper
         return jsonify({"error": "Not a free voice."}), 400
-    problem = free_voice_problem(voice_id, "English")
+    problem = free_voice_problem(voice_id, None)   # CHANGED (1.5.0): a sample is in the voice's own language
     if problem:
         return jsonify({"error": problem}), 503
     # CHANGED (1.5.0): the sample is in the voice's own language.
@@ -3700,7 +4410,7 @@ def free_voice_preview():
     path = os.path.join(AUDIO_DIR, name)
     if not os.path.isfile(path):
         try:
-            made = free_tts_audio(FREE_SAMPLE_LINES.get(code, FREE_SAMPLE_LINES["en"]), voice_id, "English")
+            made = free_tts_audio(FREE_SAMPLE_LINES.get(code, FREE_SAMPLE_LINES["en"]), voice_id, None)
             os.replace(os.path.join(AUDIO_DIR, made), path)
         except Exception as e:
             return jsonify({"error": str(e)}), 500
@@ -4913,6 +5623,9 @@ def profiles():
     language = normalize_language(data.get("language")) or ""
     # NEW (1.5.0)
     follow_length = normalize_follow_length(data.get("follow_length"), response_style)
+    # NEW (1.5.0)
+    expressive_voice = data.get("expressive_voice") is True
+    voice_delivery = normalize_voice_delivery(data.get("voice_delivery"))
 
     if not name or not voice_id:
         return jsonify({"error": "Name and voice are both required."}), 400
@@ -4929,6 +5642,8 @@ def profiles():
             "personality_preset": personality_preset,
             "language": language,
             "follow_length": follow_length,  # NEW (1.5.0)
+            "expressive_voice": expressive_voice,  # NEW (1.5.0)
+            "voice_delivery": voice_delivery,      # NEW (1.5.0)
         }
         all_profiles.append(new_profile)
         save_profiles(all_profiles)
@@ -4975,6 +5690,12 @@ def profile_detail(profile_id):
             match["personality_preset"] = normalize_personality_preset(
                 data.get("personality_preset"), match.get("personality_preset", DEFAULT_PERSONALITY_PRESET)
             )
+        # NEW (1.5.0)
+        if "expressive_voice" in data:
+            match["expressive_voice"] = data.get("expressive_voice") is True
+        if "voice_delivery" in data:
+            match["voice_delivery"] = normalize_voice_delivery(
+                data.get("voice_delivery"), match.get("voice_delivery", DEFAULT_VOICE_DELIVERY))
         # Same "in data" treatment as the personality text: sending "" has
         # to be able to clear the recommendation, not be ignored as falsy.
         # An unrecognised name is a different case though — that's garbage
@@ -5009,7 +5730,9 @@ def preview_prompt():
         personality_preset = profile.get("personality_preset", DEFAULT_PERSONALITY_PRESET)
         response_style = normalize_response_style(profile.get("response_style"), DEFAULT_RESPONSE_STYLE)
         source = profile["name"]
+        preview_voice = profile.get("voice_id", "")   # NEW (1.5.0)
     else:
+        preview_voice = CFG.get("voice_id", "")       # NEW (1.5.0)
         raw_prompt = CFG.get("system_prompt", "")
         personality_preset = CFG.get("personality_preset", DEFAULT_PERSONALITY_PRESET)
         response_style = normalize_response_style(CFG.get("response_style"), DEFAULT_RESPONSE_STYLE)
@@ -5022,7 +5745,10 @@ def preview_prompt():
         max_words = MAX_WORDS
 
     base_prompt = resolve_personality_text(raw_prompt, personality_preset)
-    full = build_system_prompt(base_prompt, max_words, language, response_style)
+    # NEW (1.5.0): with the voice rules chat() would add.
+    full = build_system_prompt(base_prompt, max_words, language, response_style,
+                               voice_style=(voice_style_of(profile if profile_id else None)
+                                            if tts_engine(preview_voice) == "elevenlabs" else None))
 
     # CHANGED (1.5.0): Mimic replaces whatever personality text was resolved
     # above (see build_system_prompt) — mirror that here, so "your_prompt"
@@ -5533,6 +6259,7 @@ def chat():
         )
         response_style = normalize_response_style(profile.get("response_style"), DEFAULT_RESPONSE_STYLE)
         follow_length = normalize_follow_length(profile.get("follow_length"), response_style)  # NEW (1.5.0)
+        voice_style = voice_style_of(profile)   # NEW (1.5.0)
     else:
         voice_id = CFG["voice_id"]
         base_prompt = resolve_personality_text(
@@ -5540,6 +6267,7 @@ def chat():
         )
         response_style = normalize_response_style(CFG.get("response_style"), DEFAULT_RESPONSE_STYLE)
         follow_length = normalize_follow_length(CFG.get("follow_length"), response_style)  # NEW (1.5.0)
+        voice_style = voice_style_of(None)   # NEW (1.5.0)
 
     # NEW (1.5.0): "Follow reply length" off — Response isn't held to the
     # slider either (Echo and Mimic never are, unless it's on; see below).
@@ -5568,7 +6296,19 @@ def chat():
         if problem:
             return jsonify({"error": problem}), 400
 
-    system_prompt = build_system_prompt(base_prompt, max_words, language, response_style)
+    # NEW (1.5.0): Expressive voice and Delivery are for ElevenLabs voices.
+    # A free voice can't perform tags, so any you typed are taken out.
+    if voice_engine == "elevenlabs":
+        g.voice_style = voice_style
+        prompt_voice_style = voice_style
+    else:
+        g.voice_style = {"expressive": False, "delivery": DEFAULT_VOICE_DELIVERY}
+        prompt_voice_style = None
+        message = strip_audio_tags(message) or message
+    message = tidy_audio_tags(message)
+
+    system_prompt = build_system_prompt(base_prompt, max_words, language, response_style,
+                                        voice_style=prompt_voice_style)
     history = get_history(session_id, profile_id, system_prompt)
 
     if response_style == "reply":
@@ -5640,7 +6380,8 @@ def chat():
             spoken = reply.strip()
 
             # NEW (1.5.0): don't take Echo's word for it — check.
-            if response_style == "echo" and language == "English" and not cleanup_stays_on_message(message, spoken):
+            if (response_style == "echo" and language == "English"
+                    and not cleanup_stays_on_message(strip_audio_tags(message), strip_audio_tags(spoken))):
                 plain = build_system_prompt(PERSONALITY_PRESET_MAP[DEFAULT_PERSONALITY_PRESET]["prompt"],
                                             budget, language, "echo")
                 retry, _, _, hit_ceiling, retry_seconds = get_chat_reply(
@@ -5649,7 +6390,7 @@ def chat():
                 )
                 text_seconds += retry_seconds
                 spoken = retry.strip()
-                if not cleanup_stays_on_message(message, spoken):
+                if not cleanup_stays_on_message(strip_audio_tags(message), strip_audio_tags(spoken)):
                     spoken = message
                     hit_ceiling = False
                 kept_exact = True
@@ -5684,9 +6425,24 @@ def chat():
                     was_repaired = True
             english = ""
 
+        # NEW (1.5.0): the voice gets the reply with its audio tags
+        # ("voiced"); everything else gets it without. A free voice gets
+        # no tags at all.
+        if voice_engine == "elevenlabs":
+            voiced = tidy_audio_tags(spoken)
+            if voice_style["delivery"] == "calm":
+                voiced = re.sub(r"\[(?:shouts|shouting|yells|yelling|screams)\]\s*", "", voiced, flags=re.I)
+        else:
+            voiced = strip_audio_tags(spoken)
+        spoken = strip_audio_tags(voiced) or voiced
+        english = strip_audio_tags(english)
+        if not has_audio_tags(voiced):
+            voiced = spoken
+
         # Only the reply goes into history — the translation is tooltip
         # metadata, not part of the conversation.
-        history.append({"role": "assistant", "content": spoken})
+        # CHANGED (1.5.0): with its tags, so the AI sees how it used them.
+        history.append({"role": "assistant", "content": voiced})
 
         # Text-only mode. With the reply going to the VRChat chatbox there
         # are plenty of times the spoken version isn't wanted, and skipping
@@ -5704,7 +6460,8 @@ def chat():
             audio_start = time.perf_counter()
             # CHANGED (1.5.0): also says when the voice finishes each page.
             # CHANGED (1.5.0): speak_reply() also says when each word is spoken.
-            audio_filename, page_ends, word_times = speak_reply(spoken, voice_id, language, chatbox_plan)
+            audio_filename, page_ends, word_times = speak_reply(spoken, voice_id, language, chatbox_plan,
+                                                                voiced=voiced)
             audio_seconds = time.perf_counter() - audio_start
     except Exception as e:
         if history and history[-1].get("role") == "user":
@@ -5714,7 +6471,8 @@ def chat():
     # Recorded here rather than inside get_tts_audio(), so a synthesis that
     # threw partway through isn't billed to the day's total.
     # CHANGED (1.5.0): free voices cost nothing, so count nothing.
-    credits_spent = len(spoken) if speak and voice_engine == "elevenlabs" else 0
+    # CHANGED (1.5.0): tags are characters ElevenLabs is sent, so they count.
+    credits_spent = len(voiced) if speak and voice_engine == "elevenlabs" else 0
 
     # NEW (1.5.0): exact timing, when there is some. Page 1 shows when the
     # voice starts, and each page after it when the voice finishes the last
@@ -5728,6 +6486,12 @@ def chat():
     return jsonify(
         {
             "reply": spoken,
+            # NEW (1.5.0): the reply with its audio tags, for the page to
+            # show; the same as "reply" when it has none.
+            "voiced": voiced,
+            # NEW (1.5.0): which ElevenLabs model spoke it, when one did.
+            "voice_model": (_elevenlabs_payload(voiced)["model_id"]
+                            if speak and voice_engine == "elevenlabs" else ""),
             "english": english,
             # Null rather than a dead path when nothing was synthesised, so
             # the page has something unambiguous to branch on.
@@ -5910,6 +6674,8 @@ def saved_add():
             "file": filename,
             "source": source,
             "text": text[:SAVED_MAX_TEXT],
+            # NEW (1.5.0): with its audio tags, to show them again.
+            "voiced": str(data.get("voiced") or text)[:SAVED_MAX_TEXT + 600],
             "english": str(data.get("english") or "")[:SAVED_MAX_TEXT],
             "language": str(data.get("language") or "English")[:60],
             "voice_name": str(data.get("voice_name") or "")[:120],

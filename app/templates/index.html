@@ -88,6 +88,12 @@
         <circle cx="8" cy="15" r="4"/><path d="M10.9 12.1 20 3M17 6l2.5 2.5M14.5 8.5 17 11"/>
       </symbol>
       <!-- NEW (1.5.0): saved replies -->
+      <!-- NEW (1.5.0): voice tags -->
+      <symbol id="i-sparkle" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 3.5l1.9 4.9a2 2 0 0 0 1.2 1.2l4.9 1.9-4.9 1.9a2 2 0 0 0-1.2 1.2L12 19.5l-1.9-4.9a2 2 0 0 0-1.2-1.2L4 11.5l4.9-1.9a2 2 0 0 0 1.2-1.2z"/>
+        <path d="M19 3v3M17.5 4.5h3"/>
+      </symbol>
       <symbol id="i-bookmark" viewBox="0 0 24 24" fill="none" stroke="currentColor"
               stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
         <path d="M6 4.5A1.5 1.5 0 0 1 7.5 3h9A1.5 1.5 0 0 1 18 4.5V21l-6-4-6 4z"/>
@@ -502,6 +508,28 @@
             <div class="composer">
               <input type="text" id="messageInput" placeholder="Say something…" autocomplete="off">
 
+              <!-- NEW (1.5.0): voice tags, for ElevenLabs voices. A tag is
+                   put in where the cursor is; Suggest asks the AI to add
+                   some to what you've typed. -->
+              <span class="chip-wrap voice-tag-wrap is-hidden" id="voiceTagWrap">
+                <button id="voiceTagBtn" class="btn-mic" type="button" aria-haspopup="dialog"
+                        aria-expanded="false" aria-controls="voiceTagPop"
+                        aria-label="Voice tags" title="Voice tags: how the next words are said">
+                  <svg class="icon-18"><use href="#i-sparkle"/></svg>
+                </button>
+                <div id="voiceTagPop" class="popover voice-tag-pop is-hidden" role="dialog" aria-label="Voice tags">
+                  <div class="voice-tag-head">
+                    <span class="eyebrow">Voice tags</span>
+                    <button type="button" class="btn btn-ghost btn-sm" id="voiceTagSuggest"
+                            title="The AI adds tags that fit what you've typed. Your words stay the same.">
+                      <svg class="icon-14" aria-hidden="true"><use href="#i-sparkle"/></svg> Suggest for my message
+                    </button>
+                  </div>
+                  <div id="voiceTagGroups"></div>
+                  <p class="voice-tag-note" id="voiceTagNote">Goes in where your cursor is. The voice acts it out; it isn't read aloud or sent to the chatbox.</p>
+                </div>
+              </span>
+
               <label class="switch icon-switch" title="Send the message automatically once you stop talking">
                 <span class="switch-label">Auto</span>
                 <input type="checkbox" id="autoSendToggle">
@@ -753,6 +781,24 @@
                       <input type="range" id="speakingSpeedSlider" min="70" max="120" step="1" value="100" aria-label="Speaking speed">
                     </span>
                     <span class="srow-number" id="speakingSpeedValue">100%</span>
+                  </div>
+                  <!-- NEW (1.5.0): for the default profile; each profile has its own. -->
+                  <label class="srow">
+                    <span class="srow-main srow-main--flex">
+                      <span class="srow-label">Expressive voice</span>
+                      <span class="srow-sub">The AI adds voice tags like [laughs] where they fit. ElevenLabs voices; uses the v3 model, which ignores Speaking speed. For the default profile.</span>
+                    </span>
+                    <span class="switch">
+                      <input type="checkbox" id="expressiveVoiceToggle">
+                      <span class="switch-track" aria-hidden="true"></span>
+                    </span>
+                  </label>
+                  <div class="srow">
+                    <span class="srow-main srow-main--flex">
+                      <span class="srow-label">Delivery</span>
+                      <span class="srow-sub" id="voiceDeliveryNote">Calm keeps the voice from shouting.</span>
+                    </span>
+                    <div class="radio-row" id="voiceDeliveryRadios" role="radiogroup" aria-label="Delivery"></div>
                   </div>
                   <div class="srow">
                     <span class="srow-main srow-main--flex">
@@ -1382,6 +1428,13 @@
         <span class="voice-foot-actions">
           <button id="voiceHiddenNote" class="link-btn is-hidden" type="button"></button>
           <button id="voiceFilterClear" class="btn-ghost btn-sm is-hidden" type="button">Clear filters</button>
+          <!-- NEW (1.5.0): add a Piper voice of your own -->
+          <button id="voiceAddBtn" class="btn-ghost btn-sm" type="button"
+                  title="Add a Piper voice: its .onnx and .onnx.json files, or an archive with them in it">
+            <svg class="icon-14" aria-hidden="true"><use href="#i-plus"/></svg>Add a voice
+          </button>
+          <input type="file" id="voiceAddInput" class="is-hidden" multiple
+                 accept=".onnx,.json,.zip,.gz,.tgz,.bz2,.tbz2,.tar,application/zip,application/gzip,application/x-bzip2,application/json">
         </span>
       </p>
     </div>
@@ -1451,6 +1504,26 @@
             <span class="switch-track" aria-hidden="true"></span>
           </span>
         </label>
+      </div>
+
+      <!-- NEW (1.5.0): how the voice performs (ElevenLabs voices). -->
+      <div class="field">
+        <label class="field-toggle">
+          <span class="field-toggle-text">
+            <span class="field-toggle-label">Expressive voice</span>
+            <span class="field-hint" id="profileExpressiveHint">The AI adds voice tags like [laughs] or [softly] where they fit, and the voice acts them out. ElevenLabs voices only.</span>
+          </span>
+          <span class="switch">
+            <input type="checkbox" id="profileExpressive">
+            <span class="switch-track" aria-hidden="true"></span>
+          </span>
+        </label>
+      </div>
+
+      <div class="field">
+        <label>Delivery</label>
+        <div class="radio-row" id="profileDeliveryRadios" role="radiogroup" aria-label="Delivery"></div>
+        <p class="field-note" id="profileDeliveryNote"></p>
       </div>
 
       <div class="field">

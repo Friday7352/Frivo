@@ -447,3 +447,7 @@ Double-click `tests/check-windows-voices.bat` on a Windows PC. It runs the real 
 ## test-conversation-kept.py (1.5.0)
 
 `python3 tests/test-conversation-kept.py` checks, in a real browser, that messages (with their times, word timings and Save state) and dividers come back after a refresh, in order, without playing; that a restored reply loads its audio on a click and plays with its words glowing; that one whose audio was cleaned up says so; that Clear forgets the conversation; and that the volume chip neither moves nor changes width while its slider is dragged.
+
+- `test-custom-voices.py`: downloads a small Piper voice once, then adds it as plain files, a zip, a tar.gz and a sherpa-onnx archive; checks that programs, broken files and duplicates are refused with nothing left behind, and that rename, remove and the language check work.
+
+- `test-voice-tags.py`: voice tags and Delivery. What ElevenLabs is sent for each setting, that the chatbox, word count and free voices never get tags, that Expressive voice tells the AI about them, that Suggest keeps every word, and that a refused v3 still speaks.

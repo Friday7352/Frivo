@@ -1583,7 +1583,10 @@ function addTurn(who, text, opts = {}) {
   body.className = "bubble";
   const textEl = document.createElement("span");
   textEl.className = "bubble-text";
-  textEl.textContent = text;
+  // CHANGED (1.5.0): voice tags ([laughs], [softly]) show as small marks.
+  // A reply's tags come in opts.voiced; what you typed has them in it.
+  if (typeof fillBubbleText === "function") fillBubbleText(textEl, isYou ? text : (opts.voiced || text));
+  else textEl.textContent = text;
   body.appendChild(textEl);
 
   // Wall-clock time, floated into the last line of the bubble the way every
@@ -1803,6 +1806,7 @@ async function loadSettings() {
     lengthSlider.value = data.max_words;
   }
   applyServerTuning(data);
+  if (typeof applyVoiceStyleSettings === "function") applyVoiceStyleSettings(data);   // NEW (1.5.0)
   updateFaderReadout();
   updateTextModelEstimate();
   updateTranslationModelEstimate();
@@ -1893,6 +1897,9 @@ async function saveAllSettings({ close = false, quiet = false } = {}) {
     personality_preset: personalityPresetSelect.value,
     max_words: parseInt(lengthSlider.value, 10),
     speaking_speed: speakingSpeedSlider ? parseInt(speakingSpeedSlider.value, 10) / 100 : 1,
+    // NEW (1.5.0): Expressive voice and Delivery, for the default profile.
+    expressive_voice: $("expressiveVoiceToggle") ? $("expressiveVoiceToggle").checked : false,
+    voice_delivery: $("voiceDeliveryRadios") ? getRadioValue($("voiceDeliveryRadios"), "natural") : "natural",
     temperature: temperatureSlider ? parseInt(temperatureSlider.value, 10) / 100 : 0.7,
     max_tokens: readMaxTokensSetting(),
     language: currentLanguage,
@@ -2945,11 +2952,13 @@ function voiceEngine(v) {
   const id = v.voice_id || "";
   // CHANGED (1.5.0): Kokoro is gone; "onecore:" is the newer Windows voices,
   // and "piper:" the voices included with Frivo.
+  if (id.startsWith("piper:custom-")) return "custom";   // NEW (1.5.0): a voice you added
   if (id.startsWith("piper:")) return "piper";
   if (id.startsWith("windows:") || id.startsWith("onecore:")) return "windows";
   return "elevenlabs";
 }
 const VOICE_ENGINE_GROUPS = [
+  ["custom", "Free · added by you", "no credits", true],         // NEW (1.5.0)
   ["piper", "Free · included with Frivo", "no credits", true],   // NEW (1.5.0)
   ["windows", "Free · built into Windows", "no credits", true],
   ["elevenlabs", "ElevenLabs", "uses credits", false],
@@ -3157,6 +3166,28 @@ function openVoiceMenu(anchor, v) {
     renderVoiceList();
   });
   item("Voice details", "i-spark", () => showVoiceTip(anchor, v));
+  // NEW (1.5.0): a voice you added can be renamed or removed.
+  if (voiceEngine(v) === "custom") {
+    const key = v.voice_id.slice("piper:".length);
+    item("Rename", "i-edit", async () => {
+      const name = window.prompt("A name for this voice", v.name);
+      if (!name || !name.trim()) return;
+      const res = await fetch(`/api/voices/custom/${encodeURIComponent(key)}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: name.trim() }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) { setStatus(data.error || "Couldn't rename it.", true); return; }
+      setStatus(`Renamed to ${data.name}.`);
+      await loadVoices();
+    });
+    item("Remove this voice", "i-trash", async () => {
+      if (!window.confirm(`Remove ${v.name}? Its files are deleted from this PC.`)) return;
+      const res = await fetch(`/api/voices/custom/${encodeURIComponent(key)}`, { method: "DELETE" });
+      if (!res.ok) { setStatus("Couldn't remove it.", true); return; }
+      setStatus(`${v.name} removed.`);
+      await loadVoices();
+    });
+  }
   if (v.category) {
     item(`Hide all ${categoryLabel(v.category)} voices`, "i-close", () => {
       toggleHiddenCategory(v.category);
@@ -3311,6 +3342,7 @@ function renderVoiceList() {
     });
   });
 
+  voiceFoot.classList.remove("is-error");   // NEW (1.5.0): after an "Add a voice" problem
   voiceFoot.textContent =
     matches.length === allVoices.length
       ? `${allVoices.length} voices`
@@ -3637,6 +3669,7 @@ function openModal(profile) {
   followLengthTouched = Boolean(profile && typeof profile.follow_length === "boolean");
   profileFollowLength.checked = followLengthTouched ? profile.follow_length : startStyle === "reply";
   updateFollowLengthHint(startStyle);
+  if (typeof fillProfileVoiceStyle === "function") fillProfileVoiceStyle(profile);   // NEW (1.5.0)
   buildRadioGroup(
     profileResponseStyleRadios,
     responseStyles,
@@ -3758,6 +3791,8 @@ profileModalSave.addEventListener("click", async () => {
     system_prompt: systemPrompt,
     response_style: getRadioValue(profileResponseStyleRadios, "echo"),
     follow_length: profileFollowLength.checked,  // NEW (1.5.0)
+    expressive_voice: $("profileExpressive") ? $("profileExpressive").checked : false,   // NEW (1.5.0)
+    voice_delivery: $("profileDeliveryRadios") ? getRadioValue($("profileDeliveryRadios"), "natural") : "natural",   // NEW (1.5.0)
     personality_preset: profilePersonalityPresetSelect.value,
     language: profileLanguageSelect.value,
   };
@@ -6206,11 +6241,13 @@ async function send() {
       textEngineName: data.text_engine_name || (data.text_seconds ? "" : "No AI"),  // NEW (1.5.0)
       voiceEngine: data.voice_engine,  // NEW (1.5.0)
       wordTimes: data.word_times,  // NEW (1.5.0): exact word timings, or null
+      voiced: data.voiced && data.voiced !== data.reply ? data.voiced : undefined,  // NEW (1.5.0): with its voice tags
       footer: pager ? pager.el : null,  // NEW (1.5.0)
       // NEW (1.5.0): what the Save button keeps, so it can be played again.
       saveData: data.audio_url ? {
         audio_url: data.audio_url,
         text: data.reply,
+        voiced: data.voiced || data.reply,   // NEW (1.5.0)
         english: data.english,
         language: data.language,
         voice_name: typeof activeVoiceName === "function" ? activeVoiceName() : "",
@@ -7889,6 +7926,7 @@ window.addEventListener("pagehide", () => {
     ["volumeChip", "volumePop"],
     ["oscChip", "oscPop"],
     ["aiChip", "aiPop"],   // NEW (1.5.0)
+    ["voiceTagBtn", "voiceTagPop"],   // NEW (1.5.0)
     ["statusPillBtn", "statusPop"],
   ].map(([b, p]) => ({ btn: $(b), pop: $(p) })).filter((x) => x.btn && x.pop);
 
@@ -7910,6 +7948,7 @@ window.addEventListener("pagehide", () => {
       btn.setAttribute("aria-expanded", opening ? "true" : "false");
       if (opening && pop.id === "lengthPop" && typeof refreshPromptIfOpen === "function") refreshPromptIfOpen();
       if (opening && pop.id === "aiPop" && typeof refreshAiPop === "function") refreshAiPop();   // NEW (1.5.0)
+      if (opening && pop.id === "voiceTagPop" && typeof openVoiceTags === "function") openVoiceTags();   // NEW (1.5.0)
     });
     pop.addEventListener("click", (e) => e.stopPropagation());
   });
@@ -8579,19 +8618,26 @@ function makeSpeechVisuals(bubble, wordTimes) {
     if (words !== null) return;
     words = [];
     if (!Array.isArray(wordTimes) || !wordTimes.length || !textEl) return;
-    const parts = textEl.textContent.split(/(\s+)/).filter((p) => p.length);
-    const count = parts.filter((p) => !/^\s+$/.test(p)).length;
+    // CHANGED (1.5.0): voice-tag marks stay as they are; only the words
+    // around them are wrapped.
+    const nodes = Array.from(textEl.childNodes);
+    const pieces = nodes.map((n) => (n.nodeType === 3 ? n.textContent.split(/(\s+)/).filter((p) => p.length) : null));
+    const count = pieces.reduce((sum, parts) => sum + (parts ? parts.filter((p) => !/^\s+$/.test(p)).length : 0), 0);
     if (count !== wordTimes.length) return;   // not word for word: no highlight
     const frag = document.createDocumentFragment();
     let k = 0;
-    parts.forEach((part) => {
-      if (/^\s+$/.test(part)) { frag.append(part); return; }
-      const span = document.createElement("span");
-      span.className = "spoken-word";
-      span.textContent = part;
-      frag.append(span);
-      const [start, end] = wordTimes[k++];
-      words.push({ el: span, start: Number(start) || 0, end: Number(end) || 0 });
+    nodes.forEach((node, n) => {
+      const parts = pieces[n];
+      if (!parts) { frag.append(node); return; }
+      parts.forEach((part) => {
+        if (/^\s+$/.test(part)) { frag.append(part); return; }
+        const span = document.createElement("span");
+        span.className = "spoken-word";
+        span.textContent = part;
+        frag.append(span);
+        const [start, end] = wordTimes[k++];
+        words.push({ el: span, start: Number(start) || 0, end: Number(end) || 0 });
+      });
     });
     textEl.replaceChildren(frag);
     bubble.classList.add("has-word-timing");
@@ -9010,6 +9056,7 @@ async function playSaved(item) {
     voiceEngine: saved.voice_engine,
     voiceEngineName: saved.voice_engine_name,
     wordTimes: saved.word_times,
+    voiced: saved.voiced && saved.voiced !== saved.text ? saved.voiced : undefined,   // NEW (1.5.0)
     footer: pager ? pager.el : null,
     saved: true,
     spoke: true,
@@ -9106,4 +9153,285 @@ function forgetTranscript() {
   transcript = records;
   logEl.scrollTop = logEl.scrollHeight;
   requestAnimationFrame(() => requestAnimationFrame(() => logBody.classList.remove("is-restoring")));
+})();
+
+
+// NEW (1.5.0): adding a Piper voice of your own, from the voice list.
+// Picks the files (the .onnx and its .onnx.json, or an archive), sends them
+// to Frivo, which converts, tries and keeps the voice. Nothing is run.
+(function wireAddVoice() {
+  const btn = $("voiceAddBtn");
+  const input = $("voiceAddInput");
+  if (!btn || !input) return;
+  btn.addEventListener("click", () => input.click());
+  input.addEventListener("change", async () => {
+    const files = Array.from(input.files || []);
+    input.value = "";
+    if (!files.length) return;
+    // The status line is behind the voice list, so say it in its footer too.
+    const foot = $("voiceFoot");
+    const say = (text, isError) => {
+      setStatus(text, isError);
+      if (foot) { foot.textContent = text; foot.classList.toggle("is-error", Boolean(isError)); }
+    };
+    const bad = files.find((f) => /\.(exe|vb|vbs|bat|cmd|ps1|msi|dll|js)$/i.test(f.name));
+    if (bad) {
+      say(`${bad.name} is a program, not a voice. A voice is an .onnx file with its .onnx.json.`, true);
+      return;
+    }
+    const form = new FormData();
+    files.forEach((f) => form.append("files", f, f.name));
+    btn.disabled = true;
+    const label = btn.lastChild;
+    const before = label.textContent;
+    label.textContent = "Adding…";
+    setStatus("Adding the voice: converting it and trying it out…");
+    say("Adding the voice: converting it and trying it out…");
+    try {
+      const res = await fetch("/api/voices/custom", { method: "POST", body: form });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "That voice couldn't be added.");
+      await loadVoices();
+      say(`${data.name} added. It's under "Free · added by you".`);
+      const added = typeof voiceById === "function" ? voiceById(data.voice_id) : null;
+      if (added) {
+        const row = voiceRows.find((r) => r.voice.voice_id === data.voice_id);
+        if (row) { row.row.scrollIntoView({ block: "center" }); popOnce(row.row); }
+      }
+    } catch (err) {
+      say(err.message, true);
+    } finally {
+      btn.disabled = false;
+      label.textContent = before;
+    }
+  });
+})();
+
+// ---------------------------------------------------------------------------
+// NEW (1.5.0): Voice tags and Delivery (ElevenLabs voices)
+//
+// A voice tag is a word or two in square brackets, like [laughs] or
+// [softly], that ElevenLabs' v3 voice acts out instead of reading. The ✦
+// button in the message box puts one in where the cursor is, or asks the AI
+// to suggest some for what you've typed. A profile with Expressive voice on
+// lets the AI add them to its own replies. In the conversation they show
+// as small marks; the chatbox never sees them.
+// ---------------------------------------------------------------------------
+
+var VOICE_TAG_RE = /\[([A-Za-z][A-Za-z' \-]{0,38})\]/g;
+var voiceDeliveries = [
+  { id: "calm", name: "Calm", description: "Steady and even. Doesn't shout." },
+  { id: "natural", name: "Natural", description: "The voice as it comes." },
+  { id: "lively", name: "Lively", description: "Bigger ups and downs. Can get loud." },
+];
+var audioTagGroups = [
+  { name: "Feeling", tags: ["happy", "excited", "sad", "nervous", "curious", "sarcastic", "annoyed", "warmly"] },
+  { name: "Voice", tags: ["softly", "whispers", "calm", "slowly", "quickly", "dramatically", "shouts"] },
+  { name: "Sounds", tags: ["laughs", "chuckles", "giggles", "sighs", "gasps", "clears throat", "pause"] },
+];
+
+// The bubble's text, with each tag as a mark. The mark's word is drawn by
+// CSS, so the bubble's text (copying, the word highlight) is only what's said.
+function fillBubbleText(el, text) {
+  text = String(text || "");
+  // Its own copy: a restored conversation is drawn before this file has
+  // finished loading.
+  const re = /\[([A-Za-z][A-Za-z' \-]{0,38})\]/g;
+  if (!re.test(text)) { el.textContent = text; return; }
+  re.lastIndex = 0;
+  const frag = document.createDocumentFragment();
+  let last = 0;
+  let m;
+  while ((m = re.exec(text))) {
+    if (m.index > last) frag.append(text.slice(last, m.index));
+    const mark = document.createElement("span");
+    mark.className = "voice-tag";
+    mark.dataset.tag = m[1].toLowerCase();
+    mark.title = `Voice tag: ${m[1].toLowerCase()} (acted out, not said)`;
+    frag.append(mark);
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) frag.append(text.slice(last));
+  el.replaceChildren(frag);
+}
+
+function deliveryNoteText(id) {
+  const d = voiceDeliveries.find((x) => x.id === id);
+  return d ? d.description : "";
+}
+
+function applyVoiceStyleSettings(data) {
+  if (Array.isArray(data.voice_deliveries) && data.voice_deliveries.length) voiceDeliveries = data.voice_deliveries;
+  if (Array.isArray(data.audio_tag_groups) && data.audio_tag_groups.length) audioTagGroups = data.audio_tag_groups;
+  const toggle = $("expressiveVoiceToggle");
+  if (toggle) toggle.checked = data.expressive_voice === true;
+  const radios = $("voiceDeliveryRadios");
+  const note = $("voiceDeliveryNote");
+  if (radios) {
+    const pick = data.voice_delivery || "natural";
+    buildRadioGroup(radios, voiceDeliveries, "voiceDeliverySettings", pick, (id) => {
+      if (note) note.textContent = deliveryNoteText(id);
+    });
+    if (note) note.textContent = deliveryNoteText(pick);
+  }
+  renderVoiceTagGroups();
+}
+
+function fillProfileVoiceStyle(profile) {
+  const expressive = $("profileExpressive");
+  const radios = $("profileDeliveryRadios");
+  const note = $("profileDeliveryNote");
+  const hint = $("profileExpressiveHint");
+  const defaults = {
+    expressive: $("expressiveVoiceToggle") ? $("expressiveVoiceToggle").checked : false,
+    delivery: $("voiceDeliveryRadios") ? getRadioValue($("voiceDeliveryRadios"), "natural") : "natural",
+  };
+  if (expressive) expressive.checked = profile ? profile.expressive_voice === true : defaults.expressive;
+  const pick = profile ? (profile.voice_delivery || "natural") : defaults.delivery;
+  if (radios) {
+    buildRadioGroup(radios, voiceDeliveries, "voiceDeliveryProfile", pick, (id) => {
+      if (note) note.textContent = deliveryNoteText(id);
+    });
+  }
+  if (note) note.textContent = deliveryNoteText(pick);
+  if (hint) {
+    const voiceId = profile ? profile.voice_id : (typeof activeVoiceId === "function" ? activeVoiceId() : "");
+    const eleven = voiceId && voiceEngine({ voice_id: voiceId }) === "elevenlabs";
+    hint.textContent = eleven
+      ? "The AI adds voice tags like [laughs] or [softly] where they fit, and the voice acts them out. Uses ElevenLabs' v3 model."
+      : "For ElevenLabs voices. This profile has a free voice, so these do nothing until it has an ElevenLabs one.";
+  }
+}
+
+function renderVoiceTagGroups() {
+  const box = $("voiceTagGroups");
+  if (!box) return;
+  box.replaceChildren();
+  audioTagGroups.forEach((group) => {
+    const row = document.createElement("div");
+    row.className = "voice-tag-group";
+    const name = document.createElement("span");
+    name.className = "voice-tag-group-name";
+    name.textContent = group.name;
+    const chips = document.createElement("div");
+    chips.className = "voice-tag-chips";
+    (group.tags || []).forEach((tag) => {
+      const chip = document.createElement("button");
+      chip.type = "button";
+      chip.className = "voice-tag-chip";
+      chip.textContent = tag;
+      chip.title = `Put [${tag}] in your message`;
+      chip.addEventListener("click", () => {
+        insertVoiceTag(tag);
+        if (typeof popOnce === "function") popOnce(chip);
+      });
+      chips.append(chip);
+    });
+    row.append(name, chips);
+    box.append(row);
+  });
+}
+
+function insertVoiceTag(tag) {
+  const input = $("messageInput");
+  if (!input) return;
+  const value = input.value;
+  const start = Number.isInteger(input.selectionStart) ? input.selectionStart : value.length;
+  const end = Number.isInteger(input.selectionEnd) ? input.selectionEnd : start;
+  const before = value.slice(0, start);
+  const after = value.slice(end);
+  const lead = before && !/\s$/.test(before) ? " " : "";
+  const trail = after && /^\s/.test(after) ? "" : " ";
+  const piece = `${lead}[${tag}]${trail}`;
+  input.value = before + piece + after;
+  const caret = before.length + piece.length;
+  input.focus();
+  try { input.setSelectionRange(caret, caret); } catch (err) { /* not focusable yet */ }
+  if (typeof cancelAutoSend === "function") cancelAutoSend();
+  if (typeof setTypedByHand === "function") setTypedByHand(true);
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
+function openVoiceTags() {
+  const note = $("voiceTagNote");
+  if (note && !note.dataset.busy) {
+    note.classList.remove("is-error");
+    note.textContent = "Goes in where your cursor is. The voice acts it out; it isn't read aloud or sent to the chatbox.";
+  }
+}
+
+function updateVoiceTagButton() {
+  const wrap = $("voiceTagWrap");
+  if (!wrap || typeof activeVoiceId !== "function") return;
+  const id = activeVoiceId();
+  const eleven = Boolean(id) && voiceEngine({ voice_id: id }) === "elevenlabs";
+  wrap.classList.toggle("is-hidden", !eleven);
+  if (!eleven) {
+    const pop = $("voiceTagPop");
+    if (pop) pop.classList.add("is-hidden");
+  }
+}
+
+(function wireVoiceTags() {
+  renderVoiceTagGroups();
+  const suggest = $("voiceTagSuggest");
+  const note = $("voiceTagNote");
+  const input = $("messageInput");
+  if (suggest && input) {
+    suggest.addEventListener("click", async () => {
+      const before = input.value;
+      if (!before.replace(VOICE_TAG_RE, "").trim()) {
+        if (note) { note.classList.add("is-error"); note.textContent = "Type your message first, then Suggest adds tags to it."; }
+        return;
+      }
+      suggest.disabled = true;
+      suggest.classList.add("is-busy");
+      if (note) { note.classList.remove("is-error"); note.dataset.busy = "1"; note.textContent = "Finding the right places…"; }
+      try {
+        const res = await fetch("/api/voice-tags/suggest", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: before, profile_id: currentProfileId || null }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Couldn't suggest tags.");
+        if (input.value !== before) return;   // you kept typing; don't overwrite it
+        if (!data.added) {
+          if (note) note.textContent = "Nothing to add: it reads fine as it is.";
+          return;
+        }
+        input.value = data.text;
+        if (typeof cancelAutoSend === "function") cancelAutoSend();
+        if (typeof setTypedByHand === "function") setTypedByHand(true);
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        if (note) {
+          note.replaceChildren(`Added ${data.added} tag${data.added === 1 ? "" : "s"}. `);
+          const undo = document.createElement("button");
+          undo.type = "button";
+          undo.className = "link-btn";
+          undo.textContent = "Undo";
+          undo.addEventListener("click", () => {
+            input.value = before;
+            input.dispatchEvent(new Event("input", { bubbles: true }));
+            note.textContent = "Put back as you typed it.";
+            input.focus();
+          });
+          note.append(undo);
+        }
+      } catch (err) {
+        if (note) { note.classList.add("is-error"); note.textContent = err.message; }
+      } finally {
+        suggest.disabled = false;
+        suggest.classList.remove("is-busy");
+        if (note) delete note.dataset.busy;
+      }
+    });
+  }
+  // Shown only for an ElevenLabs voice: the voice chip's name changes
+  // whenever the voice or the profile does.
+  const name = $("voiceTriggerName");
+  if (name && typeof MutationObserver === "function") {
+    new MutationObserver(updateVoiceTagButton).observe(name, { childList: true, characterData: true, subtree: true });
+  }
+  updateVoiceTagButton();
 })();
