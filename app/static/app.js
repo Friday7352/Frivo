@@ -1917,6 +1917,7 @@ async function saveAllSettings({ close = false, quiet = false } = {}) {
     expressive_voice: $("expressiveVoiceToggle") ? $("expressiveVoiceToggle").checked : false,
     hold_accent: $("holdAccentRadios") ? getRadioValue($("holdAccentRadios"), "anchor") : "anchor",   // NEW (1.5.0)
     voice_accent: $("voiceAccentSelect") ? $("voiceAccentSelect").value : "auto",   // NEW (1.5.0)
+    expressive_model: $("expressiveModelRadios") ? getRadioValue($("expressiveModelRadios"), "eleven_v4") : "eleven_v4",   // NEW (1.5.0)
     voice_delivery: $("voiceDeliveryRadios") ? getRadioValue($("voiceDeliveryRadios"), "natural") : "natural",
     temperature: temperatureSlider ? parseInt(temperatureSlider.value, 10) / 100 : 0.7,
     max_tokens: readMaxTokensSetting(),
@@ -3032,6 +3033,13 @@ function iconNode(name, cls) {
   return svg;
 }
 
+// NEW (1.5.0): the voice-tag labels in the voice list.
+const TAG_FIT_LABELS = {
+  made: { label: "v4 ready", title: "ElevenLabs lists this voice as made for its expressive models (v3/v4). Best for voice tags." },
+  clone: { label: "tags", title: "A voice clone or designed voice: the kind ElevenLabs recommends for voice tags." },
+  older: { label: "older", title: "A voice from before the expressive models. Tags work, but it may drift between accents with them." },
+};
+
 function voiceRowNode(v) {
   const isCurrent = v.voice_id === activeVoiceId();
 
@@ -3055,7 +3063,22 @@ function voiceRowNode(v) {
 
   const name = document.createElement("span");
   name.className = "voice-name";
-  name.textContent = voiceShortName(v);
+  // NEW (1.5.0): how well it takes voice tags, from what ElevenLabs reports.
+  // The name shortens before the label does.
+  const fit = TAG_FIT_LABELS[v.tag_fit];
+  if (fit) {
+    const text = document.createElement("span");
+    text.className = "voice-name-text";
+    text.textContent = voiceShortName(v);
+    const badge = document.createElement("span");
+    badge.className = `voice-fit is-${v.tag_fit}`;
+    badge.textContent = fit.label;
+    badge.title = fit.title;
+    name.classList.add("has-fit");
+    name.append(text, badge);
+  } else {
+    name.textContent = voiceShortName(v);
+  }
 
   const lang = document.createElement("span");
   lang.className = "voice-lang";
@@ -9315,6 +9338,17 @@ function applyVoiceStyleSettings(data) {
     buildRadioGroup(hold, data.hold_accent_modes, "holdAccentSettings", pick, (id) => { describe(id); showAnchorRows(); });
     describe(pick);
   }
+  const models = $("expressiveModelRadios");
+  const modelNote = $("expressiveModelNote");
+  if (models && Array.isArray(data.expressive_models) && data.expressive_models.length) {
+    const pickModel = data.expressive_model || "eleven_v4";
+    const sayModel = (id) => {
+      const m = data.expressive_models.find((x) => x.id === id);
+      if (modelNote) modelNote.textContent = m ? m.description : "";
+    };
+    buildRadioGroup(models, data.expressive_models, "expressiveModelSettings", pickModel, sayModel);
+    sayModel(pickModel);
+  }
   const accent = $("voiceAccentSelect");
   if (accent && Array.isArray(data.voice_accents) && data.voice_accents.length) {
     fillOptionList(accent, data.voice_accents, data.voice_accent || "auto");
@@ -9354,7 +9388,7 @@ function fillProfileVoiceStyle(profile) {
     const voiceId = profile ? profile.voice_id : (typeof activeVoiceId === "function" ? activeVoiceId() : "");
     const eleven = voiceId && voiceEngine({ voice_id: voiceId }) === "elevenlabs";
     hint.textContent = eleven
-      ? "The AI adds voice tags like [laughs] or [softly] where they fit, and the voice acts them out. Uses ElevenLabs' v3 model."
+      ? "The AI adds voice tags like [laughs] or [softly] where they fit, and the voice acts them out. Uses ElevenLabs' v4 model (Settings > Voices > Tags model)."
       : "For ElevenLabs voices. This profile has a free voice, so these do nothing until it has an ElevenLabs one.";
   }
 }

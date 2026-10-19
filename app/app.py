@@ -679,7 +679,11 @@ def load_config():
         "expressive_voice": False,
         "voice_delivery": "natural",
         # NEW (1.5.0): continuity between v3 lines (see _elevenlabs_payload).
-        "hold_accent": "anchor",
+        # CHANGED (1.5.0): Off by default. Anchor and Follow hold the accent
+        # by pulling every line toward another recording, which dulls the
+        # tags; v4 and its Similarity setting hold it without that.
+        "hold_accent": "off",
+        "expressive_model": "eleven_v4",   # NEW (1.5.0)
         "voice_accent": "auto",   # NEW (1.5.0): the accent the anchor is made in
         # Sampling temperature for the reply. 0.7 is the long-standing
         # OpenAI default and what this app used implicitly before the
@@ -779,6 +783,16 @@ def save_profiles(profiles):
 
 
 CFG = load_config()
+# NEW (1.5.0): once, when v4 arrived: Hold the accent goes back to Off (it
+# dulled the tags), and expressive lines move to v4.
+if not CFG.get("_moved_to_v4"):
+    CFG["hold_accent"] = "off"
+    CFG["expressive_model"] = "eleven_v4"
+    CFG["_moved_to_v4"] = True
+    try:
+        save_config(CFG)
+    except Exception:
+        pass
 
 
 def clamp_words(value, fallback=80):
@@ -3022,6 +3036,45 @@ def warm_free_voices():
 AUDIO_TAG_RE = re.compile(r"\[([A-Za-z][A-Za-z' \-]{0,38})\]")
 ELEVEN_V2_MODEL = "eleven_multilingual_v2"
 ELEVEN_V3_MODEL = "eleven_v3"
+# NEW (1.5.0): Eleven v4 (September 2026). ElevenLabs: "Eleven v4 and
+# Eleven v3 support audio tags. We recommend Eleven v4", "a net upgrade
+# over Eleven v3, delivering better results in almost every case". The
+# same tags work with both. v4 Turbo is the low-latency one.
+ELEVEN_V4_MODEL = "eleven_v4"
+ELEVEN_V4_TURBO_MODEL = "eleven_v4_turbo"
+EXPRESSIVE_MODELS = [
+    {"id": ELEVEN_V4_MODEL, "name": "v4", "description": "ElevenLabs' newest expressive model, and the one they recommend for tags."},
+    {"id": ELEVEN_V4_TURBO_MODEL, "name": "v4 Turbo", "description": "v4, faster to start speaking. A little less polished."},
+    {"id": ELEVEN_V3_MODEL, "name": "v3", "description": "The previous expressive model, which Frivo used before v4."},
+]
+EXPRESSIVE_MODEL_IDS = {m["id"] for m in EXPRESSIVE_MODELS}
+DEFAULT_EXPRESSIVE_MODEL = ELEVEN_V4_MODEL
+V4_SIMILARITY = 0.85
+# A model ElevenLabs refused (not on the account yet, say) is skipped for an
+# hour: v4 steps down to v3, and v3 to the standard model without tags.
+REFUSED_MODELS = {}   # model id -> when it was refused
+
+
+def is_expressive_model(model_id):
+    return model_id in EXPRESSIVE_MODEL_IDS
+
+
+def normalize_expressive_model(value, fallback=DEFAULT_EXPRESSIVE_MODEL):
+    value = str(value or "").strip().lower()
+    return value if value in EXPRESSIVE_MODEL_IDS else fallback
+
+
+def expressive_model():
+    """The expressive model to use now: the chosen one, unless it was just refused."""
+    chosen = normalize_expressive_model(CFG.get("expressive_model"))
+    for model in (chosen, ELEVEN_V3_MODEL):
+        if time.time() - REFUSED_MODELS.get(model, 0) > 3600:
+            return model
+    return None   # nothing expressive works: the standard model, without tags
+
+
+def model_label(model_id):
+    return {ELEVEN_V4_MODEL: "v4", ELEVEN_V4_TURBO_MODEL: "v4 Turbo", ELEVEN_V3_MODEL: "v3"}.get(model_id, "standard (v2)")
 # NEW (1.5.0): accent tags ([british accent]) change who the voice is. Only
 # kept when you typed them yourself.
 ACCENT_TAG_RE = re.compile(r"\[[^\]\n]*\baccent\b[^\]\n]*\]\s*", re.I)
@@ -3070,8 +3123,8 @@ def voice_how(voiced):
     payload = _elevenlabs_payload(voiced)
     style = current_voice_style()
     delivery = next((d["name"] for d in VOICE_DELIVERIES if d["id"] == normalize_voice_delivery(style.get("delivery"))), "Natural")
-    if payload["model_id"] == ELEVEN_V3_MODEL:
-        parts = ["v3", delivery]
+    if is_expressive_model(payload["model_id"]):
+        parts = [model_label(payload["model_id"]), delivery]
         mode = normalize_hold_accent(CFG.get("hold_accent"))
         parts.append({"anchor": "anchored", "follow": "following last lines"}.get(mode, "spoken fresh")
                      if payload.get("previous_request_ids") or payload.get("previous_text") else "spoken fresh")
@@ -3116,12 +3169,12 @@ def speech_thread_key(session_id, profile_id, voice_id, model_id):
 #            mood and pace of the one before it (a whisper makes the next
 #            line whispery), which is what Friday heard as "terrible".
 HOLD_ACCENT_MODES = [
-    {"id": "off", "name": "Off", "description": "Every line is spoken fresh. The accent can wander on short lines."},
-    {"id": "anchor", "name": "Anchor", "description": "Every line is matched to one plain sentence this voice said once. Steady accent, nothing carried over between lines."},
-    {"id": "follow", "name": "Follow", "description": "Every line is matched to the last few the voice said. Steady accent, but each line takes on the mood of the one before."},
+    {"id": "off", "name": "Off", "description": "Every line is spoken fresh, so the tags sound natural. Best for tags."},
+    {"id": "anchor", "name": "Anchor", "description": "Every line is matched to one plain sentence this voice said once. Steadier accent, but the tags come out duller."},
+    {"id": "follow", "name": "Follow", "description": "Every line is matched to the last few the voice said. Steadier accent, but each line takes on the mood of the one before."},
 ]
 HOLD_ACCENT_IDS = {m["id"] for m in HOLD_ACCENT_MODES}
-DEFAULT_HOLD_ACCENT = "anchor"
+DEFAULT_HOLD_ACCENT = "off"
 ANCHORS_FILE = os.path.join(DATA_DIR, "voice_anchors.json")
 ANCHORS_LOCK = threading.Lock()
 ANCHOR_FAILED_AT = {}   # voice::language -> when making its anchor last failed
@@ -3227,7 +3280,7 @@ def voice_anchor(voice_id, code, delivery_v3):
             f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}",
             headers={"xi-api-key": CFG["elevenlabs_api_key"], "Content-Type": "application/json",
                      "Accept": "audio/mpeg"},
-            json={"text": said, "model_id": ELEVEN_V3_MODEL, "language_code": code,
+            json={"text": said, "model_id": expressive_model() or ELEVEN_V3_MODEL, "language_code": code,
                   "voice_settings": {"stability": delivery_v3}},
             timeout=60,
         )
@@ -3469,13 +3522,19 @@ def _elevenlabs_payload(text, force_v2=False):
     # no tags, sends exactly what Frivo always sent.
     style = current_voice_style()
     delivery = DELIVERY_SETTINGS[normalize_voice_delivery(style.get("delivery"))]
-    if not force_v2 and (style.get("expressive") or style.get("stay_on_v3") or has_audio_tags(text)):
-        # v3 has no speed setting; the reply speaks at its natural pace.
+    model = expressive_model()
+    if model and not force_v2 and (style.get("expressive") or style.get("stay_on_v3") or has_audio_tags(text)):
+        # v3 and v4 have no speed setting; the reply speaks at its natural pace.
         payload = {
             "text": text,
-            "model_id": ELEVEN_V3_MODEL,
+            "model_id": model,
             "voice_settings": {"stability": delivery["v3"]},
         }
+        if model.startswith("eleven_v4"):
+            # NEW (1.5.0): v4's Similarity holds every line closer to the
+            # voice's own recording: the accent, without copying any other
+            # line's mood the way Hold the accent does.
+            payload["voice_settings"]["similarity_boost"] = V4_SIMILARITY
         # NEW (1.5.0): v3 works out the language from each line by itself,
         # and on a short or tagged line it guesses differently, so the same
         # voice came out American, Scottish, Russian... Told the language,
@@ -3541,16 +3600,24 @@ def get_tts_audio(text, voice_id, language="English"):
         _drop_stale_anchor(payload)
         payload = _elevenlabs_payload(text)
         resp = requests.post(url, headers=headers, json=payload, timeout=60)
-    # NEW (1.5.0): an account or voice that can't use v3 still gets spoken,
-    # by the usual model and without the tags. A refusal isn't billed.
-    if resp.status_code in (400, 403, 404, 422) and payload.get("model_id") == ELEVEN_V3_MODEL:
-        log_server_event(f"Expressive voice: v3 refused ({resp.status_code}: {resp.text[:160]}); "
-                         "speaking without tags instead")
+    # NEW (1.5.0): an account or voice that can't use the expressive model
+    # steps down: v4 to v3, then the usual model without the tags. A refusal
+    # isn't billed.
+    for _ in range(2):
+        if not (resp.status_code in (400, 403, 404, 422) and is_expressive_model(payload.get("model_id"))):
+            break
+        REFUSED_MODELS[payload["model_id"]] = time.time()
+        log_server_event(f"Expressive voice: {payload['model_id']} refused ({resp.status_code}: {resp.text[:160]}); "
+                         "trying the next model")
+        payload = _elevenlabs_payload(text) if expressive_model() else _elevenlabs_payload(text, force_v2=True)
+        resp = requests.post(url, headers=headers, json=payload, timeout=60)
+    if resp.status_code in (400, 403, 404, 422) and is_expressive_model(payload.get("model_id")):
+        REFUSED_MODELS[payload["model_id"]] = time.time()
         payload = _elevenlabs_payload(text, force_v2=True)
         resp = requests.post(url, headers=headers, json=payload, timeout=60)
     if resp.status_code != 200:
         raise RuntimeError(f"ElevenLabs error {resp.status_code}: {resp.text[:300]}")
-    if payload.get("model_id") == ELEVEN_V3_MODEL:
+    if is_expressive_model(payload.get("model_id")):
         remember_speech(resp, payload["text"])   # NEW (1.5.0)
 
     filename = f"{uuid.uuid4().hex}.mp3"
@@ -3612,7 +3679,7 @@ def elevenlabs_tts_timed(text, voice_id, pages, voiced=None):
         # Refused, so nothing was spoken or billed. The plain request is
         # tried next, and its error is the one you see if it fails too.
         raise TimedSpeechUnavailable(f"ElevenLabs timestamps {resp.status_code}: {resp.text[:200]}")
-    if payload.get("model_id") == ELEVEN_V3_MODEL:
+    if is_expressive_model(payload.get("model_id")):
         remember_speech(resp, payload["text"])   # NEW (1.5.0)
     data = resp.json()
     audio = base64.b64decode(data["audio_base64"])
@@ -4286,6 +4353,9 @@ def settings():
             CFG["voice_delivery"] = normalize_voice_delivery(data.get("voice_delivery"), CFG.get("voice_delivery", DEFAULT_VOICE_DELIVERY))
         if "hold_accent" in data:
             CFG["hold_accent"] = normalize_hold_accent(data.get("hold_accent"), normalize_hold_accent(CFG.get("hold_accent")))
+        if "expressive_model" in data:
+            CFG["expressive_model"] = normalize_expressive_model(data.get("expressive_model"), normalize_expressive_model(CFG.get("expressive_model")))
+            REFUSED_MODELS.pop(CFG["expressive_model"], None)   # a fresh pick is tried again
         if "voice_accent" in data:
             CFG["voice_accent"] = normalize_voice_accent(data.get("voice_accent"), normalize_voice_accent(CFG.get("voice_accent")))
         if "response_style" in data:
@@ -4392,6 +4462,8 @@ def settings():
             "hold_accent": normalize_hold_accent(CFG.get("hold_accent")),
             "hold_accent_modes": HOLD_ACCENT_MODES,
             "voice_accent": normalize_voice_accent(CFG.get("voice_accent")),
+            "expressive_model": normalize_expressive_model(CFG.get("expressive_model")),
+            "expressive_models": EXPRESSIVE_MODELS,
             "voice_accents": [{"id": a["id"], "name": a["name"]} for a in VOICE_ACCENTS],
             "voice_deliveries": VOICE_DELIVERIES,
             "audio_tag_groups": AUDIO_TAG_GROUPS,
@@ -4877,6 +4949,36 @@ def voice_languages(v):
     )
 
 
+def voice_tag_fit(v):
+    """
+    NEW (1.5.0): how well an ElevenLabs voice takes voice tags, from what
+    ElevenLabs reports about it (there's no "made for v3" flag):
+
+      "made"    ElevenLabs lists v3 or v4 among the models this voice is
+                high-quality or verified for
+      "clone"   a voice clone or a designed voice: what ElevenLabs
+                recommends for the expressive models
+      "older"   a default voice from before v3 (Rachel and the rest), or
+                one marked legacy: tags work, but it may not hold its
+                accent with them
+      ""        nothing to go on
+    """
+    models = set(v.get("high_quality_base_model_ids") or [])
+    for entry in v.get("verified_languages") or []:
+        if isinstance(entry, dict) and entry.get("model_id"):
+            models.add(entry["model_id"])
+    if any(str(m).startswith(("eleven_v3", "eleven_v4")) for m in models):
+        return "made"
+    if v.get("is_legacy"):
+        return "older"
+    category = (v.get("category") or "").lower()
+    if category in ("cloned", "generated", "professional"):
+        return "clone"
+    if category == "premade":
+        return "older"
+    return ""
+
+
 def tidy_voice(v):
     """
     Flattens one ElevenLabs voice into what the picker actually needs.
@@ -4918,6 +5020,8 @@ def tidy_voice(v):
         # file ElevenLabs already generated, not a synthesis request.
         "preview_url": v.get("preview_url", ""),
         "description": (v.get("description") or "").strip(),
+        # NEW (1.5.0): how well it takes voice tags, from what ElevenLabs says.
+        "tag_fit": voice_tag_fit(v),
     }
 
 
@@ -7085,7 +7189,7 @@ def chat():
             audio_filename, page_ends, word_times = speak_reply(spoken, voice_id, language, chatbox_plan,
                                                                 voiced=voiced)
             # NEW (1.5.0): remembered, so the next message keeps the same model.
-            if voice_engine == "elevenlabs" and _elevenlabs_payload(voiced)["model_id"] == ELEVEN_V3_MODEL:
+            if voice_engine == "elevenlabs" and is_expressive_model(_elevenlabs_payload(voiced)["model_id"]):
                 V3_LAST_USED[f"{session_id}::{profile_id or 'default'}"] = time.time()
             audio_seconds = time.perf_counter() - audio_start
     except Exception as e:

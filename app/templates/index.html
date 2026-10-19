@@ -826,7 +826,7 @@
                   <label class="srow">
                     <span class="srow-main srow-main--flex">
                       <span class="srow-label">Expressive voice</span>
-                      <span class="srow-sub">The AI adds voice tags like [laughs] where they fit. ElevenLabs voices; uses the v3 model, which ignores Speaking speed. For the default profile.</span>
+                      <span class="srow-sub">The AI adds voice tags like [laughs] where they fit. ElevenLabs voices; uses the Tags model below, which ignores Speaking speed. For the default profile.</span>
                     </span>
                     <span class="switch">
                       <input type="checkbox" id="expressiveVoiceToggle">
@@ -840,11 +840,19 @@
                     </span>
                     <div class="radio-row" id="voiceDeliveryRadios" role="radiogroup" aria-label="Delivery"></div>
                   </div>
+                  <!-- NEW (1.5.0): which ElevenLabs model performs the tags. -->
+                  <div class="srow">
+                    <span class="srow-main srow-main--flex">
+                      <span class="srow-label">Tags model</span>
+                      <span class="srow-sub" id="expressiveModelNote">The ElevenLabs model that performs voice tags.</span>
+                    </span>
+                    <div class="radio-row" id="expressiveModelRadios" role="radiogroup" aria-label="Tags model"></div>
+                  </div>
                   <!-- NEW (1.5.0): continuity between v3 lines. -->
                   <div class="srow">
                     <span class="srow-main srow-main--flex">
                       <span class="srow-label">Hold the accent</span>
-                      <span class="srow-sub" id="holdAccentNote">For expressive (v3) lines, which can drift into another accent when short.</span>
+                      <span class="srow-sub" id="holdAccentNote">Off is best for tags. On, every line is pulled toward another recording to hold the accent, which dulls the tags.</span>
                     </span>
                     <div class="radio-row" id="holdAccentRadios" role="radiogroup" aria-label="Hold the accent"></div>
                   </div>

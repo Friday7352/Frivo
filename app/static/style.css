@@ -3994,3 +3994,22 @@ html.motion-ready .stage { transition: transform var(--dur-smooth) var(--spring-
 .anchor-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
 .anchor-actions .btn-sm { display: inline-flex; align-items: center; gap: 5px; }
 #voiceAccentRow.is-hidden, #anchorRow.is-hidden { display: none; }
+
+/* NEW (1.5.0): how well a voice takes voice tags, after its name. */
+.voice-name.has-fit { display: flex; align-items: center; gap: 6px; }
+.voice-name-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.voice-fit {
+  flex: none;
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 0.72em;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  line-height: 1.5;
+  border: 1px solid var(--rule);
+  color: var(--ink-dim);
+}
+.voice-fit.is-made { border-color: var(--accent-line); background: var(--accent-soft); color: var(--accent); }
+.voice-fit.is-clone { color: var(--ink); }
+.voice-fit.is-older { opacity: 0.7; font-weight: 500; }

@@ -312,3 +312,10 @@ Above the personality box, in the profile editor and in Settings > Replies. It u
 - **Accent** (Settings > Voices): pick the accent the anchor is made in: American, Southern US, British, Scottish, Irish, Australian, French, German, Russian, Japanese, or the voice's own. It's said once, in the anchor; the lines themselves carry no accent tag, so the tags stay natural.
 - **The anchor** row shows what the voice is being matched to, with **Hear it** and **Make a new one** for when the first try came out wrong. An anchor ElevenLabs no longer knows is replaced on its own.
 - The ✦ menu is redesigned: a proper header with Suggest, the tags in three groups you can scan, and Auto tags and Ideas as I type as clear rows.
+
+### Voice tags on Eleven v4
+
+- Tags are now performed by **Eleven v4**, which ElevenLabs released in September 2026 and recommends over v3 for audio tags ("a net upgrade over Eleven v3, delivering better results in almost every case"). The same tags work. **Tags model** in Settings > Voices picks v4, v4 Turbo (faster to start) or v3. If your account refuses the one picked, Frivo steps down to v3, then to the standard model without tags, and remembers for an hour.
+- v4 also gets a **Similarity** setting, which holds every line closer to the voice's own recording without copying any other line's mood.
+- **Hold the accent** is back to **Off** by default and was reset to Off once on update: both Anchor and Follow hold the accent by pulling every line toward another recording, and that dulls the tags. They're still there if you want them.
+- The voice list labels ElevenLabs voices by how well they take tags, from what ElevenLabs reports about each: **v4 ready** (listed by ElevenLabs as made for its expressive models), **tags** (a voice clone or designed voice, which ElevenLabs recommends for them), **older** (a default voice from before the expressive models; tags work, but it may drift between accents).

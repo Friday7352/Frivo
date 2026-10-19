@@ -62,14 +62,22 @@ check("Natural, no tags: exactly as before",
       plain == {"text": "Hello there.", "model_id": "eleven_multilingual_v2",
                 "voice_settings": {"stability": 0.5, "similarity_boost": 0.75}}, plain)
 tagged = mod._elevenlabs_payload("[laughs] Hello there.")
-check("a tag: v3, with the tag", tagged["model_id"] == "eleven_v3" and tagged["text"].startswith("[laughs]"), tagged)
+check("a tag: v4, with the tag", tagged["model_id"] == "eleven_v4" and tagged["text"].startswith("[laughs]"), tagged)
+check("v4 holds the voice with Similarity", tagged["voice_settings"].get("similarity_boost") == mod.V4_SIMILARITY, tagged)
+check("Hold the accent is Off by default (it dulled the tags)", mod.normalize_hold_accent(mod.CFG.get("hold_accent")) == "off")
+mod.CFG.update(expressive_model="eleven_v3")
+check("v3 can still be chosen, without Similarity", mod._elevenlabs_payload("[laughs] Hi.")["model_id"] == "eleven_v3"
+      and "similarity_boost" not in mod._elevenlabs_payload("[laughs] Hi.")["voice_settings"])
+mod.CFG.update(expressive_model="eleven_v4_turbo")
+check("... and v4 Turbo", mod._elevenlabs_payload("[laughs] Hi.")["model_id"] == "eleven_v4_turbo")
+mod.CFG.update(expressive_model="eleven_v4")
 check("v3 is told the language, so the accent holds", tagged.get("language_code") == "en", tagged)
 mod.CFG.update(speaking_speed=1.1)
 check("v3 has no speed setting", "speed" not in mod._elevenlabs_payload("[laughs] Hi.")["voice_settings"])
 check("v2 still gets the speed", mod._elevenlabs_payload("Hi.")["voice_settings"].get("speed") == 1.1)
 mod.CFG.update(speaking_speed=1.0, voice_delivery="calm")
 check("Calm: steadier v2", mod._elevenlabs_payload("Hi.")["voice_settings"]["stability"] == 0.75)
-check("Calm: Robust v3", mod._elevenlabs_payload("[softly] Hi.")["voice_settings"] == {"stability": 1.0})
+check("Calm: Robust", mod._elevenlabs_payload("[softly] Hi.")["voice_settings"]["stability"] == 1.0)
 mod.CFG.update(voice_delivery="lively")
 lively = mod._elevenlabs_payload("Hi.")["voice_settings"]
 check("Lively: looser, with style", lively["stability"] == 0.3 and lively.get("style") == 0.35, lively)
@@ -77,7 +85,7 @@ check("Lively on v3: Natural, never Creative", mod._elevenlabs_payload("[laughs]
 mod.CFG.update(voice_delivery="natural")
 check("Natural on v3: Natural (the stitching below holds the accent)", mod._elevenlabs_payload("[laughs] Hi.")["voice_settings"]["stability"] == 0.5)
 mod.CFG.update(voice_delivery="natural", expressive_voice=True)
-check("Expressive voice: v3 even with no tag", mod._elevenlabs_payload("Hi.")["model_id"] == "eleven_v3")
+check("Expressive voice: v4 even with no tag", mod._elevenlabs_payload("Hi.")["model_id"] == "eleven_v4")
 check("the fallback drops the tags", mod._elevenlabs_payload("[laughs] Hi.", force_v2=True)["text"] == "Hi.")
 mod.CFG.update(expressive_voice=False)
 
@@ -99,7 +107,7 @@ refuse_v3 = {"on": False}
 def fake_post(url, **kw):
     body = kw["json"]
     posts.append((url, body))
-    if refuse_v3["on"] and body["model_id"] == "eleven_v3":
+    if refuse_v3["on"] and body["model_id"] in refuse_v3.get("models", ("eleven_v4", "eleven_v3", "eleven_v4_turbo")):
         return SimpleNamespace(status_code=422, text="model not available", content=b"", json=lambda: {})
     text = body["text"]
     align = {"characters": list(text),
@@ -125,7 +133,7 @@ def chat(message, **extra):
 
 status, data = chat("[whispers] It's a secret. [laughs] Don't tell.")
 url, sent = posts[-1]
-check("your tags reach the voice", "[whispers]" in sent["text"] and sent["model_id"] == "eleven_v3", sent)
+check("your tags reach the voice", "[whispers]" in sent["text"] and sent["model_id"] == "eleven_v4", sent)
 check("the reply shown and sent to the chatbox has none",
       status == 200 and "[" not in data.get("reply", "") and all("[" not in p["text"] for p in data["chatbox_pages"]), data)
 check("'voiced' keeps them", data.get("voiced", "").startswith("[whispers]"), data.get("voiced"))
@@ -136,13 +144,15 @@ check("word count leaves them out", data.get("word_count") == 5, data.get("word_
 print("--- Hold the accent ---")
 # Anchor (the default): the first v3 line makes one plain sentence with
 # the voice, and every line after is matched to that same one.
+mod.CFG.update(hold_accent="anchor")
+status, data = chat("[softly] Anchor mode now.")
 anchor_posts = [p for p in posts if "plan for today" in p[1].get("text", "")]
-check("Anchor: a plain sentence was made once, with v3", len(anchor_posts) == 1 and anchor_posts[0][1]["model_id"] == "eleven_v3", len(anchor_posts))
+check("Anchor: a plain sentence was made once, with the tags model", len(anchor_posts) == 1 and anchor_posts[0][1]["model_id"] == "eleven_v4", len(anchor_posts))
 anchor_id = "req%d" % (posts.index(anchor_posts[0]) + 1)
 check("... and the line was matched to it", posts[-1][1].get("previous_request_ids") == [anchor_id]
       and "plan for today" in posts[-1][1].get("previous_text", ""), {k: posts[-1][1].get(k) for k in ("previous_request_ids", "previous_text")})
 status, data = chat("No tags in this one.")
-check("after a tag, the next message stays on v3 (no accent jump)", posts[-1][1]["model_id"] == "eleven_v3", posts[-1][1])
+check("after a tag, the next message stays on the tags model (no accent jump)", posts[-1][1]["model_id"] == "eleven_v4", posts[-1][1])
 check("... matched to the same anchor, not the last line", posts[-1][1].get("previous_request_ids") == [anchor_id], posts[-1][1].get("previous_request_ids"))
 check("the anchor is kept on disk", os.path.isfile(mod.ANCHORS_FILE) and any(k.startswith("EL1::en::") for k in mod.load_anchors()))
 check("no second anchor was made", len([p for p in posts if "plan for today" in p[1].get("text", "")]) == 1)
@@ -156,7 +166,7 @@ check("Follow: matched to the last three lines", len(posts[-1][1].get("previous_
 mod.CFG.update(hold_accent="off")
 status, data = chat("With Hold the accent off.")
 check("Off: every line spoken fresh", "previous_request_ids" not in posts[-1][1] and "previous_text" not in posts[-1][1]
-      and posts[-1][1]["model_id"] == "eleven_v3", posts[-1][1])
+      and posts[-1][1]["model_id"] == "eleven_v4", posts[-1][1])
 check("an old True/False setting still reads", mod.normalize_hold_accent(True) == "anchor" and mod.normalize_hold_accent(False) == "off")
 # A stale anchor: ElevenLabs refuses it, Frivo forgets it, speaks without, and makes a new one next time.
 mod.CFG.update(hold_accent="anchor")
@@ -168,10 +178,16 @@ def refusing_post(url, **kw):
     return real_fake_post(url, **kw)
 mod.requests.post = refusing_post
 status, data = chat("Is the anchor still there?")
-check("a stale anchor: forgotten, a new one made, still spoken on v3", status == 200 and posts[-1][1]["model_id"] == "eleven_v3"
+check("a stale anchor: forgotten, a new one made, still spoken on v4", status == 200 and posts[-1][1]["model_id"] == "eleven_v4"
       and next((v for k, v in mod.load_anchors().items() if k.startswith("EL1::en::")), {}).get("id") not in (None, anchor_id), (status, data.get("error"), mod.load_anchors()))
 stale["on"] = False
 mod.requests.post = real_fake_post
+print("--- voice labels ---")
+check("listed as made for the expressive models", mod.voice_tag_fit({"high_quality_base_model_ids": ["eleven_v4"]}) == "made")
+check("... or verified for them", mod.voice_tag_fit({"verified_languages": [{"language": "en", "model_id": "eleven_v3"}]}) == "made")
+check("a clone or designed voice", mod.voice_tag_fit({"category": "cloned"}) == "clone" and mod.voice_tag_fit({"category": "generated"}) == "clone")
+check("an older default voice", mod.voice_tag_fit({"category": "premade"}) == "older" and mod.voice_tag_fit({"is_legacy": True, "category": "cloned"}) == "older")
+check("nothing to go on: no label", mod.voice_tag_fit({}) == "")
 print("--- the accent ---")
 mod.CFG.update(voice_accent="scottish")
 status, data = chat("Och, is that right?")
@@ -211,7 +227,7 @@ check("your message is tagged on its way to the voice",
 check("the voice got the tag, the chatbox didn't", "[softly]" in posts[-1][1]["text"] and "[" not in data["chatbox_pages"][0]["text"])
 status, data = chat("Don't tell anyone, okay?", auto_tags=False)
 check("off: as typed", data.get("auto_tagged") is False and data.get("voiced") == "Don't tell anyone, okay?", data)
-check("says how it was spoken", data.get("voice_how", "").startswith("v3 · Natural · anchored"), data.get("voice_how"))
+check("says how it was spoken", data.get("voice_how", "").startswith("v4 · Natural"), data.get("voice_how"))
 spoken_free = []
 mod.CFG.update(voice_id="piper:alba")
 mod.piper_problem = lambda *a, **k: None
@@ -239,8 +255,8 @@ check("Calm takes out [shouts]", "[shouts]" not in data.get("voiced", "") and "[
       data.get("voiced"))
 check("an accent tag the AI added is taken out", "accent" not in data.get("voiced", ""), data.get("voiced"))
 check("the reply reads without tags", data.get("reply") == "Oh, that is great. Anyway, carry on.", data.get("reply"))
-check("Expressive voice speaks with v3, Robust", posts[-1][1]["model_id"] == "eleven_v3"
-      and posts[-1][1]["voice_settings"] == {"stability": 1.0}, posts[-1][1])
+check("Expressive voice speaks with v4, Robust", posts[-1][1]["model_id"] == "eleven_v4"
+      and posts[-1][1]["voice_settings"]["stability"] == 1.0, posts[-1][1])
 history = mod.SESSIONS.get(f"default::{actor['id']}", [])
 check("the AI's memory keeps its tags", history and "[laughs]" in history[-1]["content"], history[-1:] if history else None)
 
@@ -255,6 +271,17 @@ n_anchor_tries = len([p for p in posts if "plan for today" in p[1].get("text", "
 status, data = chat("And again.", profile_id=actor["id"])
 check("... and the anchor isn't tried again for a while", len([p for p in posts if "plan for today" in p[1].get("text", "")]) == n_anchor_tries)
 refuse_v3["on"] = False
+mod.REFUSED_MODELS.clear()
+refuse_v3.update(on=True, models=("eleven_v4",))
+status, data = chat("Only v4 is refused.", profile_id=actor["id"])
+spoken_post = [p for p in posts if "plan for today" not in p[1].get("text", "")][-1]
+check("v4 refused: steps down to v3, tags kept", status == 200 and spoken_post[1]["model_id"] == "eleven_v3"
+      and "eleven_v4" in mod.REFUSED_MODELS, (status, spoken_post[1].get("model_id"), data.get("error")))
+status, data = chat("And the next one.", profile_id=actor["id"])
+spoken_post = [p for p in posts if "plan for today" not in p[1].get("text", "")][-1]
+check("... and goes straight to v3 for a while", spoken_post[1]["model_id"] == "eleven_v3")
+refuse_v3.update(on=False, models=("eleven_v4", "eleven_v3", "eleven_v4_turbo"))
+mod.REFUSED_MODELS.clear()
 
 res = client.put(f"/api/profiles/{actor['id']}", json={"expressive_voice": False, "voice_delivery": "lively"})
 p = (res.get_json() or {}).get("profile", {})
