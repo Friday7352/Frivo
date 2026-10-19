@@ -171,6 +171,7 @@ check("your message is tagged on its way to the voice",
 check("the voice got the tag, the chatbox didn't", "[softly]" in posts[-1][1]["text"] and "[" not in data["chatbox_pages"][0]["text"])
 status, data = chat("Don't tell anyone, okay?", auto_tags=False)
 check("off: as typed", data.get("auto_tagged") is False and data.get("voiced") == "Don't tell anyone, okay?", data)
+check("says how it was spoken", data.get("voice_how", "").startswith("v3 · Natural · accent held"), data.get("voice_how"))
 spoken_free = []
 mod.CFG.update(voice_id="piper:alba")
 mod.piper_problem = lambda *a, **k: None

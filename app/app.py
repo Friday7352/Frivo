@@ -3064,6 +3064,20 @@ SPEECH_THREADS = {}   # "session::profile::voice::model" -> {"ids": [...], "text
 SPEECH_THREADS_LOCK = threading.Lock()
 
 
+def voice_how(voiced):
+    """NEW (1.5.0): the ElevenLabs settings a reply was spoken with, in words."""
+    payload = _elevenlabs_payload(voiced)
+    style = current_voice_style()
+    delivery = next((d["name"] for d in VOICE_DELIVERIES if d["id"] == normalize_voice_delivery(style.get("delivery"))), "Natural")
+    if payload["model_id"] == ELEVEN_V3_MODEL:
+        parts = ["v3", delivery]
+        parts.append("accent held" if payload.get("previous_request_ids") or payload.get("previous_text") else "spoken fresh")
+        if has_audio_tags(voiced):
+            parts.append(f"{len(AUDIO_TAG_RE.findall(voiced))} tag{'s' if len(AUDIO_TAG_RE.findall(voiced)) != 1 else ''}")
+        return " · ".join(parts)
+    return f"standard (v2) · {delivery}"
+
+
 def speech_thread_key(session_id, profile_id, voice_id, model_id):
     return f"{session_id}::{profile_id or 'default'}::{voice_id}::{model_id}"
 
@@ -6905,6 +6919,9 @@ def chat():
             # NEW (1.5.0): which ElevenLabs model spoke it, when one did.
             "voice_model": (_elevenlabs_payload(voiced)["model_id"]
                             if speak and voice_engine == "elevenlabs" else ""),
+            # NEW (1.5.0): how it was spoken, in words, so a saved clip can
+            # say which settings made it ("v3 · Natural · accent held").
+            "voice_how": voice_how(voiced) if speak and voice_engine == "elevenlabs" else "",
             "english": english,
             # Null rather than a dead path when nothing was synthesised, so
             # the page has something unambiguous to branch on.
@@ -7094,6 +7111,7 @@ def saved_add():
             "voice_name": str(data.get("voice_name") or "")[:120],
             "voice_engine": str(data.get("voice_engine") or "")[:20],
             "voice_engine_name": str(data.get("voice_engine_name") or "")[:60],
+            "voice_how": str(data.get("voice_how") or "")[:80],   # NEW (1.5.0)
             "profile_id": str(data.get("profile_id") or "")[:80],
             "profile_name": str(data.get("profile_name") or "")[:120],
             "word_times": _clean_word_times(data.get("word_times")),
@@ -7201,7 +7219,8 @@ def saved_export():
             z.write(os.path.join(SAVED_DIR, item["file"]), name)
             when = time.strftime("%Y-%m-%d %H:%M", time.localtime(item.get("saved_at", 0))) if item.get("saved_at") else ""
             lines.append(f"{name}\n  {item.get('voiced') or item.get('text', '')}\n  "
-                         + " · ".join(x for x in (item.get("voice_name"), item.get("profile_name"), when) if x))
+                         + " · ".join(x for x in (item.get("voice_name"), item.get("profile_name"), when) if x)
+                         + (f"\n  spoken as: {item['voice_how']}" if item.get("voice_how") else ""))
         z.writestr("saved.txt", "Frivo saved replies\n\n" + "\n\n".join(lines) + "\n")
     buf.seek(0)
     from flask import send_file

@@ -1574,7 +1574,8 @@ function addTurn(who, text, opts = {}) {
       time.title =
         opts.spoke === false
           ? `${writer}: ${opts.textSeconds.toFixed(1)}s · not spoken`
-          : `${writer}: ${opts.textSeconds.toFixed(1)}s · ${whereSpoken(opts.voiceEngine, opts.voiceEngineName || "ElevenLabs")}: ${opts.audioSeconds.toFixed(1)}s`;
+          : `${writer}: ${opts.textSeconds.toFixed(1)}s · ${whereSpoken(opts.voiceEngine, opts.voiceEngineName || "ElevenLabs")}: ${opts.audioSeconds.toFixed(1)}s`
+            + (opts.voiceHow ? ` · spoken as ${opts.voiceHow}` : "");   // NEW (1.5.0)
     }
     meta.appendChild(time);
   }
@@ -6265,6 +6266,7 @@ async function send() {
       wordTimes: data.word_times,  // NEW (1.5.0): exact word timings, or null
       voiced: data.voiced && data.voiced !== data.reply ? data.voiced : undefined,  // NEW (1.5.0): with its voice tags
       autoTagged: data.auto_tagged === true,   // NEW (1.5.0)
+      voiceHow: data.voice_how || "",   // NEW (1.5.0)
       footer: pager ? pager.el : null,  // NEW (1.5.0)
       // NEW (1.5.0): what the Save button keeps, so it can be played again.
       saveData: data.audio_url ? {
@@ -6276,6 +6278,7 @@ async function send() {
         voice_name: typeof activeVoiceName === "function" ? activeVoiceName() : "",
         voice_engine: data.voice_engine,
         voice_engine_name: data.voice_engine_name,
+        voice_how: data.voice_how || "",   // NEW (1.5.0): which settings spoke it
         word_times: data.word_times,
         chatbox_pages: data.chatbox_pages,
         profile_id: currentProfileId || "",
@@ -9002,6 +9005,7 @@ function savedRowNode(item) {
   const sub = document.createElement("span");
   sub.className = "saved-sub";
   sub.textContent = [item.voice_name, item.profile_name, savedWhen(item.saved_at)].filter(Boolean).join(" · ");
+  if (item.voice_how) sub.title = `Spoken as: ${item.voice_how}`;   // NEW (1.5.0)
   body.append(text, sub);
 
   // Delete asks twice: the first click turns the button into "Delete?".
