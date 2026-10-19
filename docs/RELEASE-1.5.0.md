@@ -319,3 +319,15 @@ Above the personality box, in the profile editor and in Settings > Replies. It u
 - v4 also gets a **Similarity** setting, which holds every line closer to the voice's own recording without copying any other line's mood.
 - **Hold the accent** is back to **Off** by default and was reset to Off once on update: both Anchor and Follow hold the accent by pulling every line toward another recording, and that dulls the tags. They're still there if you want them.
 - The voice list labels ElevenLabs voices by how well they take tags, from what ElevenLabs reports about each: **v4 ready** (listed by ElevenLabs as made for its expressive models), **tags** (a voice clone or designed voice, which ElevenLabs recommends for them), **older** (a default voice from before the expressive models; tags work, but it may drift between accents).
+
+### Shape words for tags
+
+- A profile switch (and one in Settings > Voices for the default profile) for **Clean up** profiles with an ElevenLabs voice. Clean up adds voice tags itself and may lightly change the words right next to each tag so the line flows with it performed: dropping a "haha" when [laughs] performs it, adding a short "oh" or "well" after [gasps] or [sighs], moving a comma so the pause lands. Nothing else changes: same meaning, same order, nothing new said.
+- It has its own check, a little looser than Clean up's (lead-ins and dropped fillers are fine), that still catches real rewording. If the AI goes too far twice, Frivo uses your words with tags only.
+- With Auto tags on as well, there's no separate tagging call: the clean-up does both.
+- A reply shaped this way says "Shaped for tags" under it. The switch is dimmed for Reply and Word for word, where it does nothing.
+
+### The voice list: favorites for the voice in use, and removing voices
+
+- The voice in use shows its check in the coloured mark on the left, and its **…** menu is the same as every other row's, so it can be added to or removed from Favorites. (The menu was there before, hidden behind the check.)
+- **Remove from my ElevenLabs voices**, in a voice's **…** menu, takes it out of your ElevenLabs voices. One added from the Voice Library can be added back from there; a voice you made yourself is deleted for good, and the warning says which. ElevenLabs' default voices can't be removed, so they don't offer it. A voice still used by a profile (or the default) is refused, naming the profiles, so nothing is left pointing at a voice that's gone. Its anchors are removed with it.

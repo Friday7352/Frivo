@@ -978,8 +978,9 @@ def build_system_prompt(base_prompt, max_words, language="English", response_sty
     """
     voice_rules = ""
     if voice_style:
-        if voice_style.get("expressive") and response_style != "mimic":
-            voice_rules += expressive_voice_rules(response_style, language, voice_style.get("delivery"))
+        if (voice_style.get("expressive") or voice_style.get("shaping")) and response_style != "mimic":
+            voice_rules += expressive_voice_rules(response_style, language, voice_style.get("delivery"),
+                                                  shaping=bool(voice_style.get("shaping")) and response_style == "echo")
         elif response_style != "reply":
             voice_rules += audio_tag_keep_rule()
         if voice_style.get("delivery") == "calm" and response_style != "mimic":
@@ -1224,6 +1225,43 @@ def _close_spelling(a, b):
         return False
     from difflib import SequenceMatcher
     return SequenceMatcher(None, a, b).ratio() >= 0.6
+
+
+# NEW (1.5.0): what Shape words for tags may add without it counting as new
+# content: the short lead-ins and fillers that go with a performed tag.
+TAG_SHAPING_WORDS = {
+    "oh", "ah", "aw", "ooh", "uh", "um", "hmm", "well", "wow", "whoa", "okay", "ok", "so", "yeah",
+    "huh", "hey", "ha", "haha", "phew", "ugh", "man", "god", "gosh", "geez", "jeez", "alright", "right",
+}
+
+
+def tag_shaping_stays_on_message(source, output):
+    """
+    NEW (1.5.0): cleanup_stays_on_message for Shape words for tags, where
+    the AI may drop words a tag performs and add a short lead-in. Still
+    caught: new content (more than a few new words that aren't lead-ins),
+    losing most of the message, and growing much longer.
+    """
+    import math
+    a, b = _echo_words(source), _echo_words(output)
+    if not b:
+        return not a
+    if len(b) > len(a) * 1.3 + 5:
+        return False
+
+    def traced(word, pool):
+        return word in ECHO_GRAMMAR_WORDS or word in TAG_SHAPING_WORDS or any(_close_spelling(word, other) for other in pool)
+
+    a_content = [w for w in a if w not in ECHO_GRAMMAR_WORDS and w not in TAG_SHAPING_WORDS]
+    b_content = [w for w in b if w not in ECHO_GRAMMAR_WORDS]
+    new_words = [w for w in b_content if not traced(w, a)]
+    if len(new_words) > max(2, math.ceil(0.2 * len(a_content))):
+        return False
+    if a_content:
+        kept = sum(1 for w in a_content if traced(w, b))
+        if kept / len(a_content) < 0.7:
+            return False
+    return True
 
 
 def cleanup_stays_on_message(source, output):
@@ -3417,6 +3455,8 @@ def voice_style_of(profile=None):
     return {
         "expressive": source.get("expressive_voice") is True,
         "delivery": normalize_voice_delivery(source.get("voice_delivery")),
+        # NEW (1.5.0): Shape words for tags (Clean up only; see chat()).
+        "shaping": source.get("tag_shaping") is True,
     }
 
 
@@ -3462,7 +3502,7 @@ def alignment_without_tags(voiced, spoken, alignment):
     }
 
 
-def expressive_voice_rules(response_style, language, delivery):
+def expressive_voice_rules(response_style, language, delivery, shaping=False):
     """What the AI is told when Expressive voice is on (ElevenLabs voices only)."""
     examples = "[softly], [laughs], [sighs], [excited], [whispers], [sarcastic], [curious], [nervous], [chuckles], [pause]"
     if delivery == "calm":
@@ -3485,6 +3525,24 @@ def expressive_voice_rules(response_style, language, delivery):
             + "Use them the way an actor uses stage directions: only where they genuinely fit your persona "
             "and the moment. Usually none to two in a reply, never more than one per sentence.\n"
             "Let the tags carry the emotion: no words in ALL CAPITALS and no strings of exclamation marks.\n\n"
+        )
+    if response_style == "echo" and shaping:
+        # NEW (1.5.0): Shape words for tags (a Clean up profile's switch).
+        return (
+            "VOICE TAGS:\n"
+            "The output is spoken by an expressive voice that follows audio tags.\n"
+            + common
+            + "Keep every tag already in the source text, in the same place.\n"
+            "Add one to three more where the message's feeling clearly calls for it; fewer for a short message.\n"
+            "SHAPING THE WORDS AROUND A TAG:\n"
+            "Within a few words of each tag, and only there, you may make small changes so the line "
+            "flows naturally with the tag performed:\n"
+            "- remove words the tag now performs (\"[laughs] haha that's funny\" becomes \"[laughs] That's funny\"; "
+            "\"ugh [sighs]\" becomes \"[sighs]\")\n"
+            "- add a short natural lead-in of one or two words after a tag (\"[gasps] Oh,\", \"[sighs] Well,\")\n"
+            "- adjust punctuation next to a tag (a comma, an ellipsis, a full stop) so the pause lands right\n"
+            "Everything else stays as cleaned up: same meaning, same order, nothing new said. Never add a "
+            "sentence, an opinion, a name or a fact.\n\n"
         )
     if response_style == "echo":
         return (
@@ -4349,6 +4407,8 @@ def settings():
         # NEW (1.5.0)
         if "expressive_voice" in data:
             CFG["expressive_voice"] = data.get("expressive_voice") is True
+        if "tag_shaping" in data:   # NEW (1.5.0)
+            CFG["tag_shaping"] = data.get("tag_shaping") is True
         if "voice_delivery" in data:
             CFG["voice_delivery"] = normalize_voice_delivery(data.get("voice_delivery"), CFG.get("voice_delivery", DEFAULT_VOICE_DELIVERY))
         if "hold_accent" in data:
@@ -4458,6 +4518,7 @@ def settings():
             "speaking_speed": clamp_speaking_speed(CFG.get("speaking_speed", 1.0)),
             # NEW (1.5.0)
             "expressive_voice": CFG.get("expressive_voice") is True,
+            "tag_shaping": CFG.get("tag_shaping") is True,   # NEW (1.5.0)
             "voice_delivery": normalize_voice_delivery(CFG.get("voice_delivery")),
             "hold_accent": normalize_hold_accent(CFG.get("hold_accent")),
             "hold_accent_modes": HOLD_ACCENT_MODES,
@@ -5022,6 +5083,9 @@ def tidy_voice(v):
         "description": (v.get("description") or "").strip(),
         # NEW (1.5.0): how well it takes voice tags, from what ElevenLabs says.
         "tag_fit": voice_tag_fit(v),
+        # NEW (1.5.0): yours (a clone you made) or one added from the Voice
+        # Library, for removing it from your ElevenLabs voices.
+        "is_owner": v.get("is_owner") is True,
     }
 
 
@@ -5053,6 +5117,59 @@ def voices():
         if free:
             return jsonify({"voices": free, "notice": f"ElevenLabs voices couldn't be loaded: {e}"})
         return jsonify({"error": str(e)}), 500
+
+
+_EL_VOICE_ID_RE = re.compile(r"^[A-Za-z0-9]{8,40}$")
+
+
+@app.route("/api/voices/elevenlabs/<voice_id>", methods=["DELETE"])
+def elevenlabs_voice_remove(voice_id):
+    """
+    NEW (1.5.0): removes a voice from your ElevenLabs voices ("My Voices").
+    A voice added from the Voice Library can be added back from there; a
+    clone you made is deleted for good. ElevenLabs' default voices can't be
+    removed. Refused while a profile (or the default) still uses the voice,
+    so nothing is left pointing at a voice that's gone.
+    """
+    if not _EL_VOICE_ID_RE.match(voice_id or "") or tts_engine(voice_id) != "elevenlabs":
+        return jsonify({"error": "That isn't an ElevenLabs voice."}), 400
+    if not CFG.get("elevenlabs_api_key"):
+        return jsonify({"error": "Add your ElevenLabs key first."}), 400
+    users = [p["name"] for p in load_profiles() if p.get("voice_id") == voice_id]
+    if CFG.get("voice_id") == voice_id:
+        users.insert(0, "Default")
+    if users:
+        names = ", ".join(users[:4]) + (" and others" if len(users) > 4 else "")
+        return jsonify({"error": f"It's the voice for {names}. Pick another voice there first, then remove it.",
+                        "in_use": users}), 409
+    try:
+        resp = requests.delete(f"https://api.elevenlabs.io/v1/voices/{voice_id}",
+                               headers={"xi-api-key": CFG["elevenlabs_api_key"]}, timeout=30)
+    except Exception as e:
+        return jsonify({"error": f"Couldn't reach ElevenLabs: {e}"}), 502
+    if resp.status_code != 200:
+        detail = ""
+        try:
+            body = resp.json()
+            detail = (body.get("detail") or {}).get("message") if isinstance(body.get("detail"), dict) else body.get("detail")
+        except Exception:
+            detail = resp.text[:200]
+        return jsonify({"error": f"ElevenLabs didn't remove it ({resp.status_code}){': ' + str(detail) if detail else ''}."}), 502
+    # Its anchors go with it.
+    with ANCHORS_LOCK:
+        anchors = load_anchors()
+        gone = [k for k in anchors if k.startswith(voice_id + "::")]
+        for k in gone:
+            entry = anchors.pop(k)
+            if entry.get("file"):
+                try:
+                    os.remove(os.path.join(ANCHORS_DIR, entry["file"]))
+                except OSError:
+                    pass
+        if gone:
+            write_anchors(anchors)
+    log_server_event(f"Voices: removed {voice_id} from your ElevenLabs voices")
+    return jsonify({"ok": True})
 
 
 # NEW (1.5.0): the free voices' state, for Settings.
@@ -6322,6 +6439,7 @@ def profiles():
     # NEW (1.5.0)
     expressive_voice = data.get("expressive_voice") is True
     voice_delivery = normalize_voice_delivery(data.get("voice_delivery"))
+    tag_shaping = data.get("tag_shaping") is True   # NEW (1.5.0)
 
     if not name or not voice_id:
         return jsonify({"error": "Name and voice are both required."}), 400
@@ -6340,6 +6458,7 @@ def profiles():
             "follow_length": follow_length,  # NEW (1.5.0)
             "expressive_voice": expressive_voice,  # NEW (1.5.0)
             "voice_delivery": voice_delivery,      # NEW (1.5.0)
+            "tag_shaping": tag_shaping,            # NEW (1.5.0)
         }
         all_profiles.append(new_profile)
         save_profiles(all_profiles)
@@ -6389,6 +6508,8 @@ def profile_detail(profile_id):
         # NEW (1.5.0)
         if "expressive_voice" in data:
             match["expressive_voice"] = data.get("expressive_voice") is True
+        if "tag_shaping" in data:   # NEW (1.5.0)
+            match["tag_shaping"] = data.get("tag_shaping") is True
         if "voice_delivery" in data:
             match["voice_delivery"] = normalize_voice_delivery(
                 data.get("voice_delivery"), match.get("voice_delivery", DEFAULT_VOICE_DELIVERY))
@@ -7013,7 +7134,16 @@ def chat():
     message = tidy_audio_tags(message)
     auto_tagged = False
     tag_seconds = 0.0
-    if auto_tags and speak and voice_engine == "elevenlabs" and response_style != "reply" and strip_audio_tags(message):
+    # NEW (1.5.0): Shape words for tags, for a Clean up profile with an
+    # ElevenLabs voice: the clean-up itself adds the tags and shapes the
+    # words around them, so Auto tags doesn't need its own call.
+    shaping = bool(voice_style.get("shaping")) and response_style == "echo" and voice_engine == "elevenlabs"
+    if prompt_voice_style is not None:
+        prompt_voice_style = dict(prompt_voice_style, shaping=shaping)
+        if shaping:
+            g.voice_style["expressive"] = True
+    if auto_tags and speak and voice_engine == "elevenlabs" and response_style != "reply" and not shaping \
+            and strip_audio_tags(message):
         # Your own words, tagged on their way to the voice. One extra AI
         # call; if it can't, the message goes as typed.
         tag_start = time.perf_counter()
@@ -7104,19 +7234,30 @@ def chat():
             spoken = reply.strip()
 
             # NEW (1.5.0): don't take Echo's word for it — check.
+            # CHANGED (1.5.0): Shape words for tags has its own, slightly
+            # looser check, and keeps its tags when it falls back.
+            stays = tag_shaping_stays_on_message if shaping else cleanup_stays_on_message
             if (response_style == "echo" and language == "English"
-                    and not cleanup_stays_on_message(strip_audio_tags(message), strip_audio_tags(spoken))):
+                    and not stays(strip_audio_tags(message), strip_audio_tags(spoken))):
                 plain = build_system_prompt(PERSONALITY_PRESET_MAP[DEFAULT_PERSONALITY_PRESET]["prompt"],
-                                            budget, language, "echo")
+                                            budget, language, "echo", voice_style=prompt_voice_style)
                 retry, _, _, hit_ceiling, retry_seconds = get_chat_reply(
                     [{"role": "system", "content": plain}, {"role": "user", "content": source_message}],
                     budget, language, condense=False, temperature=0.0,
                 )
                 text_seconds += retry_seconds
                 spoken = retry.strip()
-                if not cleanup_stays_on_message(strip_audio_tags(message), strip_audio_tags(spoken)):
+                if not stays(strip_audio_tags(message), strip_audio_tags(spoken)):
                     spoken = message
                     hit_ceiling = False
+                    if shaping:
+                        # Your words, with tags only (no shaping).
+                        try:
+                            tagged = tag_message_with_ai(message, voice_style["delivery"])
+                            if has_audio_tags(tagged):
+                                spoken = tagged
+                        except Exception as e:
+                            log_server_event(f"Shape words for tags: {e}")
                 kept_exact = True
 
             # Cut off by the token ceiling: what you typed beats half of it.
@@ -7220,6 +7361,7 @@ def chat():
             "voiced": voiced,
             # NEW (1.5.0): Auto tags added some (your message, or its reply).
             "auto_tagged": auto_tagged and has_audio_tags(voiced),
+            "tag_shaped": shaping and not kept_exact and has_audio_tags(voiced),   # NEW (1.5.0)
             # NEW (1.5.0): which ElevenLabs model spoke it, when one did.
             "voice_model": (_elevenlabs_payload(voiced)["model_id"]
                             if speak and voice_engine == "elevenlabs" else ""),

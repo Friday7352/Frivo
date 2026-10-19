@@ -4013,3 +4013,11 @@ html.motion-ready .stage { transition: transform var(--dur-smooth) var(--spring-
 .voice-fit.is-made { border-color: var(--accent-line); background: var(--accent-soft); color: var(--accent); }
 .voice-fit.is-clone { color: var(--ink); }
 .voice-fit.is-older { opacity: 0.7; font-weight: 500; }
+
+/* NEW (1.5.0): a profile switch that doesn't apply to the style picked. */
+.field.is-dimmed .field-toggle-label { opacity: 0.55; }
+
+/* CHANGED (1.5.0): the voice in use shows a check in its mark, and its "…"
+   menu looks like every other row's. */
+.voice-row.is-current .voice-mark { color: var(--accent); }
+.voice-menu button:has(svg.is-danger) { color: var(--alert); }

@@ -1636,7 +1636,14 @@ function addTurn(who, text, opts = {}) {
     flag.title = "The clean-up added things you didn't say, so Frivo used your own wording instead.";
     stack.appendChild(flag);
   }
-  if (!isYou && opts.autoTagged) {
+  if (!isYou && opts.tagShaped) {
+    // NEW (1.5.0): Shape words for tags changed words next to the tags.
+    const flag = document.createElement("span");
+    flag.className = "turn-flag";
+    flag.textContent = "Shaped for tags";
+    flag.title = "Clean up added voice tags and lightly adjusted the words next to them (Shape words for tags).";
+    stack.appendChild(flag);
+  } else if (!isYou && opts.autoTagged) {
     // NEW (1.5.0): Auto tags added the voice tags shown in the bubble.
     const flag = document.createElement("span");
     flag.className = "turn-flag";
@@ -1915,6 +1922,7 @@ async function saveAllSettings({ close = false, quiet = false } = {}) {
     speaking_speed: speakingSpeedSlider ? parseInt(speakingSpeedSlider.value, 10) / 100 : 1,
     // NEW (1.5.0): Expressive voice and Delivery, for the default profile.
     expressive_voice: $("expressiveVoiceToggle") ? $("expressiveVoiceToggle").checked : false,
+    tag_shaping: $("tagShapingToggle") ? $("tagShapingToggle").checked : false,   // NEW (1.5.0)
     hold_accent: $("holdAccentRadios") ? getRadioValue($("holdAccentRadios"), "anchor") : "anchor",   // NEW (1.5.0)
     voice_accent: $("voiceAccentSelect") ? $("voiceAccentSelect").value : "auto",   // NEW (1.5.0)
     expressive_model: $("expressiveModelRadios") ? getRadioValue($("expressiveModelRadios"), "eleven_v4") : "eleven_v4",   // NEW (1.5.0)
@@ -3052,7 +3060,10 @@ function voiceRowNode(v) {
   const mark = document.createElement("span");
   mark.className = "voice-mark";
   mark.style.setProperty("--voice-color", voiceColor(v.voice_id));
-  mark.appendChild(iconNode("i-wave", "icon-18"));
+  // CHANGED (1.5.0): the voice in use shows its check here, so its "…"
+  // menu (Favorites and the rest) looks like every other row's.
+  mark.appendChild(iconNode(isCurrent ? "i-check" : "i-wave", "icon-18"));
+  if (isCurrent) mark.title = "The voice in use";
 
   // Three fixed columns — name, language, gender — so the values line up
   // down the list and can be compared by scanning rather than read one row
@@ -3142,10 +3153,9 @@ function voiceRowNode(v) {
   const menuBtn = document.createElement("button");
   menuBtn.type = "button";
   menuBtn.className = "voice-menu-btn";
-  menuBtn.classList.toggle("is-current", isCurrent);
-  menuBtn.title = isCurrent ? "Selected voice options" : "More";
+  menuBtn.title = "Favorites, details and more";
   menuBtn.setAttribute("aria-label", `More options for ${v.name}${isCurrent ? " (selected)" : ""}`);
-  menuBtn.appendChild(iconNode(isCurrent ? "i-check" : "i-dots", isCurrent ? "icon-16" : "icon-18"));
+  menuBtn.appendChild(iconNode("i-dots", "icon-18"));   // CHANGED (1.5.0): the same on every row
   menuBtn.addEventListener("click", (e) => {
     e.stopPropagation();
     openVoiceMenu(menuBtn, v);
@@ -3235,6 +3245,23 @@ function openVoiceMenu(anchor, v) {
       renderVoiceFilters();
       renderVoiceList();
     });
+  }
+  // NEW (1.5.0): remove it from your ElevenLabs voices. Default voices
+  // can't be removed, so they don't offer it.
+  if (voiceEngine(v) === "elevenlabs" && v.category && v.category !== "premade") {
+    item("Remove from my ElevenLabs voices", "i-trash", async () => {
+      const ask = v.is_owner
+        ? `Delete ${v.name} from your ElevenLabs account?\n\nIt's a voice you made, so this is permanent: it can't be brought back.`
+        : `Remove ${v.name} from your ElevenLabs voices?\n\nYou can add it back from ElevenLabs' Voice Library any time.`;
+      if (!window.confirm(ask)) return;
+      setStatus(`Removing ${v.name}…`);
+      const res = await fetch(`/api/voices/elevenlabs/${encodeURIComponent(v.voice_id)}`, { method: "DELETE" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) { setStatus(data.error || "Couldn't remove it.", true); return; }
+      if (voiceFavorites().includes(v.voice_id)) toggleFavorite(v.voice_id);
+      setStatus(`${v.name} removed from your ElevenLabs voices.`);
+      await loadVoices();
+    }, "is-danger");
   }
   item("Copy voice ID", "i-db", async () => {
     try {
@@ -3719,8 +3746,10 @@ function openModal(profile) {
     (id) => {
       if (!followLengthTouched) profileFollowLength.checked = id === "reply";
       updateFollowLengthHint(id);
+      if (typeof showShapingState === "function") showShapingState();   // NEW (1.5.0)
     }
   );
+  if (typeof showShapingState === "function") showShapingState();   // NEW (1.5.0): now the style is set
   fillOptionList(
     profilePersonalityPresetSelect,
     personalityPresets,
@@ -3834,6 +3863,7 @@ profileModalSave.addEventListener("click", async () => {
     response_style: getRadioValue(profileResponseStyleRadios, "echo"),
     follow_length: profileFollowLength.checked,  // NEW (1.5.0)
     expressive_voice: $("profileExpressive") ? $("profileExpressive").checked : false,   // NEW (1.5.0)
+    tag_shaping: $("profileShaping") ? $("profileShaping").checked : false,   // NEW (1.5.0)
     voice_delivery: $("profileDeliveryRadios") ? getRadioValue($("profileDeliveryRadios"), "natural") : "natural",   // NEW (1.5.0)
     personality_preset: profilePersonalityPresetSelect.value,
     language: profileLanguageSelect.value,
@@ -6291,6 +6321,7 @@ async function send() {
       wordTimes: data.word_times,  // NEW (1.5.0): exact word timings, or null
       voiced: data.voiced && data.voiced !== data.reply ? data.voiced : undefined,  // NEW (1.5.0): with its voice tags
       autoTagged: data.auto_tagged === true,   // NEW (1.5.0)
+      tagShaped: data.tag_shaped === true,     // NEW (1.5.0)
       voiceHow: data.voice_how || "",   // NEW (1.5.0)
       footer: pager ? pager.el : null,  // NEW (1.5.0)
       // NEW (1.5.0): what the Save button keeps, so it can be played again.
@@ -9327,6 +9358,8 @@ function applyVoiceStyleSettings(data) {
   if (Array.isArray(data.audio_tag_groups) && data.audio_tag_groups.length) audioTagGroups = data.audio_tag_groups;
   const toggle = $("expressiveVoiceToggle");
   if (toggle) toggle.checked = data.expressive_voice === true;
+  const shapingToggle = $("tagShapingToggle");
+  if (shapingToggle) shapingToggle.checked = data.tag_shaping === true;   // NEW (1.5.0)
   const hold = $("holdAccentRadios");
   const holdNote = $("holdAccentNote");
   if (hold && Array.isArray(data.hold_accent_modes) && data.hold_accent_modes.length) {
@@ -9377,6 +9410,10 @@ function fillProfileVoiceStyle(profile) {
     delivery: $("voiceDeliveryRadios") ? getRadioValue($("voiceDeliveryRadios"), "natural") : "natural",
   };
   if (expressive) expressive.checked = profile ? profile.expressive_voice === true : defaults.expressive;
+  const shaping = $("profileShaping");
+  if (shaping) shaping.checked = profile ? profile.tag_shaping === true
+    : ($("tagShapingToggle") ? $("tagShapingToggle").checked : false);
+  showShapingState();
   const pick = profile ? (profile.voice_delivery || "natural") : defaults.delivery;
   if (radios) {
     buildRadioGroup(radios, voiceDeliveries, "voiceDeliveryProfile", pick, (id) => {
@@ -9391,6 +9428,20 @@ function fillProfileVoiceStyle(profile) {
       ? "The AI adds voice tags like [laughs] or [softly] where they fit, and the voice acts them out. Uses ElevenLabs' v4 model (Settings > Voices > Tags model)."
       : "For ElevenLabs voices. This profile has a free voice, so these do nothing until it has an ElevenLabs one.";
   }
+}
+
+// NEW (1.5.0): Shape words for tags only does anything with Clean up.
+function showShapingState() {
+  const field = $("profileShapingField");
+  const box = $("profileShaping");
+  const hint = $("profileShapingHint");
+  if (!field || !box) return;
+  const style = typeof profileResponseStyleRadios !== "undefined" ? getRadioValue(profileResponseStyleRadios, "echo") : "echo";
+  const cleanUp = style === "echo";
+  field.classList.toggle("is-dimmed", !cleanUp);
+  if (hint) hint.textContent = cleanUp
+    ? "Clean up adds voice tags and may lightly change the words right next to them so they flow: dropping a \"haha\" when [laughs] performs it, adding an \"oh\" after [gasps]. Meaning stays yours."
+    : "Only works with Clean up. Pick Clean up above to use it.";
 }
 
 function renderVoiceTagGroups() {

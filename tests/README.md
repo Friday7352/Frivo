@@ -453,3 +453,5 @@ Double-click `tests/check-windows-voices.bat` on a Windows PC. It runs the real 
 - `test-voice-tags.py`: voice tags and Delivery. What ElevenLabs is sent for each setting, that the chatbox, word count and free voices never get tags, that Expressive voice tells the AI about them, that Suggest keeps every word, and that a refused v3 still speaks.
 
 - `test-personality-maker.py`: the personality maker. What the AI is asked for Create, Ideas to add and Add all; that answers are cleaned up and checked; that turned-down and already-written ideas aren't offered; that the conversation is used; and that a merge that loses your text falls back to adding at the end.
+
+- `test-voice-remove.py`: removing a voice from your ElevenLabs voices. Refused while a profile uses it, refused for free voices and bad ids, its anchors go with it, and ElevenLabs refusing is reported.

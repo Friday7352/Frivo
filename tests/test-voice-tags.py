@@ -228,6 +228,33 @@ check("the voice got the tag, the chatbox didn't", "[softly]" in posts[-1][1]["t
 status, data = chat("Don't tell anyone, okay?", auto_tags=False)
 check("off: as typed", data.get("auto_tagged") is False and data.get("voiced") == "Don't tell anyone, okay?", data)
 check("says how it was spoken", data.get("voice_how", "").startswith("v4 · Natural"), data.get("voice_how"))
+print("--- Shape words for tags ---")
+res = client.post("/api/profiles", json={"name": "Shaper", "voice_id": "EL1", "voice_name": "Rachel",
+                                         "response_style": "echo", "tag_shaping": True})
+shaper = (res.get_json() or {}).get("profile", {})
+check("a profile keeps Shape words for tags", shaper.get("tag_shaping") is True, shaper)
+model_says["text"] = "[laughs] That's so funny, I can't even."
+status, data = chat("haha thats so funny i cant even", profile_id=shaper["id"])
+system = [m["content"] for m in sent_prompts[-1] if m["role"] == "system"][0]
+check("Clean up is told it may shape the words next to a tag", "SHAPING THE WORDS AROUND A TAG" in system)
+check("a shaped line is used: the haha the laugh performs is gone", status == 200 and data.get("voiced") == "[laughs] That's so funny, I can't even."
+      and data.get("tag_shaped") is True and data.get("kept_exact") is False, data)
+calls_before = len(sent_prompts)
+status, data = chat("haha thats so funny i cant even", profile_id=shaper["id"], auto_tags=True)
+check("with Auto tags on too, no separate tagging call", len(sent_prompts) - calls_before == 1, len(sent_prompts) - calls_before)
+model_says["text"] = "[gasps] Oh, wait, really? You beat it?"
+status, data = chat("wait really you beat it", profile_id=shaper["id"])
+check("a short lead-in after a tag is fine", data.get("voiced") == "[gasps] Oh, wait, really? You beat it?" and data.get("tag_shaped") is True, data)
+model_says["text"] = "[excited] That is amazing news and I am so proud of you for finally doing it, champion!"
+status, data = chat("wait really you beat it", profile_id=shaper["id"])
+check("new content is still caught: falls back to your words", data.get("kept_exact") is True and "proud" not in data.get("reply", ""), data)
+check("the looser check: drops and lead-ins pass", mod.tag_shaping_stays_on_message("haha thats so funny", "That's so funny")
+      and mod.tag_shaping_stays_on_message("you beat it", "Oh, you beat it?"))
+check("... a rewrite doesn't", not mod.tag_shaping_stays_on_message("you beat it", "Congratulations on the incredible victory, friend"))
+mod.CFG.update(response_style="reply")
+p = mod.build_system_prompt("Fun.", 80, "English", "reply", voice_style={"expressive": True, "delivery": "natural", "shaping": True})
+check("a Reply profile isn't shaped", "SHAPING" not in p)
+mod.CFG.update(response_style="mimic")
 spoken_free = []
 mod.CFG.update(voice_id="piper:alba")
 mod.piper_problem = lambda *a, **k: None

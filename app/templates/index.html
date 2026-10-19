@@ -833,6 +833,17 @@
                       <span class="switch-track" aria-hidden="true"></span>
                     </span>
                   </label>
+                  <!-- NEW (1.5.0): Shape words for tags, for the default profile. -->
+                  <label class="srow">
+                    <span class="srow-main srow-main--flex">
+                      <span class="srow-label">Shape words for tags</span>
+                      <span class="srow-sub">With Clean up: the AI adds tags and may lightly change the words right next to them so they flow. For the default profile.</span>
+                    </span>
+                    <span class="switch">
+                      <input type="checkbox" id="tagShapingToggle">
+                      <span class="switch-track" aria-hidden="true"></span>
+                    </span>
+                  </label>
                   <div class="srow">
                     <span class="srow-main srow-main--flex">
                       <span class="srow-label">Delivery</span>
@@ -1596,6 +1607,20 @@
           </span>
           <span class="switch">
             <input type="checkbox" id="profileExpressive">
+            <span class="switch-track" aria-hidden="true"></span>
+          </span>
+        </label>
+      </div>
+
+      <!-- NEW (1.5.0): Shape words for tags (Clean up only). -->
+      <div class="field" id="profileShapingField">
+        <label class="field-toggle">
+          <span class="field-toggle-text">
+            <span class="field-toggle-label">Shape words for tags</span>
+            <span class="field-hint" id="profileShapingHint">Clean up adds voice tags and may lightly change the words right next to them so they flow: dropping a "haha" when [laughs] performs it, adding an "oh" after [gasps]. Meaning stays yours.</span>
+          </span>
+          <span class="switch">
+            <input type="checkbox" id="profileShaping">
             <span class="switch-track" aria-hidden="true"></span>
           </span>
         </label>
