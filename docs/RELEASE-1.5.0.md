@@ -280,3 +280,16 @@ Above the personality box, in the profile editor and in Settings > Replies. It u
 
 - With an ElevenLabs voice, a moment after you stop typing (four words or more), the AI suggests where a voice tag would fit. Each idea floats just above the word it goes before, and that word is softly marked; pointing at an idea marks its word more clearly. Click one to put it in, **Add all** for every one, × to hide them for this message. An idea whose spot you've since changed disappears. **Suggest tags as I type** in the ✦ menu turns it off.
 - The v3 voice no longer drifts between accents. It used to work out the language from each line by itself, and guessed differently on short or tagged lines, so one voice could sound American, Scottish or Russian from one reply to the next. Frivo now tells it the language you've selected and keeps its delivery steady, and accent tags (`[british accent]`) are only used when you type them yourself.
+
+### Live, and a steadier accent
+
+- Tag ideas now update as you type: Frivo asks the moment you finish each word (one question at a time), ideas that still fit stay where they are and glide along with their word, new ones fade in and ones that no longer fit fade out. The box doesn't jump in height between updates.
+- The accent kept changing for two more reasons, both fixed. A message with a tag used the v3 model and one without used the usual model, and the same voice sounds different enough on each to seem like another accent; now, once a conversation has used v3, it stays on v3 for half an hour. And v3 on Natural used its looser setting, where a voice wanders; Natural (and Calm) now use v3's steadiest setting, which still performs the tags, and Lively uses its middle one.
+
+### Voice tags, fixed up
+
+- **Instant.** The moment you type, Frivo's own quick rules put up ideas for words that plainly call for one ("haha", "ugh", "wow", a "guess what...!" sentence), shown dashed. The AI is asked as you finish each word and its ideas replace them. If the AI can't answer, the quick ones stay.
+- **They change with the text.** Each idea remembers the words it was made for: it follows its word, goes when that word changes, and goes when you put a tag in front of that word yourself (typed, or from the ✦ picker).
+- **Scrolled away.** When a long message has scrolled, ideas for words out of view are counted on a small arrow at that edge (‹ 2); click it to scroll to them.
+- **Dictation** and a click in the dictation history now update the ideas too, and switching to a free voice clears them.
+- **The accent, properly.** ElevenLabs' own guidance says v3 is "more likely to produce variable results" on text under about 250 characters, which is most replies, and the API has continuity fields for exactly that. Each v3 request now carries the ids and words of the last three things the voice said in this conversation (previous_request_ids / previous_text), which the API uses to match the new line to them, plus the language and a fixed seed. Natural and Lively are back on v3's Natural setting (Robust muted the tags); Calm stays Robust.

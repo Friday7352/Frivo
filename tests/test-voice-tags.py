@@ -73,6 +73,9 @@ check("Calm: Robust v3", mod._elevenlabs_payload("[softly] Hi.")["voice_settings
 mod.CFG.update(voice_delivery="lively")
 lively = mod._elevenlabs_payload("Hi.")["voice_settings"]
 check("Lively: looser, with style", lively["stability"] == 0.3 and lively.get("style") == 0.35, lively)
+check("Lively on v3: Natural, never Creative", mod._elevenlabs_payload("[laughs] Hi.")["voice_settings"]["stability"] == 0.5)
+mod.CFG.update(voice_delivery="natural")
+check("Natural on v3: Natural (the stitching below holds the accent)", mod._elevenlabs_payload("[laughs] Hi.")["voice_settings"]["stability"] == 0.5)
 mod.CFG.update(voice_delivery="natural", expressive_voice=True)
 check("Expressive voice: v3 even with no tag", mod._elevenlabs_payload("Hi.")["model_id"] == "eleven_v3")
 check("the fallback drops the tags", mod._elevenlabs_payload("[laughs] Hi.", force_v2=True)["text"] == "Hi.")
@@ -102,7 +105,7 @@ def fake_post(url, **kw):
     align = {"characters": list(text),
              "character_start_times_seconds": [i / 10 for i in range(len(text))],
              "character_end_times_seconds": [i / 10 + 0.08 for i in range(len(text))]}
-    return SimpleNamespace(status_code=200, text="", content=b"mp3",
+    return SimpleNamespace(status_code=200, text="", content=b"mp3", headers={"request-id": f"req{len(posts)}"},
                            json=lambda: {"audio_base64": base64.b64encode(b"mp3").decode(), "alignment": align})
 
 
@@ -130,6 +133,18 @@ check("the highlight still has a time per word", len(data.get("word_times") or [
 check("the tags are counted as credits", data.get("credits") == len(data.get("voiced", "")), data.get("credits"))
 check("word count leaves them out", data.get("word_count") == 5, data.get("word_count"))
 
+first_id = "req%d" % len(posts)
+status, data = chat("No tags in this one.")
+check("after a tag, the next message stays on v3 (no accent jump)", posts[-1][1]["model_id"] == "eleven_v3", posts[-1][1])
+check("... and is told to match what the voice just said",
+      posts[-1][1].get("previous_request_ids") == [first_id] and "[whispers]" in posts[-1][1].get("previous_text", ""),
+      {k: posts[-1][1].get(k) for k in ("previous_request_ids", "previous_text")})
+status, data = chat("A third one.")
+status, data = chat("A fourth one.")
+check("at most the last three", len(posts[-1][1].get("previous_request_ids") or []) == 3, posts[-1][1].get("previous_request_ids"))
+status, data = chat("Another, from a different page.", session_id="other")
+check("... but another conversation starts on the usual model, with no stitching",
+      posts[-1][1]["model_id"] == "eleven_multilingual_v2" and "previous_request_ids" not in posts[-1][1], posts[-1][1])
 spoken_free = []
 mod.CFG.update(voice_id="piper:alba")
 mod.piper_problem = lambda *a, **k: None

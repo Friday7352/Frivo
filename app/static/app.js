@@ -4328,11 +4328,13 @@ function appendToMessageInput(text) {
   const existing = messageInput.value;
   if (!existing.trim()) {
     messageInput.value = addition;
+    if (typeof tagIdeasState === "object" && tagIdeasState) messageBoxChanged();   // NEW (1.5.0)
     return;
   }
   messageInput.value = /\s$/.test(existing)
     ? existing + addition
     : `${existing} ${addition}`;
+  if (typeof tagIdeasState === "object" && tagIdeasState) messageBoxChanged();   // NEW (1.5.0)
 }
 
 function setDictateUI(active) {
@@ -4571,6 +4573,7 @@ function renderLiveText() {
   const keepCaret = typing && start != null &&
     next.slice(0, end) === messageInput.value.slice(0, end) && end < messageInput.value.length;
   messageInput.value = next;
+  if (typeof tagIdeasState === "object" && tagIdeasState) messageBoxChanged();   // NEW (1.5.0): dictation, too
   if (keepCaret) {
     messageInput.setSelectionRange(start, end);
     return;
@@ -5464,6 +5467,7 @@ function addListenEntry() {
       appendToMessageInput(spoken);
     } else {
       messageInput.value = spoken;
+      if (typeof tagIdeasState === "object" && tagIdeasState) messageBoxChanged();   // NEW (1.5.0)
     }
     messageInput.focus();
     // Put the caret at the end, so typing continues the sentence rather
@@ -6173,7 +6177,7 @@ async function send() {
   if (speakEnabled()) ensureAudioContext();
 
   messageInput.value = "";
-  if (typeof clearTagIdeas === "function") clearTagIdeas();   // NEW (1.5.0)
+  if (typeof tagIdeasState === "object" && tagIdeasState) clearTagIdeas();   // NEW (1.5.0)
   cancelAutoSend();
   setTypedByHand(false);   // NEW (1.5.0): the next message is back to auto-send
   beginReplyTyping();      // NEW (1.5.0): dots stay up until the chatbox message goes out
@@ -9377,7 +9381,8 @@ function updateVoiceTagButton() {
   if (!eleven) {
     const pop = $("voiceTagPop");
     if (pop) pop.classList.add("is-hidden");
-  }
+    if (typeof tagIdeasState === "object" && tagIdeasState) clearTagIdeas();   // a free voice can't use them
+  } else if (typeof tagIdeasState === "object" && tagIdeasState) messageBoxChanged();
 }
 
 (function wireVoiceTags() {
@@ -9843,48 +9848,128 @@ function makePersonalityHelper(textarea, getContext, storageKey) {
 // ---------------------------------------------------------------------------
 
 var TAG_IDEAS_KEY = "frivo_tag_ideas";
-var tagIdeasState = { ideas: [], words: [], asked: "", timer: null, controller: null, dismissed: "" };
+// CHANGED (1.5.0): live and instant. The moment you type, Frivo's own quick
+// rules put up ideas for the words that plainly call for one ("haha",
+// "ugh", "guess what...!"); the AI is asked as you finish each word and
+// its answer replaces them. Every idea keeps the words it was made for, so
+// it lands in the right place however late it arrives, goes away when you
+// put that tag in yourself, and follows its word when the box scrolls.
+var tagIdeasState = {
+  ideas: [],            // [{ tag, at, words, key, instant }]
+  nodes: new Map(),     // key -> { pill, mark, idea }
+  asked: "",            // the words last asked of the AI
+  answered: "",         // the words the AI's current answer is for
+  timer: null,
+  inFlight: false,
+  again: false,         // more was typed while asking: ask once more after
+  lastAskAt: 0,
+  paused: false,        // × pressed: none for this message
+  hideTimer: null,
+  aiDown: false,        // the AI couldn't answer: quick ideas stay
+};
 
 function tagIdeasOn() {
   try { return localStorage.getItem(TAG_IDEAS_KEY) !== "off"; } catch (e) { return true; }
 }
 
-// The words that are said (tags left out), each with where it starts.
+// The words that are said (tags left out), each with where it starts and
+// whether a tag already sits right before it.
 function spokenWords(text) {
   const out = [];
   const re = /\[[^\]\n]*\]|\S+/g;
   let m;
+  let tagBefore = false;
   while ((m = re.exec(text))) {
-    if (/^\[[A-Za-z][A-Za-z' \-]{0,38}\]$/.test(m[0])) continue;
-    out.push({ word: m[0], start: m.index, end: m.index + m[0].length });
+    if (/^\[[A-Za-z][A-Za-z' \-]{0,38}\]$/.test(m[0])) { tagBefore = true; continue; }
+    out.push({ word: m[0], start: m.index, end: m.index + m[0].length, tagged: tagBefore });
+    tagBefore = false;
   }
+  out.endsWithTag = /\]\s*$/.test(text);
   return out;
+}
+
+// Frivo's own quick ideas, for words that plainly call for a tag. Each
+// rule: the words that trigger it (case-insensitive, punctuation ignored)
+// and the tag, put before that word; "sentence" rules go before the start
+// of the sentence the word is in.
+var INSTANT_TAG_RULES = [
+  { words: /^(haha+|hehe+|lol|lmao|rofl|lmfao)$/i, tag: "laughs" },
+  { words: /^(ugh+|sigh|meh|welp)$/i, tag: "sighs" },
+  { words: /^(wow+|whoa+|woah+|omg|gasp)$/i, tag: "gasps" },
+  { words: /^(shh+|psst|secret|secretly)$/i, tag: "whispers", sentence: true },
+  { words: /^(yay+|woohoo+|yesss+|finally|hooray)$/i, tag: "excited", sentence: true },
+  { words: /^(sorry|apologies)$/i, tag: "softly", sentence: true },
+  { words: /^(sadly|unfortunately|miss)$/i, tag: "sad", sentence: true },
+  { words: /^(seriously|riiight|suuure)$/i, tag: "sarcastic", sentence: true },
+  { words: /^(um+|uh+|hmm+|erm+|well)$/i, tag: "pause" },
+];
+
+function instantTagIdeas(words) {
+  const out = [];
+  const taken = new Set();
+  const bare = (w) => w.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "");
+  // Where each sentence starts.
+  const starts = [];
+  let sentenceStart = 0;
+  words.forEach((w, i) => { starts.push(sentenceStart); if (/[.!?]+["')\]]*$/.test(w.word)) sentenceStart = i + 1; });
+  words.forEach((w, i) => {
+    const plain = bare(w.word);
+    if (!plain) return;
+    for (const rule of INSTANT_TAG_RULES) {
+      if (!rule.words.test(plain)) continue;
+      const at = rule.sentence ? starts[i] : i;
+      if (taken.has(at) || words[at].tagged) break;
+      taken.add(at);
+      out.push({ tag: rule.tag, at, instant: true });
+      break;
+    }
+  });
+  // "Guess what...!" and the like: excitement from the start of a sentence
+  // that ends in an exclamation mark and sounds like good news.
+  words.forEach((w, i) => {
+    if (!/!+["')\]]*$/.test(w.word)) return;
+    const at = starts[i];
+    if (taken.has(at) || words[at].tagged) return;
+    const sentence = words.slice(at, i + 1).map((x) => bare(x.word).toLowerCase()).join(" ");
+    if (/\b(guess what|can't believe|cannot believe|we did it|i did it|let's go|lets go|so happy|awesome|amazing|best day|i won|we won|beat)\b/.test(sentence)) {
+      taken.add(at);
+      out.push({ tag: "excited", at, instant: true });
+    }
+  });
+  return out.slice(0, 3);
 }
 
 function clearTagIdeas() {
   const st = tagIdeasState;
   clearTimeout(st.timer);
-  if (st.controller) st.controller.abort();
-  st.controller = null;
   st.ideas = [];
   st.asked = "";
-  st.dismissed = "";
-  renderTagIdeas();
+  st.answered = "";
+  st.again = false;
+  st.paused = false;
+  st.aiDown = false;
+  renderTagIdeas({ now: true });
 }
 
-// Still fits: the words up to and including the one it goes before are
-// the same as when it was suggested.
+// Where an idea goes, or null when it no longer applies: the words up to
+// and including the one it goes before must still be the same, and that
+// word mustn't already have a tag in front of it (you put one in). One
+// meant for the end only fits while nothing's been added.
 function tagIdeaPlace(idea) {
   const input = $("messageInput");
   if (!input) return null;
   const now = spokenWords(input.value);
-  const then = tagIdeasState.words;
+  const then = idea.words || [];
   const upto = Math.min(idea.at + 1, then.length);
   for (let i = 0; i < upto; i++) {
     if (!now[i] || now[i].word !== then[i]) return null;
   }
-  if (idea.at < now.length) return { offset: now[idea.at].start, end: false };
-  return now.length ? { offset: now[now.length - 1].end, end: true } : null;
+  if (idea.at < then.length) {
+    if (idea.at >= now.length || now[idea.at].tagged) return null;
+    return { offset: now[idea.at].start, end: false };
+  }
+  if (now.length !== then.length || !now.length || now.endsWithTag) return null;
+  return { offset: now[now.length - 1].end, end: true };
 }
 
 function putTagIdea(idea) {
@@ -9905,6 +9990,7 @@ function textWidthIn(input, str) {
   if (!tagMeasureCtx) tagMeasureCtx = document.createElement("canvas").getContext("2d");
   const cs = getComputedStyle(input);
   tagMeasureCtx.font = `${cs.fontStyle} ${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
+  tagMeasureCtx.letterSpacing = cs.letterSpacing === "normal" ? "0px" : cs.letterSpacing;
   return tagMeasureCtx.measureText(str).width;
 }
 function textBoxIn(input, start, end) {
@@ -9913,80 +9999,165 @@ function textBoxIn(input, start, end) {
   const right = input.offsetLeft + input.offsetWidth - parseFloat(cs.borderRightWidth || 0) - parseFloat(cs.paddingRight || 0);
   const x = left + textWidthIn(input, input.value.slice(0, start)) - input.scrollLeft;
   const w = Math.max(6, textWidthIn(input, input.value.slice(start, end)));
-  return { x, w, visible: x + w > left - 1 && x < right + 1, left, right };
+  const side = x + w <= left + 2 ? "left" : x >= right - 2 ? "right" : "";
+  return { x, w, visible: !side, side, left, right, rawX: x + input.scrollLeft };
 }
 
-function renderTagIdeas() {
+function fadeOut(el) {
+  if (!el) return;
+  el.classList.add("is-leaving");
+  setTimeout(() => el.remove(), 170);
+}
+
+// Pills and marks are kept between updates, so one that still fits stays
+// put (gliding if its word moved) instead of blinking. Ideas for words
+// scrolled out of view are counted on a small arrow at that edge, which
+// scrolls to them.
+function renderTagIdeas({ now = false } = {}) {
   const float = $("tagIdeas");
   const pills = $("tagIdeasChips");
   const marks = $("tagMarks");
   const input = $("messageInput");
   if (!float || !pills || !marks || !input) return;
   const st = tagIdeasState;
-  // Ideas whose spot has changed are dropped.
   st.ideas = st.ideas.filter((idea) => tagIdeaPlace(idea));
-  pills.replaceChildren();
-  marks.replaceChildren();
-  // The marks line up with the text by its distance from the bottom, which
-  // doesn't change while the box grows to make room for the ideas.
-  const box0 = input.closest(".composer");
-  if (box0) {
-    marks.style.top = "auto";
-    marks.style.bottom = `${box0.clientHeight - input.offsetTop - input.offsetHeight}px`;
-    marks.style.height = `${input.offsetHeight}px`;
-  }
-  const now = spokenWords(input.value);
-  const placed = [];
+  const composer = input.closest(".composer");
+  const words = spokenWords(input.value);
+  const wanted = new Map();
+  const offscreen = { left: [], right: [] };
   st.ideas.forEach((idea) => {
-    const word = now[idea.at];
+    const atEnd = idea.at >= (idea.words || []).length;
+    const word = atEnd ? null : words[idea.at];
     const box = word
       ? textBoxIn(input, word.start, word.end)
       : textBoxIn(input, input.value.length, input.value.length);
-    if (!box.visible) return;
-    let mark = null;
-    if (word) {
-      // The word it goes before, softly marked.
-      mark = document.createElement("span");
-      mark.className = "tag-mark";
-      mark.style.left = `${box.x - 3}px`;
-      mark.style.width = `${box.w + 6}px`;
-      mark.style.top = "calc(50% - 12px)";
-      marks.append(mark);
-    }
-    const pill = document.createElement("button");
-    pill.type = "button";
-    pill.className = "tag-pill";
-    pill.textContent = idea.tag;
-    pill.title = word ? `Put [${idea.tag}] before “${word.word}”` : `Put [${idea.tag}] at the end`;
-    pill.addEventListener("click", () => applyTagIdeas([idea]));
-    if (mark) {
-      pill.addEventListener("pointerenter", () => mark.classList.add("is-hot"));
-      pill.addEventListener("pointerleave", () => mark.classList.remove("is-hot"));
-      pill.addEventListener("focus", () => mark.classList.add("is-hot"));
-      pill.addEventListener("blur", () => mark.classList.remove("is-hot"));
-    }
-    pills.append(pill);
-    placed.push({ pill, center: box.x + (word ? box.w / 2 : 0) });
+    if (box.visible) wanted.set(idea.key, { idea, word, box });
+    else offscreen[box.side].push({ idea, box });
   });
-  float.classList.toggle("is-hidden", !placed.length);   // shown first, so the pills can be measured
-  const composer = input.closest(".composer");
-  if (composer) composer.classList.toggle("has-tag-ideas", placed.length > 0);
-  // Each pill sits centred over its word, without overlapping the one before.
+  ["left", "right"].forEach((side) => {
+    if (offscreen[side].length) wanted.set(`edge-${side}`, { edge: side, list: offscreen[side] });
+  });
+
+  // Gone: fade out.
+  st.nodes.forEach((node, key) => {
+    if (wanted.has(key)) return;
+    fadeOut(node.pill);
+    fadeOut(node.mark);
+    st.nodes.delete(key);
+  });
+
+  if (wanted.size) {
+    clearTimeout(st.hideTimer);
+    st.hideTimer = null;
+    float.classList.remove("is-hidden");
+    marks.classList.remove("is-hidden");
+    if (composer) composer.classList.add("has-tag-ideas");
+  }
+  // The marks line up with the text by its distance from the bottom, which
+  // doesn't change while the box grows to make room for the ideas.
+  if (composer) {
+    marks.style.top = "auto";
+    marks.style.bottom = `${composer.clientHeight - input.offsetTop - input.offsetHeight}px`;
+    marks.style.height = `${input.offsetHeight}px`;
+  }
+
+  const placed = [];
+  const edges = {};
+  wanted.forEach((want, key) => {
+    let node = st.nodes.get(key);
+    if (want.edge) {
+      if (!node) {
+        const pill = document.createElement("button");
+        pill.type = "button";
+        pill.className = `tag-pill tag-pill--edge is-${want.edge}`;
+        node = { pill, mark: null, list: want.list };
+        pill.addEventListener("click", () => {
+          // Scroll the box so the nearest hidden word is in view.
+          const target = node.list.slice().sort((a, b) =>
+            want.edge === "left" ? b.box.rawX - a.box.rawX : a.box.rawX - b.box.rawX)[0];
+          if (!target) return;
+          const cs = getComputedStyle(input);
+          const pad = parseFloat(cs.paddingLeft || 0) + 24;
+          input.scrollLeft = want.edge === "left"
+            ? Math.max(0, target.box.rawX - (input.offsetLeft + pad))
+            : Math.max(0, target.box.rawX + target.box.w - (input.offsetLeft + input.clientWidth) + pad);
+          renderTagIdeas();
+        });
+        pills.append(pill);
+        st.nodes.set(key, node);
+      }
+      node.list = want.list;
+      const n = want.list.length;
+      node.pill.textContent = want.edge === "left" ? `‹ ${n}` : `${n} ›`;
+      node.pill.title = `${n} idea${n === 1 ? "" : "s"} for words scrolled out of view. Click to see.`;
+      edges[want.edge] = node.pill;
+      return;
+    }
+    const { idea, word, box } = want;
+    if (!node) {
+      const pill = document.createElement("button");
+      pill.type = "button";
+      pill.className = "tag-pill";
+      pill.textContent = idea.tag;
+      node = { pill, mark: null, idea };
+      pill.addEventListener("click", () => applyTagIdeas([node.idea]));
+      const hot = (on) => { if (node.mark) node.mark.classList.toggle("is-hot", on); };
+      pill.addEventListener("pointerenter", () => hot(true));
+      pill.addEventListener("pointerleave", () => hot(false));
+      pill.addEventListener("focus", () => hot(true));
+      pill.addEventListener("blur", () => hot(false));
+      pills.append(pill);
+      if (word) {
+        node.mark = document.createElement("span");
+        node.mark.className = "tag-mark";
+        node.mark.style.top = "calc(50% - 12px)";
+        marks.append(node.mark);
+      }
+      st.nodes.set(key, node);
+    }
+    node.idea = idea;
+    node.pill.classList.toggle("is-instant", Boolean(idea.instant));
+    node.pill.title = (word ? `Put [${idea.tag}] before “${word.word}”` : `Put [${idea.tag}] at the end`)
+      + (idea.instant ? " (Frivo's quick guess; the AI's ideas replace it)" : "");
+    if (node.mark) {
+      node.mark.style.left = `${box.x - 3}px`;
+      node.mark.style.width = `${box.w + 6}px`;
+    }
+    placed.push({ pill: node.pill, center: box.x + (word ? box.w / 2 : 0) });
+  });
+
+  // Each pill sits centred over its word, without overlapping the one
+  // before; the edge arrows hold the ends.
   const limit = pills.clientWidth || float.clientWidth;
   let edge = 0;
+  let cap = limit;
+  if (edges.left) { edges.left.style.left = "0px"; edge = edges.left.offsetWidth + 4; }
+  if (edges.right) { cap = limit - edges.right.offsetWidth - 4; edges.right.style.left = `${Math.max(0, cap + 4)}px`; }
   placed.sort((a, b) => a.center - b.center).forEach(({ pill, center }) => {
     const w = pill.offsetWidth;
     let left = Math.round(center - w / 2);
     left = Math.max(left, edge, 0);
-    left = Math.min(left, Math.max(0, limit - w));
+    left = Math.min(left, Math.max(0, cap - w));
     pill.style.left = `${left}px`;
     pill.style.setProperty("--point", `${Math.round(Math.min(Math.max(center - left, 8), w - 8))}px`);
     edge = left + w + 4;
   });
   const all = $("tagIdeasAll");
-  if (all) all.classList.toggle("is-hidden", placed.length < 2);
-  float.classList.toggle("is-hidden", !placed.length);
-  marks.classList.toggle("is-hidden", !placed.length);
+  if (all) all.classList.toggle("is-hidden", st.ideas.length < 2);
+
+  if (!wanted.size) {
+    // Held open a moment, so the box doesn't jump while new ideas are on
+    // their way.
+    const close = () => {
+      st.hideTimer = null;
+      if (st.nodes.size) return;
+      float.classList.add("is-hidden");
+      marks.classList.add("is-hidden");
+      if (composer) composer.classList.remove("has-tag-ideas");
+    };
+    if (now || !input.value.trim()) close();
+    else if (!st.hideTimer) st.hideTimer = setTimeout(close, st.inFlight ? 1600 : 900);
+  }
 }
 
 function applyTagIdeas(list) {
@@ -9996,48 +10167,112 @@ function applyTagIdeas(list) {
   const sorted = list.slice().sort((a, b) => b.at - a.at);
   let any = false;
   sorted.forEach((idea) => { if (putTagIdea(idea)) any = true; });
-  // The words haven't changed, only tags were added, so the rest still fit.
   tagIdeasState.ideas = tagIdeasState.ideas.filter((i) => !list.includes(i));
-  tagIdeasState.asked = spokenWords(input.value).map((w) => w.word).join(" ");
   if (any) {
     if (typeof cancelAutoSend === "function") cancelAutoSend();
     if (typeof setTypedByHand === "function") setTypedByHand(true);
     input.focus();
     try { input.setSelectionRange(input.value.length, input.value.length); } catch (e) { /* fine */ }
   }
-  renderTagIdeas();
+  renderTagIdeas({ now: !tagIdeasState.ideas.length });
+}
+
+function tagIdeaKey(idea) {
+  return `${idea.tag}@${idea.at}:${(idea.words || [])[idea.at] || "end"}`;
+}
+
+function withWords(list, words) {
+  return list.map((idea) => {
+    const full = { tag: idea.tag, at: idea.at, words, instant: Boolean(idea.instant) };
+    full.key = tagIdeaKey(full);
+    return full;
+  });
+}
+
+// Frivo's quick ideas for the message as it is now, kept only where the
+// AI hasn't answered for these words yet (its answer wins).
+function refreshInstantIdeas() {
+  const input = $("messageInput");
+  const st = tagIdeasState;
+  if (!input || st.paused) return;
+  const spoken = spokenWords(input.value);
+  const words = spoken.map((w) => w.word);
+  const key = words.join(" ");
+  const fromAi = st.ideas.filter((i) => !i.instant);
+  if (key === st.answered && !st.aiDown) {
+    st.ideas = fromAi;   // the AI has spoken for exactly this text
+    return;
+  }
+  const quick = withWords(instantTagIdeas(spoken), words)
+    .filter((q) => !fromAi.some((a) => a.at === q.at && tagIdeaPlace(a)));
+  st.ideas = fromAi.concat(quick);
 }
 
 async function askTagIdeas() {
   const input = $("messageInput");
   const st = tagIdeasState;
-  if (!input || !tagIdeasOn()) return;
+  if (!input || !tagIdeasOn() || st.paused) return;
   const wrap = $("voiceTagWrap");
   if (!wrap || wrap.classList.contains("is-hidden")) return;   // not an ElevenLabs voice
   const words = spokenWords(input.value).map((w) => w.word);
   const key = words.join(" ");
-  if (words.length < 4 || key === st.asked || key === st.dismissed) return;
-  if (st.controller) st.controller.abort();
-  const mine = new AbortController();
-  st.controller = mine;
+  if (words.length < 3 || key === st.asked) return;
+  if (st.inFlight) { st.again = true; return; }   // asked again when this answer is in
+  st.inFlight = true;
   st.asked = key;
+  st.lastAskAt = Date.now();
+  wrap.classList.add("is-thinking");
   try {
     const res = await fetch("/api/voice-tags/suggest", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text: input.value, profile_id: currentProfileId || null }),
-      signal: mine.signal,
     });
     const data = await res.json();
-    if (mine !== st.controller || !res.ok) return;
-    st.words = words;
-    st.ideas = (data.ideas || []).slice(0, 4);
-    renderTagIdeas();
+    if (!st.paused && input.value.trim()) {
+      if (res.ok) {
+        st.aiDown = false;
+        st.answered = key;
+        // The AI's view replaces the last one and Frivo's quick guesses;
+        // an idea that's the same keeps its pill.
+        st.ideas = withWords((data.ideas || []).slice(0, 4), words);
+        refreshInstantIdeas();   // quick ideas for anything typed since
+        renderTagIdeas();
+      } else {
+        st.aiDown = true;   // the quick ideas stay up
+      }
+    }
   } catch (err) {
-    /* quiet: ideas are optional */
+    st.aiDown = true;
   } finally {
-    if (mine === st.controller) st.controller = null;
+    st.inFlight = false;
+    wrap.classList.remove("is-thinking");
+    if (st.again) {
+      st.again = false;
+      askTagIdeas();
+    }
   }
+}
+
+// Anything that changes the message box calls this: typing, dictation,
+// the picker, a click in the dictation history.
+function messageBoxChanged() {
+  const input = $("messageInput");
+  const st = tagIdeasState;
+  if (!input) return;
+  if (!input.value.trim()) { clearTagIdeas(); return; }
+  const wrap = $("voiceTagWrap");
+  if (!tagIdeasOn() || !wrap || wrap.classList.contains("is-hidden")) return;
+  refreshInstantIdeas();
+  renderTagIdeas();   // moves the ideas along, and drops any whose word changed
+  clearTimeout(st.timer);
+  // The AI is asked the moment a word is finished (one question at a
+  // time; anything typed meanwhile is asked about as soon as the answer
+  // is in), a little later mid-word, and at least every two seconds while
+  // you keep typing.
+  const finished = /[\s.,!?;:]$/.test(input.value);
+  const overdue = Date.now() - st.lastAskAt > 2000;
+  st.timer = setTimeout(askTagIdeas, overdue || finished ? 40 : 600);
 }
 
 (function wireTagIdeas() {
@@ -10048,26 +10283,22 @@ async function askTagIdeas() {
     toggle.addEventListener("change", () => {
       try { localStorage.setItem(TAG_IDEAS_KEY, toggle.checked ? "on" : "off"); } catch (e) { /* not kept */ }
       if (!toggle.checked) clearTagIdeas();
+      else messageBoxChanged();
     });
   }
   const all = $("tagIdeasAll");
   if (all) all.addEventListener("click", () => applyTagIdeas(tagIdeasState.ideas));
   const close = $("tagIdeasClose");
   if (close) close.addEventListener("click", () => {
-    tagIdeasState.dismissed = tagIdeasState.asked;
+    tagIdeasState.paused = true;   // none for this message
     tagIdeasState.ideas = [];
-    renderTagIdeas();
+    renderTagIdeas({ now: true });
   });
   if (!input) return;
   // The box scrolls sideways as a long message grows, so the ideas follow.
   ["scroll", "keyup", "click", "select"].forEach((type) => input.addEventListener(type, () => {
-    if (tagIdeasState.ideas.length) renderTagIdeas();
+    if (tagIdeasState.nodes.size) renderTagIdeas();
   }));
-  window.addEventListener("resize", () => { if (tagIdeasState.ideas.length) renderTagIdeas(); });
-  input.addEventListener("input", () => {
-    renderTagIdeas();   // drops ideas whose spot just changed
-    clearTimeout(tagIdeasState.timer);
-    if (!input.value.trim()) { clearTagIdeas(); return; }
-    tagIdeasState.timer = setTimeout(askTagIdeas, 1400);
-  });
+  window.addEventListener("resize", () => { if (tagIdeasState.nodes.size) renderTagIdeas(); });
+  input.addEventListener("input", messageBoxChanged);
 })();

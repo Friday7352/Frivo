@@ -3918,3 +3918,22 @@ html.motion-ready .stage { transition: transform var(--dur-smooth) var(--spring-
   font-size: var(--text-footnote); color: var(--ink);
   cursor: pointer;
 }
+/* CHANGED (1.5.0): live tag ideas. Pills glide when their word moves and
+   fade when they no longer fit; the ✦ button breathes while asking. */
+.tag-pill { transition: opacity 170ms var(--ease), translate 260ms var(--spring-snappy, var(--ease)),
+                        left 220ms var(--spring-smooth, var(--ease)),
+                        background var(--dur) var(--ease), border-color var(--dur) var(--ease); }
+.tag-pill.is-leaving, .tag-mark.is-leaving { opacity: 0; pointer-events: none; }
+.tag-mark { transition: left 220ms var(--spring-smooth, var(--ease)), width 220ms var(--spring-smooth, var(--ease)),
+                        background 160ms var(--ease), box-shadow 160ms var(--ease), opacity 170ms var(--ease); }
+.voice-tag-wrap.is-thinking #voiceTagBtn svg { animation: pm-breathe 1.2s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .tag-pill, .tag-mark { transition-duration: 0ms; }
+  .voice-tag-wrap.is-thinking #voiceTagBtn svg { animation: none; }
+}
+/* CHANGED (1.5.0): Frivo's quick guesses are dashed until the AI's ideas
+   replace them; the edge arrows count ideas for words scrolled away. */
+.tag-pill.is-instant { border-style: dashed; color: var(--ink-dim); }
+.tag-pill.is-instant::after { border-style: dashed; }
+.tag-pill--edge { font-style: normal; font-weight: 600; color: var(--ink-dim); padding: 0 8px; border-style: solid; }
+.tag-pill--edge::before, .tag-pill--edge::after { display: none; }

@@ -3034,10 +3034,52 @@ DEFAULT_VOICE_DELIVERY = "natural"
 # v2 takes any stability (lower swings more) and a style boost; v3 takes
 # three settings only: 0 (Creative), 0.5 (Natural) and 1 (Robust).
 DELIVERY_SETTINGS = {
+    # v3's three settings: Robust holds the voice steadiest but follows tags
+    # less; Creative follows them most but wanders. Calm is Robust;
+    # Natural and Lively are Natural, and what keeps their accent steady is
+    # the stitching below, not the setting.
     "calm": {"v2": {"stability": 0.75, "similarity_boost": 0.75}, "v3": 1.0},
     "natural": {"v2": {"stability": 0.5, "similarity_boost": 0.75}, "v3": 0.5},
-    "lively": {"v2": {"stability": 0.3, "similarity_boost": 0.75, "style": 0.35}, "v3": 0.0},
+    "lively": {"v2": {"stability": 0.3, "similarity_boost": 0.75, "style": 0.35}, "v3": 0.5},
 }
+
+# NEW (1.5.0): why a v3 voice changed accent between replies, and what's
+# done about each:
+#
+#   * v3 works out the language from each line by itself and, ElevenLabs
+#     says, "very short prompts are more likely to produce variable
+#     results" (under about 250 characters, which is most replies). Each
+#     request now names the language, and carries ElevenLabs' continuity
+#     fields: the ids of the last three things this voice said in this
+#     conversation (previous_request_ids) and the words themselves
+#     (previous_text), which the API uses to match the new line to them.
+#   * v3 and the usual model make the same voice sound different enough to
+#     seem like another accent, so a conversation that has used v3 stays on
+#     v3 for a while instead of flipping between models.
+#   * a fixed seed, so the same settings don't roll a new delivery each time.
+V3_STICKY_SECONDS = 30 * 60
+V3_LAST_USED = {}   # "session::profile" -> when v3 last spoke
+SPEECH_THREADS = {}   # "session::profile::voice::model" -> {"ids": [...], "text": "..."}
+SPEECH_THREADS_LOCK = threading.Lock()
+
+
+def speech_thread_key(session_id, profile_id, voice_id, model_id):
+    return f"{session_id}::{profile_id or 'default'}::{voice_id}::{model_id}"
+
+
+def remember_speech(resp, voiced):
+    """After ElevenLabs spoke: keep its request id and words for next time."""
+    from flask import has_request_context
+    if not has_request_context() or not getattr(g, "speech_thread", None):
+        return
+    request_id = (resp.headers.get("request-id") or resp.headers.get("x-request-id") or "").strip() \
+        if getattr(resp, "headers", None) else ""
+    with SPEECH_THREADS_LOCK:
+        thread = SPEECH_THREADS.setdefault(g.speech_thread, {"ids": [], "text": ""})
+        if request_id:
+            thread["ids"] = (thread["ids"] + [request_id])[-3:]
+        thread["text"] = (voiced or "")[-600:]
+        thread["at"] = time.time()
 
 # The tag button's choices. Any tag works; these are the dependable ones.
 AUDIO_TAG_GROUPS = [
@@ -3235,7 +3277,7 @@ def _elevenlabs_payload(text, force_v2=False):
     # no tags, sends exactly what Frivo always sent.
     style = current_voice_style()
     delivery = DELIVERY_SETTINGS[normalize_voice_delivery(style.get("delivery"))]
-    if not force_v2 and (style.get("expressive") or has_audio_tags(text)):
+    if not force_v2 and (style.get("expressive") or style.get("stay_on_v3") or has_audio_tags(text)):
         # v3 has no speed setting; the reply speaks at its natural pace.
         payload = {
             "text": text,
@@ -3251,6 +3293,16 @@ def _elevenlabs_payload(text, force_v2=False):
         code = language_iso(style.get("language") or CFG.get("language") or "English")
         if code:
             payload["language_code"] = code
+        # Continuity with what this voice just said (see above).
+        from flask import has_request_context
+        if has_request_context() and getattr(g, "speech_thread", None):
+            with SPEECH_THREADS_LOCK:
+                thread = SPEECH_THREADS.get(g.speech_thread)
+            if thread and time.time() - thread.get("at", 0) < V3_STICKY_SECONDS:
+                if thread.get("ids"):
+                    payload["previous_request_ids"] = list(thread["ids"])
+                if thread.get("text"):
+                    payload["previous_text"] = thread["text"]
         return payload
     if force_v2:
         text = strip_audio_tags(text)
@@ -3292,6 +3344,8 @@ def get_tts_audio(text, voice_id, language="English"):
         resp = requests.post(url, headers=headers, json=payload, timeout=60)
     if resp.status_code != 200:
         raise RuntimeError(f"ElevenLabs error {resp.status_code}: {resp.text[:300]}")
+    if payload.get("model_id") == ELEVEN_V3_MODEL:
+        remember_speech(resp, payload["text"])   # NEW (1.5.0)
 
     filename = f"{uuid.uuid4().hex}.mp3"
     with open(os.path.join(AUDIO_DIR, filename), "wb") as f:
@@ -3342,11 +3396,14 @@ def elevenlabs_tts_timed(text, voice_id, pages, voiced=None):
         "Content-Type": "application/json",
         "Accept": "application/json",
     }
-    resp = requests.post(url, headers=headers, json=_elevenlabs_payload(voiced), timeout=60)
+    payload = _elevenlabs_payload(voiced)
+    resp = requests.post(url, headers=headers, json=payload, timeout=60)
     if resp.status_code != 200:
         # Refused, so nothing was spoken or billed. The plain request is
         # tried next, and its error is the one you see if it fails too.
         raise TimedSpeechUnavailable(f"ElevenLabs timestamps {resp.status_code}: {resp.text[:200]}")
+    if payload.get("model_id") == ELEVEN_V3_MODEL:
+        remember_speech(resp, payload["text"])   # NEW (1.5.0)
     data = resp.json()
     audio = base64.b64decode(data["audio_base64"])
     filename = f"{uuid.uuid4().hex}.mp3"
@@ -6601,6 +6658,11 @@ def chat():
     # A free voice can't perform tags, so any you typed are taken out.
     if voice_engine == "elevenlabs":
         g.voice_style = dict(voice_style, language=language)   # CHANGED (1.5.0): and the language, for v3
+        # NEW (1.5.0): stays on v3 if this conversation was just using it.
+        sticky_key = f"{session_id}::{profile_id or 'default'}"
+        if time.time() - V3_LAST_USED.get(sticky_key, 0) < V3_STICKY_SECONDS:
+            g.voice_style["stay_on_v3"] = True
+        g.speech_thread = speech_thread_key(session_id, profile_id, voice_id, ELEVEN_V3_MODEL)
         prompt_voice_style = voice_style
     else:
         g.voice_style = {"expressive": False, "delivery": DEFAULT_VOICE_DELIVERY}
@@ -6765,6 +6827,9 @@ def chat():
             # CHANGED (1.5.0): speak_reply() also says when each word is spoken.
             audio_filename, page_ends, word_times = speak_reply(spoken, voice_id, language, chatbox_plan,
                                                                 voiced=voiced)
+            # NEW (1.5.0): remembered, so the next message keeps the same model.
+            if voice_engine == "elevenlabs" and _elevenlabs_payload(voiced)["model_id"] == ELEVEN_V3_MODEL:
+                V3_LAST_USED[f"{session_id}::{profile_id or 'default'}"] = time.time()
             audio_seconds = time.perf_counter() - audio_start
     except Exception as e:
         if history and history[-1].get("role") == "user":
