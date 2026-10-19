@@ -935,7 +935,14 @@ function updateFaderReadout() {
   // say, Finnish versus Chinese.
   const chars = Math.round(words * currentCharsPerWord());
   const seconds = Math.round((chars / 1000) * 60);
-  lengthValue.textContent = `${words} words`;
+  // CHANGED (1.5.0): the unit is its own span, so a crowded chip row can
+  // drop it ("50") and keep the voice chip's name whole. Text is unchanged.
+  lengthValue.textContent = String(words);
+  const lengthUnit = document.createElement("span");
+  lengthUnit.className = "chip-unit";
+  lengthUnit.textContent = " words";
+  lengthValue.append(lengthUnit);
+  if (typeof fitSessionStrip === "function") fitSessionStrip();
   const big = $("lengthValueBig");  // CHANGED (2.0): the chip and its popover both say it
   if (big) big.textContent = `${words} words`;
   lengthEcho.textContent = words;
@@ -2578,10 +2585,20 @@ function voiceHasMoreName(v) {
 }
 
 // The first language, plus a count when a voice covers several.
+// CHANGED (1.5.0): regions shortened ("English · UK"), so the free voices'
+// labels fit the column instead of being cut off.
+const VOICE_REGION_SHORT = {
+  "United States": "US", "United Kingdom": "UK", "Australia": "AU", "Canada": "CA",
+  "India": "IN", "Ireland": "IE", "New Zealand": "NZ", "South Africa": "ZA",
+  "Mexico": "MX", "Spain": "ES", "Brazil": "BR", "Portugal": "PT", "France": "FR",
+  "Germany": "DE", "Austria": "AT", "Switzerland": "CH", "Belgium": "BE",
+  "Netherlands": "NL", "China": "CN", "Taiwan": "TW", "Hong Kong": "HK",
+};
 function voiceLanguageLabel(v) {
   const langs = v.languages || [];
   if (!langs.length) return "";
-  const first = langs[0].name;
+  const first = String(langs[0].name || "").replace(/ · (.+)$/, (m, region) =>
+    VOICE_REGION_SHORT[region] ? ` · ${VOICE_REGION_SHORT[region]}` : m);
   return langs.length > 1 ? `${first} +${langs.length - 1}` : first;
 }
 
@@ -2995,6 +3012,12 @@ function voiceRowNode(v) {
       playVoicePreview(v);
     });
     row.appendChild(play);
+  } else {
+    // NEW (1.5.0): a voice with no sample keeps the column, so the buttons
+    // still line up down the list.
+    const spacer = document.createElement("span");
+    spacer.className = "voice-preview-spacer";
+    row.appendChild(spacer);
   }
 
   // Keep the action menu on the voice in use too. It used to be replaced by
@@ -3111,88 +3134,37 @@ function byVoiceName(a, b) {
 }
 
 function voiceSections(matches) {
+  // CHANGED (1.5.0): always grouped by what a voice costs: Frivo's own,
+  // Windows', then ElevenLabs. The sort decides the order inside each group
+  // (it used to replace the groups, so "Recently added" mixed free voices in
+  // with ElevenLabs ones under "No date from ElevenLabs"). Favorites still
+  // lead when sorting by favorites.
   const query = voiceQuery.trim().toLowerCase();
 
   // While searching, what you typed outranks the sort: a name starting with
   // the query is almost always the one being looked for, even if the sort
   // would bury it. The chosen order still applies within each bucket.
-  if (query) {
-    const ordered = sortVoicesFlat(matches);
+  const order = (list) => {
+    const ordered = sortVoicesFlat(list);
+    if (!query) return ordered;
     const starts = ordered.filter((v) => v.name.toLowerCase().startsWith(query));
     const startIds = new Set(starts.map((v) => v.voice_id));
-    const rest = ordered.filter((v) => !startIds.has(v.voice_id));
-    return [["", [...starts, ...rest]]];
-  }
+    return [...starts, ...ordered.filter((v) => !startIds.has(v.voice_id))];
+  };
 
-  if (voiceSortMode === "language") {
-    const groups = new Map();
-    matches.forEach((v) => {
-      const label = (v.languages || [])[0]?.name || "No language listed";
-      if (!groups.has(label)) groups.set(label, []);
-      groups.get(label).push(v);
-    });
-    return [...groups.entries()]
-      .sort((a, b) => {
-        // The catch-all goes last however it happens to sort.
-        if (a[0] === "No language listed") return 1;
-        if (b[0] === "No language listed") return -1;
-        return a[0].localeCompare(b[0]);
-      })
-      .map(([label, list]) => [label, list.sort(byVoiceName)]);
+  const sections = [];
+  let rest = matches;
+  if (!query && voiceSortMode === "favorites") {
+    const favs = new Set(voiceFavorites());
+    const fav = matches.filter((v) => favs.has(v.voice_id)).sort(byVoiceName);
+    if (fav.length) sections.push(["Favorites", fav]);
+    rest = matches.filter((v) => !favs.has(v.voice_id));
   }
-
-  if (voiceSortMode === "recent") {
-    // Voices ElevenLabs gives no date for can't be placed in the order, so
-    // they go after everything that can, alphabetically among themselves —
-    // rather than being silently treated as the oldest.
-    const dated = matches.filter((v) => v.created_at);
-    const undated = matches.filter((v) => !v.created_at).sort(byVoiceName);
-    dated.sort((a, b) => b.created_at - a.created_at);
-    return undated.length
-      ? [["Newest first", dated], ["No date from ElevenLabs", undated]]
-      : [["", dated]];
-  }
-
-  if (voiceSortMode === "name") {
-    // CHANGED (2.0): by name, within engine groups.
-    return groupByEngine(matches);
-  }
-
-  if (voiceSortMode === "category") {
-    const groups = new Map();
-    matches.forEach((v) => {
-      const label = categoryLabel(v.category);
-      if (!groups.has(label)) groups.set(label, []);
-      groups.get(label).push(v);
-    });
-    return [...groups.entries()]
-      .sort((a, b) => {
-        // "Default" is ElevenLabs' own stock set and the one most people
-        // are looking for, so it leads regardless of how it sorts.
-        if (a[0] === "Default") return -1;
-        if (b[0] === "Default") return 1;
-        if (a[0] === "Uncategorised") return 1;
-        if (b[0] === "Uncategorised") return -1;
-        return a[0].localeCompare(b[0]);
-      })
-      .map(([label, list]) => [label, list.sort(byVoiceName)]);
-  }
-
-  // "favorites" — starred first, then what you've used lately, then the
-  // rest. The default, because it puts the handful of voices you actually
-  // switch between at the top of a list of dozens.
-  const favs = new Set(voiceFavorites());
-  const recents = voiceRecents();
-  const fav = matches.filter((v) => favs.has(v.voice_id)).sort(byVoiceName);
-  const used = matches
-    .filter((v) => !favs.has(v.voice_id) && recents.includes(v.voice_id))
-    .sort((a, b) => recents.indexOf(a.voice_id) - recents.indexOf(b.voice_id));
-  const pinned = new Set([...fav, ...used].map((v) => v.voice_id));
-  const rest = matches.filter((v) => !pinned.has(v.voice_id));
-  // CHANGED (2.0): favorites first, then everything else grouped by engine
-  // — free on this PC, built into Windows, ElevenLabs — so what costs
-  // credits and what doesn't is the first thing the list says.
-  return [["Favorites", fav], ...groupByEngine(rest)];
+  VOICE_ENGINE_GROUPS.forEach(([engine, label, note, free]) => {
+    const list = rest.filter((v) => voiceEngine(v) === engine);
+    if (list.length) sections.push([label, order(list), note, free]);
+  });
+  return sections;
 }
 
 function sortVoicesFlat(matches) {
@@ -3206,6 +3178,9 @@ function sortVoicesFlat(matches) {
       const lb = (b.languages || [])[0]?.name || "￿";
       return la.localeCompare(lb) || byVoiceName(a, b);
     });
+  }
+  if (voiceSortMode === "category") {   // NEW (1.5.0): now sorts inside each group
+    return list.sort((a, b) => categoryLabel(a.category).localeCompare(categoryLabel(b.category)) || byVoiceName(a, b));
   }
   if (voiceSortMode === "favorites") {
     const favs = new Set(voiceFavorites());
@@ -6861,7 +6836,15 @@ let languageQuery = "";
 function showLanguageTrigger() {
   if (!languageTriggerName) return;
   const match = languages.find((l) => l.name === currentLanguage);
-  languageTriggerName.textContent = match ? languageLabel(match) : currentLanguage;
+  // CHANGED (1.5.0): just the name ("German"); "German · Deutsch" took the
+  // room the voice chip needed. The native spelling is in the tooltip and
+  // the language list.
+  languageTriggerName.textContent = match ? match.name : currentLanguage;
+  if (languageTrigger) {
+    languageTrigger.title = match && match.native !== match.name
+      ? `${match.name} · ${match.native} — change the reply language`
+      : "Change the reply language";
+  }
 }
 
 function languagePopIsOpen() {
@@ -8257,3 +8240,41 @@ document.addEventListener("change", (event) => {
   track.classList.add("is-popping");
   track.addEventListener("animationend", () => track.classList.remove("is-popping"), { once: true });
 });
+
+
+// NEW (1.5.0): keep the chip row on one line without cutting into the voice's
+// name. When everything doesn't fit at full size, the row goes compact: the
+// length chip shows only its number, and if that's not enough, the style chip
+// only its icon (both keep their tooltips). Checked whenever a chip's size changes.
+var fitStripQueued = false;
+function fitSessionStrip() {
+  if (fitStripQueued) return;
+  fitStripQueued = true;
+  requestAnimationFrame(() => {
+    fitStripQueued = false;
+    const strip = document.querySelector(".session-strip");
+    if (!strip || !strip.offsetWidth) return;
+    // Two steps, the gentlest first: drop " words", then the style's name.
+    strip.classList.remove("is-compact", "is-compact-more");
+    strip.classList.add("is-measuring");   // every chip at its natural width
+    const tooWide = () => strip.scrollWidth > strip.clientWidth + 1;
+    if (tooWide()) {
+      strip.classList.add("is-compact");
+      if (tooWide()) strip.classList.add("is-compact-more");
+    }
+    strip.classList.remove("is-measuring");
+  });
+}
+(function watchSessionStrip() {
+  const strip = document.querySelector(".session-strip");
+  if (!strip || typeof ResizeObserver !== "function") return;
+  const ro = new ResizeObserver(() => fitSessionStrip());
+  ro.observe(strip);
+  // A chip appearing, disappearing or changing its words.
+  new MutationObserver((records) => {
+    // Its own is-compact / is-measuring flips don't count.
+    if (records.some((r) => r.target !== strip)) fitSessionStrip();
+  })
+    .observe(strip, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ["class"] });
+  fitSessionStrip();
+})();

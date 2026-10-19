@@ -3318,3 +3318,43 @@ html[data-theme="light"] { --bubble-lift: 0 8px 22px rgba(15, 23, 42, 0.13), 0 0
     box-shadow: var(--bubble-lift);
   }
 }
+
+
+/* NEW (1.5.0): the chip row, crowded. fitSessionStrip() in app.js sets
+   .is-compact when the chips don't fit at full size (the length chip drops
+   "words"), and .is-compact-more if that's not enough (the style chip is
+   just its icon). The voice's name is
+   never cut: if it still doesn't fit, the language chip gives way instead
+   (its full name is in the tooltip). */
+@media (min-width: 761px) {
+  .session-strip > #voicePicker { flex: none; }
+  .session-strip > #languagePicker { flex: 0 1 auto; min-width: 64px; }
+  .session-strip > #languagePicker .chip.voice-trigger { max-width: 100%; }
+  .session-strip #languageTriggerName { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .session-strip.is-measuring > * { flex: none !important; min-width: max-content !important; }
+  .session-strip.is-compact .chip-unit,
+  .session-strip.is-compact-more #styleChipText { display: none; }
+  .session-strip.is-compact-more #styleChip { padding: 0 8px; }
+}
+
+/* The "Use English" suggestion pops in rather than appearing. */
+.chip--suggest {
+  transition:
+    background var(--dur) var(--ease), color var(--dur) var(--ease), border-color var(--dur) var(--ease),
+    opacity 200ms var(--ease), scale var(--dur-bouncy) var(--spring-bouncy);
+}
+@starting-style {
+  .chip--suggest { opacity: 0; scale: 0.7; }
+}
+
+
+/* NEW (1.5.0): the voice list lines up. Every column has a fixed width, so
+   a long language label can't push the gender, cost and buttons along: name
+   (the rest), language, gender, cost, sample, menu. */
+.voice-pick { grid-template-columns: minmax(0, 1fr) 168px 62px; }
+.voice-cost { flex: none; width: 50px; text-align: right; padding-right: 6px; }
+.voice-preview-spacer { flex: none; width: 34px; height: 34px; }
+@media (max-width: 720px) {
+  .voice-pick { grid-template-columns: minmax(0, 1fr) 120px; }   /* gender hidden on phones */
+  .voice-cost { width: auto; }
+}
