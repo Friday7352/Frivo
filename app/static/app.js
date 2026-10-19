@@ -6173,6 +6173,7 @@ async function send() {
   if (speakEnabled()) ensureAudioContext();
 
   messageInput.value = "";
+  if (typeof clearTagIdeas === "function") clearTagIdeas();   // NEW (1.5.0)
   cancelAutoSend();
   setTypedByHand(false);   // NEW (1.5.0): the next message is back to auto-send
   beginReplyTyping();      // NEW (1.5.0): dots stay up until the chatbox message goes out
@@ -9826,4 +9827,247 @@ function makePersonalityHelper(textarea, getContext, storageKey) {
       }
     }).observe(settingsBox);
   }
+})();
+
+
+// ---------------------------------------------------------------------------
+// NEW (1.5.0): voice-tag ideas as you type
+//
+// With an ElevenLabs voice, a moment after you stop typing (four words or
+// more), the AI looks at the message and suggests where a tag would fit.
+// The ideas show just above the message box: click one to put it in, Add
+// all for every one, × to hide them for this message. Each idea knows
+// which word it goes before, so it still lands in the right place if you
+// typed somewhere else meanwhile, and disappears if that part changed.
+// "Suggest tags as I type" in the ✦ menu turns it off.
+// ---------------------------------------------------------------------------
+
+var TAG_IDEAS_KEY = "frivo_tag_ideas";
+var tagIdeasState = { ideas: [], words: [], asked: "", timer: null, controller: null, dismissed: "" };
+
+function tagIdeasOn() {
+  try { return localStorage.getItem(TAG_IDEAS_KEY) !== "off"; } catch (e) { return true; }
+}
+
+// The words that are said (tags left out), each with where it starts.
+function spokenWords(text) {
+  const out = [];
+  const re = /\[[^\]\n]*\]|\S+/g;
+  let m;
+  while ((m = re.exec(text))) {
+    if (/^\[[A-Za-z][A-Za-z' \-]{0,38}\]$/.test(m[0])) continue;
+    out.push({ word: m[0], start: m.index, end: m.index + m[0].length });
+  }
+  return out;
+}
+
+function clearTagIdeas() {
+  const st = tagIdeasState;
+  clearTimeout(st.timer);
+  if (st.controller) st.controller.abort();
+  st.controller = null;
+  st.ideas = [];
+  st.asked = "";
+  st.dismissed = "";
+  renderTagIdeas();
+}
+
+// Still fits: the words up to and including the one it goes before are
+// the same as when it was suggested.
+function tagIdeaPlace(idea) {
+  const input = $("messageInput");
+  if (!input) return null;
+  const now = spokenWords(input.value);
+  const then = tagIdeasState.words;
+  const upto = Math.min(idea.at + 1, then.length);
+  for (let i = 0; i < upto; i++) {
+    if (!now[i] || now[i].word !== then[i]) return null;
+  }
+  if (idea.at < now.length) return { offset: now[idea.at].start, end: false };
+  return now.length ? { offset: now[now.length - 1].end, end: true } : null;
+}
+
+function putTagIdea(idea) {
+  const input = $("messageInput");
+  const place = tagIdeaPlace(idea);
+  if (!input || !place) return false;
+  const v = input.value;
+  input.value = place.end
+    ? v.slice(0, place.offset) + ` [${idea.tag}]` + v.slice(place.offset)
+    : v.slice(0, place.offset) + `[${idea.tag}] ` + v.slice(place.offset);
+  return true;
+}
+
+// Where a stretch of the message box's text is drawn, in the box's own
+// coordinates (the message box is the positioning parent).
+var tagMeasureCtx = null;
+function textWidthIn(input, str) {
+  if (!tagMeasureCtx) tagMeasureCtx = document.createElement("canvas").getContext("2d");
+  const cs = getComputedStyle(input);
+  tagMeasureCtx.font = `${cs.fontStyle} ${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
+  return tagMeasureCtx.measureText(str).width;
+}
+function textBoxIn(input, start, end) {
+  const cs = getComputedStyle(input);
+  const left = input.offsetLeft + parseFloat(cs.borderLeftWidth || 0) + parseFloat(cs.paddingLeft || 0);
+  const right = input.offsetLeft + input.offsetWidth - parseFloat(cs.borderRightWidth || 0) - parseFloat(cs.paddingRight || 0);
+  const x = left + textWidthIn(input, input.value.slice(0, start)) - input.scrollLeft;
+  const w = Math.max(6, textWidthIn(input, input.value.slice(start, end)));
+  return { x, w, visible: x + w > left - 1 && x < right + 1, left, right };
+}
+
+function renderTagIdeas() {
+  const float = $("tagIdeas");
+  const pills = $("tagIdeasChips");
+  const marks = $("tagMarks");
+  const input = $("messageInput");
+  if (!float || !pills || !marks || !input) return;
+  const st = tagIdeasState;
+  // Ideas whose spot has changed are dropped.
+  st.ideas = st.ideas.filter((idea) => tagIdeaPlace(idea));
+  pills.replaceChildren();
+  marks.replaceChildren();
+  // The marks line up with the text by its distance from the bottom, which
+  // doesn't change while the box grows to make room for the ideas.
+  const box0 = input.closest(".composer");
+  if (box0) {
+    marks.style.top = "auto";
+    marks.style.bottom = `${box0.clientHeight - input.offsetTop - input.offsetHeight}px`;
+    marks.style.height = `${input.offsetHeight}px`;
+  }
+  const now = spokenWords(input.value);
+  const placed = [];
+  st.ideas.forEach((idea) => {
+    const word = now[idea.at];
+    const box = word
+      ? textBoxIn(input, word.start, word.end)
+      : textBoxIn(input, input.value.length, input.value.length);
+    if (!box.visible) return;
+    let mark = null;
+    if (word) {
+      // The word it goes before, softly marked.
+      mark = document.createElement("span");
+      mark.className = "tag-mark";
+      mark.style.left = `${box.x - 3}px`;
+      mark.style.width = `${box.w + 6}px`;
+      mark.style.top = "calc(50% - 12px)";
+      marks.append(mark);
+    }
+    const pill = document.createElement("button");
+    pill.type = "button";
+    pill.className = "tag-pill";
+    pill.textContent = idea.tag;
+    pill.title = word ? `Put [${idea.tag}] before “${word.word}”` : `Put [${idea.tag}] at the end`;
+    pill.addEventListener("click", () => applyTagIdeas([idea]));
+    if (mark) {
+      pill.addEventListener("pointerenter", () => mark.classList.add("is-hot"));
+      pill.addEventListener("pointerleave", () => mark.classList.remove("is-hot"));
+      pill.addEventListener("focus", () => mark.classList.add("is-hot"));
+      pill.addEventListener("blur", () => mark.classList.remove("is-hot"));
+    }
+    pills.append(pill);
+    placed.push({ pill, center: box.x + (word ? box.w / 2 : 0) });
+  });
+  float.classList.toggle("is-hidden", !placed.length);   // shown first, so the pills can be measured
+  const composer = input.closest(".composer");
+  if (composer) composer.classList.toggle("has-tag-ideas", placed.length > 0);
+  // Each pill sits centred over its word, without overlapping the one before.
+  const limit = pills.clientWidth || float.clientWidth;
+  let edge = 0;
+  placed.sort((a, b) => a.center - b.center).forEach(({ pill, center }) => {
+    const w = pill.offsetWidth;
+    let left = Math.round(center - w / 2);
+    left = Math.max(left, edge, 0);
+    left = Math.min(left, Math.max(0, limit - w));
+    pill.style.left = `${left}px`;
+    pill.style.setProperty("--point", `${Math.round(Math.min(Math.max(center - left, 8), w - 8))}px`);
+    edge = left + w + 4;
+  });
+  const all = $("tagIdeasAll");
+  if (all) all.classList.toggle("is-hidden", placed.length < 2);
+  float.classList.toggle("is-hidden", !placed.length);
+  marks.classList.toggle("is-hidden", !placed.length);
+}
+
+function applyTagIdeas(list) {
+  const input = $("messageInput");
+  if (!input) return;
+  // Last first, so putting one in doesn't move where the others go.
+  const sorted = list.slice().sort((a, b) => b.at - a.at);
+  let any = false;
+  sorted.forEach((idea) => { if (putTagIdea(idea)) any = true; });
+  // The words haven't changed, only tags were added, so the rest still fit.
+  tagIdeasState.ideas = tagIdeasState.ideas.filter((i) => !list.includes(i));
+  tagIdeasState.asked = spokenWords(input.value).map((w) => w.word).join(" ");
+  if (any) {
+    if (typeof cancelAutoSend === "function") cancelAutoSend();
+    if (typeof setTypedByHand === "function") setTypedByHand(true);
+    input.focus();
+    try { input.setSelectionRange(input.value.length, input.value.length); } catch (e) { /* fine */ }
+  }
+  renderTagIdeas();
+}
+
+async function askTagIdeas() {
+  const input = $("messageInput");
+  const st = tagIdeasState;
+  if (!input || !tagIdeasOn()) return;
+  const wrap = $("voiceTagWrap");
+  if (!wrap || wrap.classList.contains("is-hidden")) return;   // not an ElevenLabs voice
+  const words = spokenWords(input.value).map((w) => w.word);
+  const key = words.join(" ");
+  if (words.length < 4 || key === st.asked || key === st.dismissed) return;
+  if (st.controller) st.controller.abort();
+  const mine = new AbortController();
+  st.controller = mine;
+  st.asked = key;
+  try {
+    const res = await fetch("/api/voice-tags/suggest", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: input.value, profile_id: currentProfileId || null }),
+      signal: mine.signal,
+    });
+    const data = await res.json();
+    if (mine !== st.controller || !res.ok) return;
+    st.words = words;
+    st.ideas = (data.ideas || []).slice(0, 4);
+    renderTagIdeas();
+  } catch (err) {
+    /* quiet: ideas are optional */
+  } finally {
+    if (mine === st.controller) st.controller = null;
+  }
+}
+
+(function wireTagIdeas() {
+  const input = $("messageInput");
+  const toggle = $("tagIdeasToggle");
+  if (toggle) {
+    toggle.checked = tagIdeasOn();
+    toggle.addEventListener("change", () => {
+      try { localStorage.setItem(TAG_IDEAS_KEY, toggle.checked ? "on" : "off"); } catch (e) { /* not kept */ }
+      if (!toggle.checked) clearTagIdeas();
+    });
+  }
+  const all = $("tagIdeasAll");
+  if (all) all.addEventListener("click", () => applyTagIdeas(tagIdeasState.ideas));
+  const close = $("tagIdeasClose");
+  if (close) close.addEventListener("click", () => {
+    tagIdeasState.dismissed = tagIdeasState.asked;
+    tagIdeasState.ideas = [];
+    renderTagIdeas();
+  });
+  if (!input) return;
+  // The box scrolls sideways as a long message grows, so the ideas follow.
+  ["scroll", "keyup", "click", "select"].forEach((type) => input.addEventListener(type, () => {
+    if (tagIdeasState.ideas.length) renderTagIdeas();
+  }));
+  window.addEventListener("resize", () => { if (tagIdeasState.ideas.length) renderTagIdeas(); });
+  input.addEventListener("input", () => {
+    renderTagIdeas();   // drops ideas whose spot just changed
+    clearTimeout(tagIdeasState.timer);
+    if (!input.value.trim()) { clearTagIdeas(); return; }
+    tagIdeasState.timer = setTimeout(askTagIdeas, 1400);
+  });
 })();

@@ -3019,6 +3019,10 @@ def warm_free_voices():
 AUDIO_TAG_RE = re.compile(r"\[([A-Za-z][A-Za-z' \-]{0,38})\]")
 ELEVEN_V2_MODEL = "eleven_multilingual_v2"
 ELEVEN_V3_MODEL = "eleven_v3"
+ELEVEN_V3_SEED = 4242   # NEW (1.5.0): any fixed number; see _elevenlabs_payload
+# NEW (1.5.0): accent tags ([british accent]) change who the voice is. Only
+# kept when you typed them yourself.
+ACCENT_TAG_RE = re.compile(r"\[[^\]\n]*\baccent\b[^\]\n]*\]\s*", re.I)
 
 VOICE_DELIVERIES = [
     {"id": "calm", "name": "Calm", "description": "Steady and even. Doesn't shout."},
@@ -3105,6 +3109,21 @@ def transplant_audio_tags(original, tagged):
     return " ".join(out)
 
 
+def audio_tag_positions(text):
+    """
+    NEW (1.5.0): where the tags in `text` are: [(word index, tag), ...],
+    counting only the words that are said. A tag before the 3rd word is at
+    2; one after the last word is at the word count.
+    """
+    out, count = [], 0
+    for token in re.findall(r"\[[^\]\n]*\]|\S+", text or ""):
+        if AUDIO_TAG_RE.fullmatch(token):
+            out.append((count, AUDIO_TAG_RE.fullmatch(token).group(1).lower()))
+        else:
+            count += 1
+    return out
+
+
 def voice_style_of(profile=None):
     """Expressive voice and Delivery, from a profile or the defaults in Settings."""
     source = profile if profile is not None else CFG
@@ -3164,6 +3183,7 @@ def expressive_voice_rules(response_style, language, delivery):
     common = (
         "An audio tag is a word or two in square brackets placed right before the words it colours, "
         f"for example {examples}. The voice performs it; it is never read out.\n"
+        "Never use accent tags, like [british accent]: the voice keeps its own accent.\n"
         "Write tags in English and lowercase"
         + (f", even though the words are in {language}" if language != "English" else "")
         + ".\nTags don't count toward the length.\n"
@@ -3217,11 +3237,21 @@ def _elevenlabs_payload(text, force_v2=False):
     delivery = DELIVERY_SETTINGS[normalize_voice_delivery(style.get("delivery"))]
     if not force_v2 and (style.get("expressive") or has_audio_tags(text)):
         # v3 has no speed setting; the reply speaks at its natural pace.
-        return {
+        payload = {
             "text": text,
             "model_id": ELEVEN_V3_MODEL,
             "voice_settings": {"stability": delivery["v3"]},
+            # NEW (1.5.0): v3 works out the language from each line by
+            # itself, and on a short or tagged line it guesses differently,
+            # so the same voice came out American, Scottish, Russian... Told
+            # the language, it keeps one accent. The fixed seed keeps it from
+            # rolling a new delivery each time.
+            "seed": ELEVEN_V3_SEED,
         }
+        code = language_iso(style.get("language") or CFG.get("language") or "English")
+        if code:
+            payload["language_code"] = code
+        return payload
     if force_v2:
         text = strip_audio_tags(text)
     voice_settings = dict(delivery["v2"])
@@ -3462,6 +3492,7 @@ def build_tag_suggestion_prompt(text, delivery):
         "An audio tag is a word or two of lowercase English in square brackets, placed right before the words "
         "it colours. Good ones: [happy], [excited], [sad], [nervous], [curious], [sarcastic], [warmly], "
         "[softly], [whispers], [slowly], [laughs], [chuckles], [sighs], [gasps], [pause]." + gentle + "\n"
+        "Never use accent tags.\n"
         "Add one to three, where they clearly fit the feeling of the message; one for a short message. "
         "Keep any tags already there.\n"
         "Do not change, add, remove or reorder any word or punctuation.\n"
@@ -3497,12 +3528,22 @@ def suggest_voice_tags():
     except Exception as e:
         return jsonify({"error": f"Couldn't ask the AI: {e}"}), 502
     raw = re.sub(r"</?MESSAGE>", "", raw).strip()
-    suggested = transplant_audio_tags(strip_audio_tags(text), tidy_audio_tags(raw))
+    suggested = transplant_audio_tags(strip_audio_tags(text), tidy_audio_tags(raw if ACCENT_TAG_RE.search(text) else ACCENT_TAG_RE.sub("", raw)))
     if delivery == "calm":
         suggested = re.sub(r"\[(?:shouts|shouting|yells|yelling|screams)\]\s*", "", suggested, flags=re.I)
     added = len(AUDIO_TAG_RE.findall(suggested)) - len(AUDIO_TAG_RE.findall(text))
+    # NEW (1.5.0): the new tags one by one, for the ideas that pop up as you
+    # type: each with the word it goes before ("at", counting said words only).
+    had = list(audio_tag_positions(text))
+    ideas = []
+    for at, tag in audio_tag_positions(suggested):
+        if (at, tag) in had:
+            had.remove((at, tag))
+            continue
+        ideas.append({"at": at, "tag": tag})
     return jsonify({
         "text": suggested,
+        "ideas": ideas,
         "added": max(0, added),
         "seconds": round(time.perf_counter() - started, 2),
     })
@@ -6559,7 +6600,7 @@ def chat():
     # NEW (1.5.0): Expressive voice and Delivery are for ElevenLabs voices.
     # A free voice can't perform tags, so any you typed are taken out.
     if voice_engine == "elevenlabs":
-        g.voice_style = voice_style
+        g.voice_style = dict(voice_style, language=language)   # CHANGED (1.5.0): and the language, for v3
         prompt_voice_style = voice_style
     else:
         g.voice_style = {"expressive": False, "delivery": DEFAULT_VOICE_DELIVERY}
@@ -6690,6 +6731,8 @@ def chat():
         # no tags at all.
         if voice_engine == "elevenlabs":
             voiced = tidy_audio_tags(spoken)
+            if not ACCENT_TAG_RE.search(message):   # NEW (1.5.0): not one you typed
+                voiced = ACCENT_TAG_RE.sub("", voiced).strip()
             if voice_style["delivery"] == "calm":
                 voiced = re.sub(r"\[(?:shouts|shouting|yells|yelling|screams)\]\s*", "", voiced, flags=re.I)
         else:

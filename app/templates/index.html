@@ -508,6 +508,19 @@
             <div class="composer">
               <input type="text" id="messageInput" placeholder="Say something…" autocomplete="off">
 
+              <!-- NEW (1.5.0): voice-tag ideas for what you're typing, from
+                   the AI a moment after you pause (ElevenLabs voices). Each
+                   floats above the word it goes before, and that word is
+                   softly marked. -->
+              <div class="tag-float is-hidden" id="tagIdeas" role="group" aria-label="Voice tag ideas">
+                <div class="tag-float-pills" id="tagIdeasChips"></div>
+                <span class="tag-float-actions">
+                  <button type="button" class="link-btn" id="tagIdeasAll">Add all</button>
+                  <button type="button" class="tag-float-close" id="tagIdeasClose" title="Not for this message" aria-label="Hide these ideas">×</button>
+                </span>
+              </div>
+              <div class="tag-marks" id="tagMarks" aria-hidden="true"></div>
+
               <!-- NEW (1.5.0): voice tags, for ElevenLabs voices. A tag is
                    put in where the cursor is; Suggest asks the AI to add
                    some to what you've typed. -->
@@ -526,6 +539,10 @@
                     </button>
                   </div>
                   <div id="voiceTagGroups"></div>
+                  <label class="voice-tag-auto">
+                    <span>Suggest tags as I type</span>
+                    <span class="switch"><input type="checkbox" id="tagIdeasToggle" checked><span class="switch-track" aria-hidden="true"></span></span>
+                  </label>
                   <p class="voice-tag-note" id="voiceTagNote">Goes in where your cursor is. The voice acts it out; it isn't read aloud or sent to the chatbox.</p>
                 </div>
               </span>

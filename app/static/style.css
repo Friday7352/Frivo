@@ -3822,3 +3822,99 @@ html.motion-ready .stage { transition: transform var(--dur-smooth) var(--spring-
 @media (prefers-reduced-motion: reduce) {
   .pm.is-writing .pm-create-icon, .pm.is-thinking .pm-refresh svg, .pm-thinking { animation: none; }
 }
+
+/* NEW (1.5.0): voice-tag ideas. Each pill floats over the word it goes
+   before, pointing at it, and that word gets a soft mark. */
+.composer {
+  position: relative;
+  transition: border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease),
+              padding-top 240ms var(--spring-smooth, var(--ease));
+}
+/* With ideas showing, the box makes room for them above the words. */
+.composer.has-tag-ideas { padding-top: 36px; }
+.tag-float {
+  position: absolute;
+  left: 12px;
+  right: 10px;
+  top: 7px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  pointer-events: none;
+  z-index: 5;
+}
+.tag-float.is-hidden, .tag-marks.is-hidden { display: none; }
+.tag-float-pills { position: relative; flex: 1; height: 100%; min-width: 0; }
+.tag-pill {
+  position: absolute;
+  top: 0;
+  pointer-events: auto;
+  height: 24px;
+  padding: 0 9px;
+  border: 1px solid var(--accent-line);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--text-caption);
+  font-style: italic;
+  line-height: 22px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: opacity 180ms var(--ease), translate 260ms var(--spring-snappy, var(--ease)),
+              background var(--dur) var(--ease), border-color var(--dur) var(--ease);
+}
+@starting-style { .tag-pill { opacity: 0; translate: 0 5px; } }
+.tag-pill::before { content: "+ "; color: var(--accent); font-style: normal; font-weight: 600; }
+/* The little point under the pill, aimed at the word. */
+.tag-pill::after {
+  content: "";
+  position: absolute;
+  left: var(--point, 50%);
+  bottom: -4px;
+  width: 7px;
+  height: 7px;
+  translate: -50% 0;
+  rotate: 45deg;
+  background: inherit;
+  border-right: 1px solid var(--accent-line);
+  border-bottom: 1px solid var(--accent-line);
+}
+.tag-pill:hover, .tag-pill:focus-visible { background: color-mix(in srgb, var(--accent) 12%, var(--surface)); outline: none; }
+.tag-pill:active { scale: 0.95; }
+.tag-float-actions {
+  display: inline-flex; align-items: center; gap: 4px; flex: none;
+  pointer-events: auto;
+  padding: 0 0 0 8px;
+}
+.tag-float-actions .link-btn { font-size: var(--text-caption); }
+.tag-float-actions .is-hidden { display: none; }
+.tag-float-close {
+  width: 22px; height: 22px; padding: 0;
+  border: 0; border-radius: 6px; background: transparent;
+  color: var(--ink-faint); font-size: 15px; line-height: 1; cursor: pointer;
+}
+.tag-float-close:hover { background: var(--fill); color: var(--ink); }
+
+.tag-marks { position: absolute; left: 0; right: 0; pointer-events: none; overflow: hidden; }
+.tag-mark {
+  position: absolute;
+  height: 24px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
+  box-shadow: inset 0 -1.5px 0 var(--accent-line);
+  transition: background 160ms var(--ease), box-shadow 160ms var(--ease);
+}
+@starting-style { .tag-mark { opacity: 0; } }
+.tag-mark { transition-property: background, box-shadow, opacity; }
+.tag-mark.is-hot {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+.voice-tag-auto {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--rule);
+  font-size: var(--text-footnote); color: var(--ink);
+  cursor: pointer;
+}

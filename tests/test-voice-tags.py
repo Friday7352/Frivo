@@ -63,6 +63,7 @@ check("Natural, no tags: exactly as before",
                 "voice_settings": {"stability": 0.5, "similarity_boost": 0.75}}, plain)
 tagged = mod._elevenlabs_payload("[laughs] Hello there.")
 check("a tag: v3, with the tag", tagged["model_id"] == "eleven_v3" and tagged["text"].startswith("[laughs]"), tagged)
+check("v3 is told the language, so the accent holds", tagged.get("language_code") == "en" and "seed" in tagged, tagged)
 mod.CFG.update(speaking_speed=1.1)
 check("v3 has no speed setting", "speed" not in mod._elevenlabs_payload("[laughs] Hi.")["voice_settings"])
 check("v2 still gets the speed", mod._elevenlabs_payload("Hi.")["voice_settings"].get("speed") == 1.1)
@@ -159,11 +160,12 @@ res = client.post("/api/profiles", json={"name": "Actor", "voice_id": "EL1", "vo
 actor = (res.get_json() or {}).get("profile", {})
 check("a profile keeps Expressive voice and Delivery",
       actor.get("expressive_voice") is True and actor.get("voice_delivery") == "calm", actor)
-model_says["text"] = "[laughs] Oh, that is great [shouts]. Anyway, carry on."
+model_says["text"] = "[laughs] Oh, that is great [shouts]. [british accent] Anyway, carry on."
 status, data = chat("I finished the world!", profile_id=actor["id"])
 check("the AI was told about tags", any("VOICE TAGS" in m["content"] for m in sent_prompts[-1] if m["role"] == "system"))
 check("Calm takes out [shouts]", "[shouts]" not in data.get("voiced", "") and "[laughs]" in data.get("voiced", ""),
       data.get("voiced"))
+check("an accent tag the AI added is taken out", "accent" not in data.get("voiced", ""), data.get("voiced"))
 check("the reply reads without tags", data.get("reply") == "Oh, that is great. Anyway, carry on.", data.get("reply"))
 check("Expressive voice speaks with v3, Robust", posts[-1][1]["model_id"] == "eleven_v3"
       and posts[-1][1]["voice_settings"] == {"stability": 1.0}, posts[-1][1])
@@ -190,6 +192,12 @@ res = client.post("/api/voice-tags/suggest", json={"text": "Guess what, I got th
 data = res.get_json() or {}
 check("tags added, every word kept", res.status_code == 200 and data.get("added") == 2
       and mod.strip_audio_tags(data.get("text", "")) == "Guess what, I got the job! Finally.", data)
+check("each new tag, with the word it goes before", data.get("ideas") == [{"at": 0, "tag": "excited"}, {"at": 6, "tag": "laughs"}],
+      data.get("ideas"))
+model_says["text"] = "[excited] Guess what, I got the job! [laughs] Finally."
+res = client.post("/api/voice-tags/suggest", json={"text": "[excited] Guess what, I got the job! Finally."})
+check("a tag you already had isn't an idea", (res.get_json() or {}).get("ideas") == [{"at": 6, "tag": "laughs"}],
+      (res.get_json() or {}).get("ideas"))
 model_says["text"] = "[sad] Guess what, I received the position! Finally."
 res = client.post("/api/voice-tags/suggest", json={"text": "Guess what, I got the job! Finally."})
 data = res.get_json() or {}

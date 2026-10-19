@@ -275,3 +275,8 @@ Above the personality box, in the profile editor and in Settings > Replies. It u
 - **Ideas to add** appear above the box: things the personality doesn't cover yet, worked out from what's written and from how the profile has actually been talking in your conversation. Click one to put it in (at the end of the sentence your cursor is in). × turns it down, and it isn't suggested again for that profile. New ideas come a moment after you stop typing, or with ↻.
 - **Add all** has the AI work every idea in so it reads as one piece. If the AI drops anything you'd written, the ideas are added at the end instead.
 - **Undo** after anything the AI changed.
+
+## Voice tag ideas as you type, and one accent
+
+- With an ElevenLabs voice, a moment after you stop typing (four words or more), the AI suggests where a voice tag would fit. Each idea floats just above the word it goes before, and that word is softly marked; pointing at an idea marks its word more clearly. Click one to put it in, **Add all** for every one, × to hide them for this message. An idea whose spot you've since changed disappears. **Suggest tags as I type** in the ✦ menu turns it off.
+- The v3 voice no longer drifts between accents. It used to work out the language from each line by itself, and guessed differently on short or tagged lines, so one voice could sound American, Scottish or Russian from one reply to the next. Frivo now tells it the language you've selected and keeps its delivery steady, and accent tags (`[british accent]`) are only used when you type them yourself.
