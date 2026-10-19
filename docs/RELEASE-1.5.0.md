@@ -220,3 +220,31 @@ after an hour with no replies. The next reply takes a few seconds longer
 while it loads again. Change it under **Settings > Providers > Free the
 graphics card when idle**: 15 minutes, 1 hour, 4 hours or Never. The local
 AI guide's settings step now sets Ollama's own default to an hour too.
+
+## Saved replies
+
+Keep a spoken reply and play it again whenever you like, for free.
+
+- Hover over a spoken reply and click **Save**.
+- **Saved**, on the left, lists them, newest first, with a search box.
+- Click one to play it. It goes into the chat and the VRChat chatbox exactly as it did the first time: the same voice, the chatbox pages timed to it, the glowing words. Nothing is generated, so it costs no credits, and the AI remembers saying it.
+- Delete one with the bin on its row (click twice).
+
+They're kept in `%APPDATA%\Frivo\saved\`, apart from the 7-day audio clean-up, so they stay until you delete them.
+
+## The conversation survives a refresh
+
+Refreshing the page, or closing and reopening it, brings the conversation back,
+until you press **Clear** (the bin in the top bar). Each message keeps its time.
+Old replies come back quietly: nothing plays by itself, and a reply's voice is
+only loaded when you click it. Spoken replies are kept for 7 days, so an older
+one says its audio has been cleaned up; save a reply to keep it. The AI's memory
+of the conversation follows the same rule: kept until Clear (or until Frivo
+restarts). It's kept per browser, so your phone has its own.
+
+## The volume chip holds still
+
+Dragging the volume slider used to make it jump back and forth: as the number
+changed width ("95%", "100%"), the chip row re-fitted and moved the slider under
+the pointer. The chip keeps one width now, and the row waits for the popover to
+close before it re-fits.

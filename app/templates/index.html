@@ -87,6 +87,11 @@
               stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
         <circle cx="8" cy="15" r="4"/><path d="M10.9 12.1 20 3M17 6l2.5 2.5M14.5 8.5 17 11"/>
       </symbol>
+      <!-- NEW (1.5.0): saved replies -->
+      <symbol id="i-bookmark" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M6 4.5A1.5 1.5 0 0 1 7.5 3h9A1.5 1.5 0 0 1 18 4.5V21l-6-4-6 4z"/>
+      </symbol>
       <symbol id="i-db" viewBox="0 0 24 24" fill="none" stroke="currentColor"
               stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
         <ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v6c0 1.7 3.6 3 8 3s8-1.3 8-3V6"/>
@@ -202,6 +207,10 @@
       </button>
       <button id="railVoices" class="rail-btn" type="button" aria-label="Voices" title="Choose a voice">
         <svg class="icon-20"><use href="#i-mic"/></svg>
+      </button>
+      <!-- NEW (1.5.0): saved replies, to play again for free -->
+      <button id="railSaved" class="rail-btn" type="button" aria-label="Saved replies" title="Saved replies — play one again, no credits">
+        <svg class="icon-20"><use href="#i-bookmark"/></svg>
       </button>
       <span class="rail-spacer"></span>
       <label class="rail-btn rail-theme switch" title="Switch between the dark and light themes">
@@ -1286,6 +1295,34 @@
 
     </div><!-- /workspace -->
   </div><!-- /app -->
+
+  <!-- ============================================================
+       NEW (1.5.0): Saved replies
+       ============================================================
+       Spoken replies you saved. Playing one puts it in the conversation
+       and sends it to the VRChat chatbox exactly as when it was new, with
+       the same audio: no credits, no AI. -->
+  <div id="savedPop" class="overlay sheet-overlay is-hidden">
+    <div class="voice-dialog sheet saved-dialog" role="dialog" aria-modal="true" aria-labelledby="savedDialogTitle">
+      <header class="voice-dialog-head">
+        <h2 class="voice-dialog-title" id="savedDialogTitle">Saved <span class="voice-dialog-for">play again, no credits</span></h2>
+        <button id="savedCloseBtn" class="voice-close" type="button" aria-label="Close">
+          <svg class="icon-18"><use href="#i-close"/></svg>
+        </button>
+      </header>
+      <div class="voice-search-row voice-search-row--single">
+        <span class="voice-search-field">
+          <span class="voice-search-icon" aria-hidden="true">
+            <svg class="icon-16"><use href="#i-search"/></svg>
+          </span>
+          <input type="text" id="savedSearch" class="voice-search" autocomplete="off"
+                 placeholder="Search saved replies…" aria-label="Search saved replies">
+        </span>
+      </div>
+      <div class="voice-list saved-list" id="savedList" role="list" aria-label="Saved replies"></div>
+      <p class="voice-foot"><span id="savedFoot"></span></p>
+    </div>
+  </div>
 
   <!-- ============================================================
        Voice picker

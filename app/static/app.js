@@ -1220,7 +1220,10 @@ function attachBubbleAudio(wrap, url, onStart, onPlayback, extras = {}) {   // C
   function toggle() {
     // Set by the fallback path when Web Audio couldn't decode the clip.
     if (typeof wrap._toggle === "function") return wrap._toggle();
-    if (!state.buffer) return;
+    if (!state.buffer) {
+      load();   // NEW (1.5.0): a restored reply loads its audio on the first click
+      return;
+    }
     if (state.isPlaying) pause();
     else play();
   }
@@ -1238,8 +1241,23 @@ function attachBubbleAudio(wrap, url, onStart, onPlayback, extras = {}) {   // C
     }
   });
 
+  // CHANGED (1.5.0): in a function, so a reply restored after a refresh can
+  // wait for a click instead of fetching (and playing) every old reply at
+  // once. A reply whose audio has been cleaned up (after 7 days) says so.
+  let loadStarted = false;
+  function load() {
+  if (loadStarted) return;
+  loadStarted = true;
+  wrap.classList.add("is-loading");
   fetch(url)
-    .then((r) => r.arrayBuffer())
+    .then((r) => {
+      if (!r.ok) {
+        const gone = new Error("gone");
+        gone.gone = true;
+        throw gone;
+      }
+      return r.arrayBuffer();
+    })
     .then((buf) => ensureAudioContext().decodeAudioData(buf))
     .then((decoded) => {
       state.buffer = decoded;
@@ -1250,7 +1268,17 @@ function attachBubbleAudio(wrap, url, onStart, onPlayback, extras = {}) {   // C
       updateUI();
       play(); // autoplay once decoded, matching the previous behavior
     })
-    .catch(() => {
+    .catch((err) => {
+      if (err && err.gone) {   // NEW (1.5.0)
+        wrap.classList.remove("is-loading", "has-audio");
+        wrap.classList.add("is-audio-gone");
+        wrap.removeAttribute("role");
+        wrap.removeAttribute("tabindex");
+        wrap.removeAttribute("aria-label");
+        wrap.title = "The audio for this reply has been cleaned up (spoken replies are kept for 7 days). Save a reply to keep it.";
+        setStatus("That reply's audio has been cleaned up. Spoken replies are kept 7 days unless saved.", true);
+        return;
+      }
       // Rare: some audio can't be decoded by the Web Audio API. Fall back
       // to a plain element so playback still works, just without
       // normalization — better than a dead player.
@@ -1277,6 +1305,13 @@ function attachBubbleAudio(wrap, url, onStart, onPlayback, extras = {}) {   // C
       wrap._toggle = () => (audio.paused ? audio.play() : audio.pause());
       wrap.appendChild(audio);
     });
+  }
+  if (extras.lazy) {
+    wrap.classList.remove("is-loading");
+    wrap.setAttribute("aria-label", "Play reply");
+  } else {
+    load();
+  }
 }
 
 
@@ -1456,6 +1491,9 @@ function whereSpoken(engine, name) {
 }
 
 function addTurn(who, text, opts = {}) {
+  // NEW (1.5.0): remembered, so a refresh brings the conversation back.
+  const at = opts.at || Date.now();
+  if (!opts.restoring && typeof rememberTurn === "function") rememberTurn(who, text, opts, at);
   // Query fresh each time: clearTranscript() rebuilds this node, so a
   // reference cached at page load goes stale and removing it does nothing.
   const placeholder = logBody.querySelector(".empty");
@@ -1498,11 +1536,15 @@ function addTurn(who, text, opts = {}) {
     // line says so instead of quoting what ElevenLabs would have charged.
     const freeVoice = opts.voiceEngine && opts.voiceEngine !== "elevenlabs";
     const spent = opts.spoke === false ? "not spoken"
+      : opts.saved ? "saved · no credits"   // NEW (1.5.0): played again from Saved
       : freeVoice ? "free voice"
       : `${opts.credits != null ? opts.credits : opts.charCount} credits`;
     cost.textContent = `${opts.wordCount} words${target} · ${spent}`;
     meta.appendChild(cost);
   }
+
+  // NEW (1.5.0): a spoken reply can be saved to play again later.
+  if (opts.saveData && typeof makeSaveButton === "function") meta.appendChild(makeSaveButton(opts.saveData));
 
   // NEW (1.5.0): where the reply was written, in a word: "Local" (Ollama,
   // on your own PC or server) or "OpenAI". Nothing when no AI was asked
@@ -1549,7 +1591,7 @@ function addTurn(who, text, opts = {}) {
   // reserves its own space and can never sit on top of the final word.
   const stamp = document.createElement("span");
   stamp.className = "bubble-stamp";
-  stamp.textContent = new Date().toLocaleTimeString([], {
+  stamp.textContent = new Date(at).toLocaleTimeString([], {   // CHANGED (1.5.0): its own time, after a refresh too
     hour: "numeric",
     minute: "2-digit",
   });
@@ -1566,7 +1608,7 @@ function addTurn(who, text, opts = {}) {
   // was the only part of a message that didn't look like a message.
   if (opts.audioUrl) {
     attachBubbleAudio(body, opts.audioUrl, opts.onAudioStart, opts.onPlayback,
-      { wordTimes: opts.wordTimes });   // CHANGED (1.5.0)
+      { wordTimes: opts.wordTimes, lazy: Boolean(opts.restoring) });   // CHANGED (1.5.0): a restored reply waits for a click
   }
   // NEW (1.5.0): the chatbox page dots, under a reply that goes to VRChat
   // a page at a time.
@@ -1602,6 +1644,7 @@ function addTurn(who, text, opts = {}) {
   removeTypingBubble();
   logBody.appendChild(turn);
   if (typingRect && typeof morphFromTyping === "function") morphFromTyping(body, typingRect);
+  if (opts.restoring) return;   // NEW (1.5.0): the restore scrolls once, at the end
   scrollLogToEnd();   // CHANGED (1.5.0): glides rather than jumps
 }
 
@@ -1647,9 +1690,10 @@ function removeTypingBubble() {
 
 function clearTranscript() {
   logBody.innerHTML = '<div class="empty"><p>Nothing yet. Type below and the reply comes back spoken.</p></div>';
+  if (typeof forgetTranscript === "function") forgetTranscript();   // NEW (1.5.0): Clear forgets it for good
 }
 
-function addProfileDivider(label) {
+function addProfileDivider(label, { restoring = false } = {}) {
   // Nothing to divide yet.
   if (logBody.querySelector(".empty")) return;
 
@@ -1657,6 +1701,7 @@ function addProfileDivider(label) {
   // stack of markers, so an unused one is replaced rather than added to.
   const last = logBody.lastElementChild;
   if (last && last.classList.contains("turn-divider")) last.remove();
+  if (!restoring && typeof rememberDivider === "function") rememberDivider(label);   // NEW (1.5.0)
 
   const rule = document.createElement("div");
   rule.className = "turn-divider";
@@ -6162,6 +6207,20 @@ async function send() {
       voiceEngine: data.voice_engine,  // NEW (1.5.0)
       wordTimes: data.word_times,  // NEW (1.5.0): exact word timings, or null
       footer: pager ? pager.el : null,  // NEW (1.5.0)
+      // NEW (1.5.0): what the Save button keeps, so it can be played again.
+      saveData: data.audio_url ? {
+        audio_url: data.audio_url,
+        text: data.reply,
+        english: data.english,
+        language: data.language,
+        voice_name: typeof activeVoiceName === "function" ? activeVoiceName() : "",
+        voice_engine: data.voice_engine,
+        voice_engine_name: data.voice_engine_name,
+        word_times: data.word_times,
+        chatbox_pages: data.chatbox_pages,
+        profile_id: currentProfileId || "",
+        profile_name: speaker,
+      } : null,
       credits: data.credits,  // NEW (1.5.0): what was actually billed
       spoke: data.spoke,
       totalSeconds: data.total_seconds,
@@ -8397,6 +8456,11 @@ function fitSessionStrip() {
     fitStripQueued = false;
     const strip = document.querySelector(".session-strip");
     if (!strip || !strip.offsetWidth) return;
+    // NEW (1.5.0): not while one of the chips' popovers is open. Re-fitting
+    // then moved the chip, and the slider in its popover with it, under
+    // the pointer: dragging the volume made it jump back and forth. It
+    // re-fits once the popover closes.
+    if (strip.querySelector(".popover:not(.is-hidden)")) return;
     // Two steps, the gentlest first: drop " words", then the style's name.
     strip.classList.remove("is-compact", "is-compact-more");
     strip.classList.add("is-measuring");   // every chip at its natural width
@@ -8651,7 +8715,8 @@ function smoothResize(el, mutate) {
 const stripPlaces = new WeakMap();
 function flipStrip(strip) {
   if (!strip) return;
-  const moving = !reducedMotion();
+  // CHANGED (1.5.0): no gliding while a popover is open (see fitSessionStrip).
+  const moving = !reducedMotion() && !strip.querySelector(".popover:not(.is-hidden)");
   Array.from(strip.children).forEach((chip) => {
     if (!chip.offsetParent) { stripPlaces.delete(chip); return; }   // hidden
     const now = chip.offsetLeft;
@@ -8729,4 +8794,316 @@ var micRing = (function makeMicRing() {
       dictateBtn.style.removeProperty("--mic-level");
     },
   };
+})();
+
+
+// ---------------------------------------------------------------------------
+// NEW (1.5.0): saved replies.
+//
+// Save keeps a spoken reply: its audio, its chatbox pages timed to the
+// voice and its word timings. Playing it from the Saved list puts it in the
+// conversation and sends it to the VRChat chatbox exactly as when it was
+// new. Nothing is generated, so it costs no credits.
+// ---------------------------------------------------------------------------
+const savedPop = $("savedPop");
+const savedListEl = $("savedList");
+const savedSearch = $("savedSearch");
+const savedFoot = $("savedFoot");
+let savedItems = [];
+let savedQuery = "";
+
+function makeSaveButton(saveData) {
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "turn-save";
+  btn.title = "Save this reply to play again later, without credits";
+  const label = document.createElement("span");
+  label.textContent = saveData.saved_done ? "Saved" : "Save";
+  btn.append(iconNode("i-bookmark", "icon-12"), label);
+  if (saveData.saved_done) {   // saved before a refresh
+    btn.classList.add("is-saved");
+    btn.disabled = true;
+  }
+  btn.addEventListener("click", async (event) => {
+    event.stopPropagation();
+    if (btn.disabled) return;
+    btn.disabled = true;
+    try {
+      const res = await fetch("/api/saved", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(saveData),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Couldn't save that reply.");
+      btn.classList.add("is-saved");
+      label.textContent = "Saved";
+      saveData.saved_done = true;   // remembered through a refresh
+      if (typeof persistTranscript === "function") persistTranscript();
+      btn.title = "Saved. Find it under Saved, on the left.";
+      if (typeof popOnce === "function") popOnce(btn);
+      setStatus(data.already ? "Already saved." : "Saved. Play it again any time from Saved, on the left.");
+      if (savedPopIsOpen()) loadSavedList();
+    } catch (err) {
+      btn.disabled = false;
+      setStatus(err.message, true);
+    }
+  });
+  return btn;
+}
+
+function savedPopIsOpen() {
+  return savedPop && !savedPop.classList.contains("is-hidden");
+}
+
+function openSavedPop() {
+  if (!savedPop) return;
+  if (typeof closeAllPopovers === "function") closeAllPopovers();
+  savedPop.classList.remove("is-hidden");
+  savedQuery = "";
+  if (savedSearch) { savedSearch.value = ""; savedSearch.focus(); }
+  renderSavedList();
+  loadSavedList();
+}
+
+function closeSavedPop() {
+  if (savedPop) savedPop.classList.add("is-hidden");
+}
+
+async function loadSavedList() {
+  try {
+    const res = await fetch("/api/saved");
+    const data = await res.json();
+    savedItems = Array.isArray(data.items) ? data.items : [];
+  } catch (err) {
+    savedItems = [];
+  }
+  renderSavedList();
+}
+
+function savedWhen(seconds) {
+  const date = new Date(seconds * 1000);
+  const today = new Date();
+  const sameDay = date.toDateString() === today.toDateString();
+  return sameDay
+    ? date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
+    : date.toLocaleDateString([], { month: "short", day: "numeric" });
+}
+
+function renderSavedList() {
+  if (!savedListEl) return;
+  const q = savedQuery.trim().toLowerCase();
+  const shown = savedItems.filter((item) => !q || [item.text, item.voice_name, item.profile_name, item.english]
+    .some((field) => String(field || "").toLowerCase().includes(q)));
+  savedListEl.replaceChildren();
+  if (!savedItems.length || !shown.length) {
+    const none = document.createElement("p");
+    none.className = "voice-none";
+    none.textContent = savedItems.length
+      ? "Nothing saved matches that."
+      : "Nothing saved yet. Hover over a spoken reply and click Save to keep it.";
+    savedListEl.appendChild(none);
+  }
+  shown.forEach((item) => savedListEl.appendChild(savedRowNode(item)));
+  if (savedFoot) {
+    savedFoot.textContent = savedItems.length === shown.length
+      ? `${savedItems.length} saved`
+      : `${shown.length} of ${savedItems.length} saved`;
+  }
+}
+
+function savedRowNode(item) {
+  const row = document.createElement("div");
+  row.className = "voice-row saved-row";
+  row.setAttribute("role", "listitem");
+
+  const play = document.createElement("button");
+  play.type = "button";
+  play.className = "voice-preview saved-play";
+  play.title = "Play it now: in the chat, and in your VRChat chatbox if it's on";
+  play.setAttribute("aria-label", "Play this saved reply");
+  play.appendChild(iconNode("i-play", "icon-16"));
+
+  const body = document.createElement("button");
+  body.type = "button";
+  body.className = "saved-body";
+  const text = document.createElement("span");
+  text.className = "saved-text";
+  text.textContent = item.text;
+  const sub = document.createElement("span");
+  sub.className = "saved-sub";
+  sub.textContent = [item.voice_name, item.profile_name, savedWhen(item.saved_at)].filter(Boolean).join(" · ");
+  body.append(text, sub);
+
+  // Delete asks twice: the first click turns the button into "Delete?".
+  const del = document.createElement("button");
+  del.type = "button";
+  del.className = "voice-menu-btn saved-delete";
+  del.title = "Delete this saved reply";
+  del.setAttribute("aria-label", "Delete this saved reply");
+  del.appendChild(iconNode("i-trash", "icon-16"));
+  let armedTimer = null;
+  del.addEventListener("click", async (event) => {
+    event.stopPropagation();
+    if (!del.classList.contains("is-armed")) {
+      del.classList.add("is-armed");
+      del.replaceChildren(document.createTextNode("Delete?"));
+      armedTimer = setTimeout(() => {
+        del.classList.remove("is-armed");
+        del.replaceChildren(iconNode("i-trash", "icon-16"));
+      }, 3000);
+      return;
+    }
+    clearTimeout(armedTimer);
+    try {
+      const res = await fetch(`/api/saved/${item.id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error("Couldn't delete it.");
+      savedItems = savedItems.filter((i) => i.id !== item.id);
+      row.classList.add("is-leaving");
+      setTimeout(renderSavedList, 220);
+    } catch (err) {
+      setStatus(err.message, true);
+    }
+  });
+
+  const go = (event) => {
+    event.stopPropagation();
+    playSaved(item);
+  };
+  play.addEventListener("click", go);
+  body.addEventListener("click", go);
+  row.append(play, body, del);
+  return row;
+}
+
+// Plays a saved reply as if it had just been generated: the voice, the
+// bubble with its glowing words, and the chatbox pages following the voice.
+async function playSaved(item) {
+  ensureAudioContext();   // inside the click, so the browser lets it play
+  closeSavedPop();
+  beginReplyTyping();
+  requestVrchatUnmute();
+  let data;
+  try {
+    const res = await fetch(`/api/saved/${item.id}/play`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session_id: sessionId, profile_id: currentProfileId || null }),
+    });
+    data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Couldn't play that saved reply.");
+  } catch (err) {
+    endReplyTyping();
+    setStatus(err.message, true);
+    return;
+  }
+  const saved = data.item;
+  const pages = Array.isArray(saved.chatbox_pages) ? saved.chatbox_pages : [];
+  const pager = pages.length > 1 && oscEnabled() ? makeChatboxPager(pages.length) : null;
+  const follower = pages.length > 1 ? makeChatboxFollower(pages, pager ? (i) => pager.show(i) : null) : null;
+  const active = allProfiles.find((p) => p.id === currentProfileId);
+  addTurn(saved.profile_name || (active ? active.name : "Voice"), saved.text, {
+    audioUrl: saved.audio_url,
+    language: saved.language,
+    english: saved.english,
+    wordCount: saved.text.split(/\s+/).filter(Boolean).length,
+    voiceEngine: saved.voice_engine,
+    voiceEngineName: saved.voice_engine_name,
+    wordTimes: saved.word_times,
+    footer: pager ? pager.el : null,
+    saved: true,
+    spoke: true,
+    credits: 0,
+    onAudioStart: () => {
+      if (!oscEnabled()) endReplyTyping();
+      else if (!follower) sendToChatbox(saved.text, { speaking: true });
+    },
+    onPlayback: follower ? (playing, offset, dur) => follower.update(playing, offset, dur) : null,
+  });
+  setStatus("Playing a saved reply. No credits used.");
+}
+
+if (savedPop) {
+  const railSaved = $("railSaved");
+  if (railSaved) railSaved.addEventListener("click", openSavedPop);
+  const savedClose = $("savedCloseBtn");
+  if (savedClose) savedClose.addEventListener("click", closeSavedPop);
+  savedPop.addEventListener("click", (event) => {
+    if (event.target === savedPop) closeSavedPop();
+  });
+  savedPop.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") { event.preventDefault(); closeSavedPop(); }
+  });
+  if (savedSearch) {
+    savedSearch.addEventListener("input", () => {
+      savedQuery = savedSearch.value;
+      renderSavedList();
+    });
+  }
+}
+
+
+// ---------------------------------------------------------------------------
+// NEW (1.5.0): the conversation survives a refresh. Every message (and each
+// "now talking to" divider) is kept in this browser until Clear is pressed.
+// Old replies come back quietly: nothing plays, and a reply's audio is only
+// fetched when you click it. The AI's memory of the conversation is on the
+// server, under this browser's session, so it lines up with what you see.
+// ---------------------------------------------------------------------------
+const TRANSCRIPT_KEY = "frivo_transcript_v1";
+const TRANSCRIPT_MAX = 150;
+var transcript = [];
+
+function persistTranscript() {
+  try {
+    localStorage.setItem(TRANSCRIPT_KEY, JSON.stringify(transcript.slice(-TRANSCRIPT_MAX)));
+  } catch (err) {
+    // Full or blocked storage: the conversation just won't survive a refresh.
+  }
+}
+
+function rememberTurn(who, text, opts, at) {
+  const kept = {};
+  Object.keys(opts || {}).forEach((key) => {
+    const value = opts[key];
+    if (typeof value === "function" || value instanceof Node) return;   // callbacks, the page dots
+    if (key === "restoring" || key === "at") return;
+    kept[key] = value;
+  });
+  transcript.push({ kind: "turn", who, text, opts: kept, at });
+  if (transcript.length > TRANSCRIPT_MAX) transcript = transcript.slice(-TRANSCRIPT_MAX);
+  persistTranscript();
+}
+
+function rememberDivider(label) {
+  if (transcript.length && transcript[transcript.length - 1].kind === "divider") transcript.pop();
+  transcript.push({ kind: "divider", label, at: Date.now() });
+  persistTranscript();
+}
+
+function forgetTranscript() {
+  transcript = [];
+  try { localStorage.removeItem(TRANSCRIPT_KEY); } catch (err) { /* nothing kept */ }
+}
+
+(function restoreTranscript() {
+  let records = [];
+  try {
+    records = JSON.parse(localStorage.getItem(TRANSCRIPT_KEY) || "[]");
+  } catch (err) {
+    records = [];
+  }
+  if (!Array.isArray(records) || !records.length) return;
+  logBody.classList.add("is-restoring");   // no entrance animations
+  records.forEach((record) => {
+    try {
+      if (record.kind === "divider") addProfileDivider(record.label, { restoring: true });
+      else if (record.kind === "turn") addTurn(record.who, record.text, { ...(record.opts || {}), restoring: true, at: record.at });
+    } catch (err) {
+      console.warn("Couldn't bring back a message:", err);
+    }
+  });
+  transcript = records;
+  logEl.scrollTop = logEl.scrollHeight;
+  requestAnimationFrame(() => requestAnimationFrame(() => logBody.classList.remove("is-restoring")));
 })();

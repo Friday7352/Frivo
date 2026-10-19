@@ -5794,6 +5794,185 @@ def audio(filename):
     return send_from_directory(AUDIO_DIR, filename)
 
 
+# ---------------------------------------------------------------------------
+# NEW (1.5.0): saved replies
+#
+# A spoken reply can be saved, then played again later exactly as it was:
+# the same audio, the same chatbox pages timed to the voice, the same
+# glowing words. Playing one costs nothing and asks no AI anything.
+#
+# Kept in %APPDATA%\Frivo\saved\: a copy of each reply's audio, and
+# saved.json listing them. Separate from audio_cache, so the 7-day clean-up
+# never touches them; deleting one from the Saved list is the only way they
+# go (and uninstalling with "remove my data").
+# ---------------------------------------------------------------------------
+
+SAVED_DIR = os.path.join(DATA_DIR, "saved")
+SAVED_INDEX = os.path.join(SAVED_DIR, "saved.json")
+SAVED_LOCK = threading.Lock()
+_SAVED_ID_RE = re.compile(r"^[0-9a-f]{32}$")
+_SAVED_FILE_RE = re.compile(r"^[0-9a-f]{32}\.(mp3|wav)$")
+SAVED_MAX_ITEMS = 1000
+SAVED_MAX_TEXT = 5000
+
+
+def load_saved():
+    try:
+        with open(SAVED_INDEX, "r", encoding="utf-8") as f:
+            items = json.load(f)
+        return [item for item in items if isinstance(item, dict) and _SAVED_ID_RE.match(str(item.get("id", "")))]
+    except (OSError, ValueError, TypeError):
+        return []
+
+
+def write_saved(items):
+    os.makedirs(SAVED_DIR, exist_ok=True)
+    temp = SAVED_INDEX + ".tmp"
+    with open(temp, "w", encoding="utf-8") as f:
+        json.dump(items, f, ensure_ascii=False, indent=1)
+    os.replace(temp, SAVED_INDEX)
+
+
+def _clean_word_times(value):
+    """[[start, end], ...] of numbers, or None."""
+    if not isinstance(value, list) or not value or len(value) > 5000:
+        return None
+    out = []
+    for pair in value:
+        if not isinstance(pair, (list, tuple)) or len(pair) != 2:
+            return None
+        try:
+            out.append([round(float(pair[0]), 3), round(float(pair[1]), 3)])
+        except (TypeError, ValueError):
+            return None
+    return out
+
+
+def _clean_pages(value):
+    """The chatbox pages: [{text, start, at?}, ...], or []."""
+    if not isinstance(value, list):
+        return []
+    pages = []
+    for page in value[:200]:
+        if not isinstance(page, dict) or not isinstance(page.get("text"), str):
+            return []
+        clean = {"text": page["text"][:CHATBOX_LIMIT + 20]}
+        for key in ("start", "at"):
+            if isinstance(page.get(key), (int, float)):
+                clean[key] = float(page[key])
+        clean.setdefault("start", 0.0)
+        pages.append(clean)
+    return pages
+
+
+def saved_public(item):
+    """What the page gets for one saved reply."""
+    out = dict(item)
+    out["audio_url"] = f"/saved-audio/{item['file']}"
+    out.pop("source", None)
+    return out
+
+
+@app.route("/api/saved", methods=["GET"])
+def saved_list():
+    with SAVED_LOCK:
+        items = load_saved()
+    items.sort(key=lambda item: item.get("saved_at", 0), reverse=True)
+    return jsonify({"items": [saved_public(item) for item in items]})
+
+
+@app.route("/api/saved", methods=["POST"])
+def saved_add():
+    data = request.get_json(force=True) or {}
+    audio_url = str(data.get("audio_url") or "")
+    source = audio_url.rsplit("/", 1)[-1]
+    text = str(data.get("text") or "").strip()
+    if not audio_url.startswith("/audio/") or not _AUDIO_REPLY_RE.match(source):
+        return jsonify({"error": "Only a spoken reply can be saved."}), 400
+    if not text:
+        return jsonify({"error": "That reply has no text to save."}), 400
+    source_path = os.path.join(AUDIO_DIR, source)
+    with SAVED_LOCK:
+        items = load_saved()
+        existing = next((item for item in items if item.get("source") == source), None)
+        if existing:
+            return jsonify({"ok": True, "item": saved_public(existing), "already": True})
+        if not os.path.isfile(source_path):
+            return jsonify({"error": "That reply's audio has already been cleaned up, so it can't be saved."}), 410
+        if len(items) >= SAVED_MAX_ITEMS:
+            return jsonify({"error": f"You have {SAVED_MAX_ITEMS} saved replies. Delete some to save more."}), 400
+        ident = uuid.uuid4().hex
+        filename = ident + os.path.splitext(source)[1]
+        os.makedirs(SAVED_DIR, exist_ok=True)
+        shutil.copyfile(source_path, os.path.join(SAVED_DIR, filename))
+        item = {
+            "id": ident,
+            "file": filename,
+            "source": source,
+            "text": text[:SAVED_MAX_TEXT],
+            "english": str(data.get("english") or "")[:SAVED_MAX_TEXT],
+            "language": str(data.get("language") or "English")[:60],
+            "voice_name": str(data.get("voice_name") or "")[:120],
+            "voice_engine": str(data.get("voice_engine") or "")[:20],
+            "voice_engine_name": str(data.get("voice_engine_name") or "")[:60],
+            "profile_id": str(data.get("profile_id") or "")[:80],
+            "profile_name": str(data.get("profile_name") or "")[:120],
+            "word_times": _clean_word_times(data.get("word_times")),
+            "chatbox_pages": _clean_pages(data.get("chatbox_pages")),
+            "saved_at": time.time(),
+        }
+        items.append(item)
+        write_saved(items)
+    return jsonify({"ok": True, "item": saved_public(item)})
+
+
+@app.route("/api/saved/<ident>", methods=["DELETE"])
+def saved_delete(ident):
+    if not _SAVED_ID_RE.match(ident or ""):
+        return jsonify({"error": "Not found."}), 404
+    with SAVED_LOCK:
+        items = load_saved()
+        item = next((i for i in items if i["id"] == ident), None)
+        if not item:
+            return jsonify({"error": "Not found."}), 404
+        items = [i for i in items if i["id"] != ident]
+        write_saved(items)
+    try:
+        if _SAVED_FILE_RE.match(item.get("file", "")):
+            os.remove(os.path.join(SAVED_DIR, item["file"]))
+    except OSError:
+        pass
+    return jsonify({"ok": True})
+
+
+@app.route("/api/saved/<ident>/play", methods=["POST"])
+def saved_play(ident):
+    """
+    A saved reply is about to be played. Nothing is generated or billed.
+    It joins the conversation the AI remembers, as if it had just said it,
+    when there's a conversation going for that profile.
+    """
+    if not _SAVED_ID_RE.match(ident or ""):
+        return jsonify({"error": "Not found."}), 404
+    with SAVED_LOCK:
+        item = next((i for i in load_saved() if i["id"] == ident), None)
+    if not item or not os.path.isfile(os.path.join(SAVED_DIR, item["file"])):
+        return jsonify({"error": "That saved reply's audio is missing."}), 404
+    data = request.get_json(silent=True) or {}
+    key = f"{data.get('session_id') or 'default'}::{data.get('profile_id') or 'default'}"
+    with SESSIONS_LOCK:
+        if key in SESSIONS:
+            SESSIONS[key].append({"role": "assistant", "content": item["text"]})
+    return jsonify({"ok": True, "item": saved_public(item)})
+
+
+@app.route("/saved-audio/<filename>")
+def saved_audio(filename):
+    if not _SAVED_FILE_RE.match(filename or ""):
+        return jsonify({"error": "Not found."}), 404
+    return send_from_directory(SAVED_DIR, filename)
+
+
 def local_ip_addresses():
     """
     Best-effort list of this machine's LAN IPv4 addresses, so the

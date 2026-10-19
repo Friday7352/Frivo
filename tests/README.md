@@ -439,3 +439,11 @@ Double-click `tests/check-windows-voices.bat` on a Windows PC. It runs the real 
 `python3 tests/test-word-highlight.py` checks the timings behind the glowing word: ElevenLabs' per-character timings become one start and end per word (and timings that don't match the text give none), a Windows voice's word boundaries do the same across pages (punctuation-only words share the previous word's time; a missing word gives none), and `/api/chat` sends `word_times` for ElevenLabs (one page or many) and none for Frivo's own voices.
 
 `check-windows-voices.bat` now also reports how many word boundaries each Windows voice gave for the three-page reply, which is what the glow needs on a real Windows PC.
+
+## test-saved-replies.py (1.5.0)
+
+`python3 tests/test-saved-replies.py` checks saved replies: saving copies the reply's audio with its text, chatbox pages and word timings (and saving twice keeps one); only replies in the audio cache can be saved, safely; the list is newest first and its audio is served; playing one adds it to the conversation the AI remembers, without generating anything; deleting removes its audio; and the 7-day audio clean-up leaves saved replies alone.
+
+## test-conversation-kept.py (1.5.0)
+
+`python3 tests/test-conversation-kept.py` checks, in a real browser, that messages (with their times, word timings and Save state) and dividers come back after a refresh, in order, without playing; that a restored reply loads its audio on a click and plays with its words glowing; that one whose audio was cleaned up says so; that Clear forgets the conversation; and that the volume chip neither moves nor changes width while its slider is dragged.
