@@ -3028,7 +3028,11 @@ def settings():
         if data.get("ollama_tier") in OLLAMA_TIER_KEYS:   # NEW (1.5.0)
             CFG["ollama_tier"] = data["ollama_tier"]
         if data.get("ollama_idle_unload") in OLLAMA_IDLE_UNLOAD:   # NEW (1.5.0)
+            changed = CFG.get("ollama_idle_unload") != data["ollama_idle_unload"]
             CFG["ollama_idle_unload"] = data["ollama_idle_unload"]
+            if changed:
+                # Applied to the model on the card now, not at the next reply.
+                threading.Thread(target=apply_ollama_idle_timer, name="ollama-idle", daemon=True).start()
 
         if "allow_openai_fallback" in data:
             CFG["allow_openai_fallback"] = bool(data.get("allow_openai_fallback"))
@@ -5088,6 +5092,29 @@ def _ollama_set_loaded(model, keep):
                   timeout=(LOCAL_CONNECT_TIMEOUT, LOCAL_READ_TIMEOUT))
 
 
+def apply_ollama_idle_timer(wait=0):
+    """
+    NEW (1.5.0): gives whatever Ollama has loaded the idle time from
+    Settings, straight away. Ollama sets a model's timer on each request, so
+    a model loaded before an update (or before the setting changed) would
+    otherwise keep its old timer, "forever" included, until the next reply.
+    Only touches models that are already loaded: nothing is loaded by this.
+    """
+    if wait:
+        time.sleep(wait)
+    try:
+        uses_ollama, _ = gpu_watch_targets()
+        if not uses_ollama:
+            return
+        loaded = _ollama_get("/api/ps").get("models") or []
+        for model in loaded:
+            name = model.get("name") or model.get("model")
+            if name:
+                _ollama_set_loaded(name, keep=True)
+    except Exception as e:
+        log_server_event(f"Ollama idle timer: {e!r}")
+
+
 def _same_model(a, b):
     """'gemma3:4b' and 'gemma3:4b', or 'llama3.1' and 'llama3.1:latest'."""
     norm = lambda name: name if ":" in name else name + ":latest"
@@ -6100,6 +6127,8 @@ def serve(host, port, cert_path, key_path):
     threading.Thread(target=audio_prune_loop, name="audio-prune", daemon=True).start()
     # NEW (1.5.0): keep the last ten minutes of graphics-card memory for the graph.
     threading.Thread(target=gpu_sampler_loop, name="gpu-graph", daemon=True).start()
+    # NEW (1.5.0): and puts the idle timer on a model loaded before this start.
+    threading.Thread(target=apply_ollama_idle_timer, kwargs={"wait": 5}, name="ollama-idle", daemon=True).start()
 
     try:
         import cheroot

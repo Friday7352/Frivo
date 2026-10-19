@@ -130,6 +130,13 @@ check("15 minutes", mod.ollama_keep_alive() == "15m", mod.ollama_keep_alive())
 mod.CFG["ollama_idle_unload"] = "nonsense"
 check("anything else falls back to an hour", mod.ollama_keep_alive() == "1h", mod.ollama_keep_alive())
 mod.CFG["ollama_idle_unload"] = "1h"
+# NEW (1.5.0): the timer goes on a model that's already loaded, straight away.
+ollama["loaded"] = {"gemma3:4b": 100}
+before = len(ollama["posts"])
+mod.CFG["chat_provider"] = "ollama"
+mod.apply_ollama_idle_timer()
+sent = [p for kind, p in ollama["posts"][before:] if kind == "generate"]
+check("a loaded model gets the idle timer at once", [(p.get("model"), p.get("keep_alive")) for p in sent] == [("gemma3:4b", "1h")], sent)
 check("the reply says which AI wrote it", data.get("text_engine_name") == "Ollama · gemma3:4b", data.get("text_engine_name"))
 
 ollama["think_refused"] = True
