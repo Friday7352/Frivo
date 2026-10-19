@@ -305,3 +305,10 @@ Above the personality box, in the profile editor and in Settings > Replies. It u
 
 - The voice-tag controls are one split pill: **✦ Suggest** tags the message, the small arrow opens the menu (the tag picker, Auto tags, Ideas as I type). Speak and Chatbox can still be hidden from the box in Settings > Appearance.
 - **Auto tags** (in that menu): the AI tags every message you send on its way to the voice, and a Reply profile's replies too, with no clicking. The pill shows **Auto** while it's on, the live ideas step aside, and a reply the AI tagged says "Auto tags" under it. It's one extra AI call per message.
+
+### The anchor: one accent, natural tags
+
+- **Hold the accent** is now three-way. *Follow* (what it was) matched each expressive line to the voice's last three, which held the accent but made every line inherit the mood and pace of the one before. **Anchor**, the new default, matches every line to one short, plain sentence the voice said once (made the first time, about 40 credits), so the accent is pinned to one recording and nothing carries over between lines. *Off* speaks every line fresh.
+- **Accent** (Settings > Voices): pick the accent the anchor is made in: American, Southern US, British, Scottish, Irish, Australian, French, German, Russian, Japanese, or the voice's own. It's said once, in the anchor; the lines themselves carry no accent tag, so the tags stay natural.
+- **The anchor** row shows what the voice is being matched to, with **Hear it** and **Make a new one** for when the first try came out wrong. An anchor ElevenLabs no longer knows is replaced on its own.
+- The ✦ menu is redesigned: a proper header with Suggest, the tags in three groups you can scan, and Auto tags and Ideas as I type as clear rows.

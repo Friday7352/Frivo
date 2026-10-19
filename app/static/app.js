@@ -1854,6 +1854,7 @@ function setSettingsOpen(open) {
   if (open && typeof collapseAllServicePanels === "function") collapseAllServicePanels();
   settingsPanel.classList.toggle("is-hidden", !open);
   settingsToggle.classList.toggle("is-active", open);
+  if (open && typeof refreshAnchorStatus === "function") refreshAnchorStatus();   // NEW (1.5.0): for the voice selected now
   // CHANGED (2.0): the rail says where you are.
   const railChat = $("railChat");
   if (railChat) railChat.classList.toggle("is-active", !open);
@@ -1914,7 +1915,8 @@ async function saveAllSettings({ close = false, quiet = false } = {}) {
     speaking_speed: speakingSpeedSlider ? parseInt(speakingSpeedSlider.value, 10) / 100 : 1,
     // NEW (1.5.0): Expressive voice and Delivery, for the default profile.
     expressive_voice: $("expressiveVoiceToggle") ? $("expressiveVoiceToggle").checked : false,
-    hold_accent: $("holdAccentToggle") ? $("holdAccentToggle").checked : true,   // NEW (1.5.0)
+    hold_accent: $("holdAccentRadios") ? getRadioValue($("holdAccentRadios"), "anchor") : "anchor",   // NEW (1.5.0)
+    voice_accent: $("voiceAccentSelect") ? $("voiceAccentSelect").value : "auto",   // NEW (1.5.0)
     voice_delivery: $("voiceDeliveryRadios") ? getRadioValue($("voiceDeliveryRadios"), "natural") : "natural",
     temperature: temperatureSlider ? parseInt(temperatureSlider.value, 10) / 100 : 0.7,
     max_tokens: readMaxTokensSetting(),
@@ -9302,8 +9304,23 @@ function applyVoiceStyleSettings(data) {
   if (Array.isArray(data.audio_tag_groups) && data.audio_tag_groups.length) audioTagGroups = data.audio_tag_groups;
   const toggle = $("expressiveVoiceToggle");
   if (toggle) toggle.checked = data.expressive_voice === true;
-  const hold = $("holdAccentToggle");
-  if (hold) hold.checked = data.hold_accent !== false;
+  const hold = $("holdAccentRadios");
+  const holdNote = $("holdAccentNote");
+  if (hold && Array.isArray(data.hold_accent_modes) && data.hold_accent_modes.length) {
+    const pick = data.hold_accent || "anchor";
+    const describe = (id) => {
+      const m = data.hold_accent_modes.find((x) => x.id === id);
+      if (holdNote) holdNote.textContent = m ? m.description : "";
+    };
+    buildRadioGroup(hold, data.hold_accent_modes, "holdAccentSettings", pick, (id) => { describe(id); showAnchorRows(); });
+    describe(pick);
+  }
+  const accent = $("voiceAccentSelect");
+  if (accent && Array.isArray(data.voice_accents) && data.voice_accents.length) {
+    fillOptionList(accent, data.voice_accents, data.voice_accent || "auto");
+  }
+  showAnchorRows();
+  refreshAnchorStatus();
   const radios = $("voiceDeliveryRadios");
   const note = $("voiceDeliveryNote");
   if (radios) {
@@ -9350,7 +9367,7 @@ function renderVoiceTagGroups() {
     const row = document.createElement("div");
     row.className = "voice-tag-group";
     const name = document.createElement("span");
-    name.className = "voice-tag-group-name";
+    name.className = "voice-tag-group-name eyebrow";
     name.textContent = group.name;
     const chips = document.createElement("div");
     chips.className = "voice-tag-chips";
@@ -9395,7 +9412,7 @@ function openVoiceTags() {
   const note = $("voiceTagNote");
   if (note && !note.dataset.busy) {
     note.classList.remove("is-error");
-    note.textContent = "Goes in where your cursor is. The voice acts it out; it isn't read aloud or sent to the chatbox.";
+    note.textContent = "";
   }
 }
 
@@ -10295,4 +10312,93 @@ function showAutoTagsState() {
   }));
   window.addEventListener("resize", () => { if (tagIdeasState.nodes.size) renderTagIdeas(); });
   input.addEventListener("input", messageBoxChanged);
+})();
+
+// ---------------------------------------------------------------------------
+// NEW (1.5.0): the anchor (Settings > Voices): what the voice is being
+// matched to, with Hear it and Make a new one. Shown only when Hold the
+// accent is Anchor.
+// ---------------------------------------------------------------------------
+
+function showAnchorRows() {
+  const mode = $("holdAccentRadios") ? getRadioValue($("holdAccentRadios"), "anchor") : "anchor";
+  ["voiceAccentRow", "anchorRow"].forEach((id) => { const el = $(id); if (el) el.classList.toggle("is-hidden", mode !== "anchor"); });
+}
+
+var anchorAudio = null;
+async function refreshAnchorStatus() {
+  const status = $("anchorStatus");
+  const hear = $("anchorHearBtn");
+  if (!status) return;
+  const voiceId = typeof activeVoiceId === "function" ? activeVoiceId() : "";
+  if (!voiceId || voiceEngine({ voice_id: voiceId }) !== "elevenlabs") {
+    status.textContent = "For ElevenLabs voices. The profile selected now has a free voice.";
+    if (hear) hear.disabled = true;
+    return;
+  }
+  try {
+    const res = await fetch(`/api/voice-anchor?voice_id=${encodeURIComponent(voiceId)}&language=${encodeURIComponent(typeof currentLanguage !== "undefined" ? currentLanguage : "English")}`);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Couldn't check.");
+    const name = typeof activeVoiceName === "function" ? activeVoiceName() : "this voice";
+    if (!data.anchor) {
+      status.textContent = `None yet for ${name}. It's made the first time ${name} speaks an expressive line (about 40 credits, once).`;
+      if (hear) hear.disabled = true;
+    } else {
+      const accent = $("voiceAccentSelect");
+      const accentName = accent && accent.options[accent.selectedIndex] && data.anchor.accent !== "auto"
+        ? ` in a ${accent.options[accent.selectedIndex].textContent} accent` : "";
+      status.textContent = `${name} said one plain sentence${accentName}; every expressive line is matched to it. If it came out wrong, make a new one.`;
+      if (hear) { hear.disabled = !data.anchor.audio_url; hear.dataset.url = data.anchor.audio_url || ""; }
+    }
+  } catch (err) {
+    status.textContent = err.message;
+    if (hear) hear.disabled = true;
+  }
+}
+
+(function wireAnchor() {
+  const hear = $("anchorHearBtn");
+  const remake = $("anchorRemakeBtn");
+  const accent = $("voiceAccentSelect");
+  if (hear) hear.addEventListener("click", () => {
+    if (!hear.dataset.url) return;
+    if (anchorAudio) { anchorAudio.pause(); anchorAudio = null; }
+    anchorAudio = new Audio(hear.dataset.url);
+    anchorAudio.play().catch(() => {});
+  });
+  if (remake) remake.addEventListener("click", async () => {
+    const voiceId = typeof activeVoiceId === "function" ? activeVoiceId() : "";
+    if (!voiceId) return;
+    remake.disabled = true;
+    const status = $("anchorStatus");
+    if (status) status.textContent = "Making a new one…";
+    try {
+      // Save the accent first, so the new anchor is made in it.
+      if (typeof saveAllSettings === "function") await saveAllSettings({ quiet: true });
+      const res = await fetch("/api/voice-anchor", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ voice_id: voiceId, language: typeof currentLanguage !== "undefined" ? currentLanguage : "English" }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Couldn't make it.");
+      await refreshAnchorStatus();
+      if (hear && hear.dataset.url) hear.click();   // hear the new one straight away
+    } catch (err) {
+      if (status) status.textContent = err.message;
+    } finally {
+      remake.disabled = false;
+    }
+  });
+  if (accent) accent.addEventListener("change", () => {
+    // A new accent means a new anchor; the old one is only right for the old accent.
+    const status = $("anchorStatus");
+    if (status) status.textContent = "Accent changed: press Make a new one to hear the voice in it (the next expressive line makes one anyway).";
+  });
+  const name = $("voiceTriggerName");
+  if (name && typeof MutationObserver === "function") {
+    new MutationObserver(() => { if (settingsPanel && !settingsPanel.classList.contains("is-hidden")) refreshAnchorStatus(); })
+      .observe(name, { childList: true, characterData: true, subtree: true });
+  }
 })();

@@ -133,20 +133,60 @@ check("the highlight still has a time per word", len(data.get("word_times") or [
 check("the tags are counted as credits", data.get("credits") == len(data.get("voiced", "")), data.get("credits"))
 check("word count leaves them out", data.get("word_count") == 5, data.get("word_count"))
 
-first_id = "req%d" % len(posts)
+print("--- Hold the accent ---")
+# Anchor (the default): the first v3 line makes one plain sentence with
+# the voice, and every line after is matched to that same one.
+anchor_posts = [p for p in posts if "plan for today" in p[1].get("text", "")]
+check("Anchor: a plain sentence was made once, with v3", len(anchor_posts) == 1 and anchor_posts[0][1]["model_id"] == "eleven_v3", len(anchor_posts))
+anchor_id = "req%d" % (posts.index(anchor_posts[0]) + 1)
+check("... and the line was matched to it", posts[-1][1].get("previous_request_ids") == [anchor_id]
+      and "plan for today" in posts[-1][1].get("previous_text", ""), {k: posts[-1][1].get(k) for k in ("previous_request_ids", "previous_text")})
 status, data = chat("No tags in this one.")
 check("after a tag, the next message stays on v3 (no accent jump)", posts[-1][1]["model_id"] == "eleven_v3", posts[-1][1])
-check("... and is told to match what the voice just said",
-      posts[-1][1].get("previous_request_ids") == [first_id] and "[whispers]" in posts[-1][1].get("previous_text", ""),
-      {k: posts[-1][1].get(k) for k in ("previous_request_ids", "previous_text")})
+check("... matched to the same anchor, not the last line", posts[-1][1].get("previous_request_ids") == [anchor_id], posts[-1][1].get("previous_request_ids"))
+check("the anchor is kept on disk", os.path.isfile(mod.ANCHORS_FILE) and any(k.startswith("EL1::en::") for k in mod.load_anchors()))
+check("no second anchor was made", len([p for p in posts if "plan for today" in p[1].get("text", "")]) == 1)
+mod.CFG.update(hold_accent="follow")
+first_id = "req%d" % len(posts)
+status, data = chat("Follow mode now.")
 status, data = chat("A third one.")
 status, data = chat("A fourth one.")
-check("at most the last three", len(posts[-1][1].get("previous_request_ids") or []) == 3, posts[-1][1].get("previous_request_ids"))
-mod.CFG.update(hold_accent=False)
+check("Follow: matched to the last three lines", len(posts[-1][1].get("previous_request_ids") or []) == 3
+      and anchor_id not in posts[-1][1]["previous_request_ids"], posts[-1][1].get("previous_request_ids"))
+mod.CFG.update(hold_accent="off")
 status, data = chat("With Hold the accent off.")
-check("Hold the accent off: every line spoken fresh", "previous_request_ids" not in posts[-1][1] and "previous_text" not in posts[-1][1]
+check("Off: every line spoken fresh", "previous_request_ids" not in posts[-1][1] and "previous_text" not in posts[-1][1]
       and posts[-1][1]["model_id"] == "eleven_v3", posts[-1][1])
-mod.CFG.update(hold_accent=True)
+check("an old True/False setting still reads", mod.normalize_hold_accent(True) == "anchor" and mod.normalize_hold_accent(False) == "off")
+# A stale anchor: ElevenLabs refuses it, Frivo forgets it, speaks without, and makes a new one next time.
+mod.CFG.update(hold_accent="anchor")
+stale = {"on": True}
+real_fake_post = mod.requests.post
+def refusing_post(url, **kw):
+    if stale["on"] and kw["json"].get("previous_request_ids") == [anchor_id]:
+        return SimpleNamespace(status_code=422, text="unknown request id", content=b"", headers={}, json=lambda: {})
+    return real_fake_post(url, **kw)
+mod.requests.post = refusing_post
+status, data = chat("Is the anchor still there?")
+check("a stale anchor: forgotten, a new one made, still spoken on v3", status == 200 and posts[-1][1]["model_id"] == "eleven_v3"
+      and next((v for k, v in mod.load_anchors().items() if k.startswith("EL1::en::")), {}).get("id") not in (None, anchor_id), (status, data.get("error"), mod.load_anchors()))
+stale["on"] = False
+mod.requests.post = real_fake_post
+print("--- the accent ---")
+mod.CFG.update(voice_accent="scottish")
+status, data = chat("Och, is that right?")
+made = [p for p in posts if "plan for today" in p[1].get("text", "")][-1][1]
+check("a chosen accent goes on the anchor only", made["text"].startswith("[scottish accent]") and "accent" not in posts[-1][1]["text"], (made["text"][:40], posts[-1][1]["text"]))
+info = client.get("/api/voice-anchor?voice_id=EL1").get_json()
+check("the anchor can be heard", info.get("anchor", {}).get("accent") == "scottish" and info["anchor"].get("audio_url", "").startswith("/anchor-audio/"), info)
+check("... and the recording is served", client.get(info["anchor"]["audio_url"]).status_code == 200)
+n = len([p for p in posts if "plan for today" in p[1].get("text", "")])
+res = client.post("/api/voice-anchor", json={"voice_id": "EL1"})
+check("Make a new one: a fresh anchor", res.status_code == 200 and len([p for p in posts if "plan for today" in p[1].get("text", "")]) == n + 1)
+check("forgetting it", client.delete("/api/voice-anchor?voice_id=EL1").status_code == 200
+      and client.get("/api/voice-anchor?voice_id=EL1").get_json().get("anchor") is None)
+check("a free voice has none", client.get("/api/voice-anchor?voice_id=piper:alba").status_code == 400)
+mod.CFG.update(voice_accent="auto")
 status, data = chat("Another, from a different page.", session_id="other")
 check("... but another conversation starts on the usual model, with no stitching",
       posts[-1][1]["model_id"] == "eleven_multilingual_v2" and "previous_request_ids" not in posts[-1][1], posts[-1][1])
@@ -171,7 +211,7 @@ check("your message is tagged on its way to the voice",
 check("the voice got the tag, the chatbox didn't", "[softly]" in posts[-1][1]["text"] and "[" not in data["chatbox_pages"][0]["text"])
 status, data = chat("Don't tell anyone, okay?", auto_tags=False)
 check("off: as typed", data.get("auto_tagged") is False and data.get("voiced") == "Don't tell anyone, okay?", data)
-check("says how it was spoken", data.get("voice_how", "").startswith("v3 · Natural · accent held"), data.get("voice_how"))
+check("says how it was spoken", data.get("voice_how", "").startswith("v3 · Natural · anchored"), data.get("voice_how"))
 spoken_free = []
 mod.CFG.update(voice_id="piper:alba")
 mod.piper_problem = lambda *a, **k: None
@@ -205,10 +245,15 @@ history = mod.SESSIONS.get(f"default::{actor['id']}", [])
 check("the AI's memory keeps its tags", history and "[laughs]" in history[-1]["content"], history[-1:] if history else None)
 
 refuse_v3["on"] = True
+mod.forget_anchor("EL1", "en")
 status, data = chat("I finished the world!", profile_id=actor["id"])
+spoken_post = [p for p in posts if "plan for today" not in p[1].get("text", "")][-1]
 check("v3 refused: still spoken, by the usual model, without tags",
-      status == 200 and posts[-1][1]["model_id"] == "eleven_multilingual_v2" and "[" not in posts[-1][1]["text"],
-      (status, posts[-1][1], data.get("error")))
+      status == 200 and spoken_post[1]["model_id"] == "eleven_multilingual_v2" and "[" not in spoken_post[1]["text"],
+      (status, spoken_post[1], data.get("error")))
+n_anchor_tries = len([p for p in posts if "plan for today" in p[1].get("text", "")])
+status, data = chat("And again.", profile_id=actor["id"])
+check("... and the anchor isn't tried again for a while", len([p for p in posts if "plan for today" in p[1].get("text", "")]) == n_anchor_tries)
 refuse_v3["on"] = False
 
 res = client.put(f"/api/profiles/{actor['id']}", json={"expressive_voice": False, "voice_delivery": "lively"})

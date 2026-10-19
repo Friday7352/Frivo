@@ -679,7 +679,8 @@ def load_config():
         "expressive_voice": False,
         "voice_delivery": "natural",
         # NEW (1.5.0): continuity between v3 lines (see _elevenlabs_payload).
-        "hold_accent": True,
+        "hold_accent": "anchor",
+        "voice_accent": "auto",   # NEW (1.5.0): the accent the anchor is made in
         # Sampling temperature for the reply. 0.7 is the long-standing
         # OpenAI default and what this app used implicitly before the
         # setting was exposed, so an existing config behaves identically.
@@ -3071,15 +3072,191 @@ def voice_how(voiced):
     delivery = next((d["name"] for d in VOICE_DELIVERIES if d["id"] == normalize_voice_delivery(style.get("delivery"))), "Natural")
     if payload["model_id"] == ELEVEN_V3_MODEL:
         parts = ["v3", delivery]
-        parts.append("accent held" if payload.get("previous_request_ids") or payload.get("previous_text") else "spoken fresh")
+        mode = normalize_hold_accent(CFG.get("hold_accent"))
+        parts.append({"anchor": "anchored", "follow": "following last lines"}.get(mode, "spoken fresh")
+                     if payload.get("previous_request_ids") or payload.get("previous_text") else "spoken fresh")
         if has_audio_tags(voiced):
             parts.append(f"{len(AUDIO_TAG_RE.findall(voiced))} tag{'s' if len(AUDIO_TAG_RE.findall(voiced)) != 1 else ''}")
         return " · ".join(parts)
     return f"standard (v2) · {delivery}"
 
 
+def _drop_stale_anchor(payload):
+    """The anchor in `payload` was refused: forget it (and the thread's ids)."""
+    from flask import has_request_context
+    if not has_request_context():
+        return
+    voice_id = getattr(g, "speech_voice", None)
+    code = payload.get("language_code") or "en"
+    if voice_id:
+        with ANCHORS_LOCK:
+            anchors = load_anchors()
+            entry = anchors.get(anchor_key(voice_id, code))
+        if entry and entry.get("id") in (payload.get("previous_request_ids") or []):
+            forget_anchor(voice_id, code)
+            log_server_event(f"Hold the accent: ElevenLabs no longer knows the anchor for {voice_id}; a new one will be made")
+    if getattr(g, "speech_thread", None):
+        with SPEECH_THREADS_LOCK:
+            SPEECH_THREADS.pop(g.speech_thread, None)
+
+
 def speech_thread_key(session_id, profile_id, voice_id, model_id):
     return f"{session_id}::{profile_id or 'default'}::{voice_id}::{model_id}"
+
+
+# NEW (1.5.0): "Hold the accent" has three settings:
+#
+#   off      every line is spoken fresh
+#   anchor   every line is matched to ONE short, plain sentence this voice
+#            said once (made the first time, about 40 credits, kept in
+#            voice_anchors.json). The accent is pinned to that one sample,
+#            and nothing carries over from line to line.
+#   follow   every line is matched to the last three the voice said in the
+#            conversation. Holds the accent too, but a line inherits the
+#            mood and pace of the one before it (a whisper makes the next
+#            line whispery), which is what Friday heard as "terrible".
+HOLD_ACCENT_MODES = [
+    {"id": "off", "name": "Off", "description": "Every line is spoken fresh. The accent can wander on short lines."},
+    {"id": "anchor", "name": "Anchor", "description": "Every line is matched to one plain sentence this voice said once. Steady accent, nothing carried over between lines."},
+    {"id": "follow", "name": "Follow", "description": "Every line is matched to the last few the voice said. Steady accent, but each line takes on the mood of the one before."},
+]
+HOLD_ACCENT_IDS = {m["id"] for m in HOLD_ACCENT_MODES}
+DEFAULT_HOLD_ACCENT = "anchor"
+ANCHORS_FILE = os.path.join(DATA_DIR, "voice_anchors.json")
+ANCHORS_LOCK = threading.Lock()
+ANCHOR_FAILED_AT = {}   # voice::language -> when making its anchor last failed
+ANCHORS_DIR = os.path.join(DATA_DIR, "anchors")   # the anchor recordings, to hear
+# NEW (1.5.0): the accent the anchor is made in. v3's accent tags change who
+# the voice is when they're on every line, so they go on the anchor only:
+# the one plain sentence is said in the chosen accent, and every line is
+# matched to that recording. "auto" is whatever the voice does on its own.
+VOICE_ACCENTS = [
+    {"id": "auto", "name": "Voice's own", "tag": ""},
+    {"id": "american", "name": "American", "tag": "american accent"},
+    {"id": "southern", "name": "Southern US", "tag": "southern american accent"},
+    {"id": "british", "name": "British", "tag": "british accent"},
+    {"id": "scottish", "name": "Scottish", "tag": "scottish accent"},
+    {"id": "irish", "name": "Irish", "tag": "irish accent"},
+    {"id": "australian", "name": "Australian", "tag": "australian accent"},
+    {"id": "french", "name": "French", "tag": "french accent"},
+    {"id": "german", "name": "German", "tag": "german accent"},
+    {"id": "russian", "name": "Russian", "tag": "russian accent"},
+    {"id": "japanese", "name": "Japanese", "tag": "japanese accent"},
+]
+VOICE_ACCENT_IDS = {a["id"] for a in VOICE_ACCENTS}
+
+
+def normalize_voice_accent(value, fallback="auto"):
+    value = str(value or "").strip().lower()
+    return value if value in VOICE_ACCENT_IDS else fallback
+
+
+def anchor_key(voice_id, code):
+    return f"{voice_id}::{code}::{normalize_voice_accent(CFG.get('voice_accent'))}"
+# What the anchor says: plain, unemotional, long enough to settle the voice.
+ANCHOR_LINES = {
+    "en": "Right, so here's the plan for today. We'll start with the usual things, and then see where it goes from there.",
+    "de": "Also gut, hier ist der Plan für heute. Wir fangen mit den üblichen Dingen an und sehen dann, wie es weitergeht.",
+    "es": "Bueno, este es el plan para hoy. Empezamos con lo de siempre y luego vemos cómo sigue.",
+    "fr": "Bon, voilà le programme pour aujourd'hui. On commence par les choses habituelles, et on verra ensuite.",
+    "it": "Allora, ecco il piano per oggi. Cominciamo con le solite cose e poi vediamo come va.",
+    "pt": "Então, este é o plano para hoje. Começamos com as coisas de sempre e depois vemos como corre.",
+    "ja": "さて、今日の予定はこんな感じです。まずはいつものことから始めて、その後の様子を見ましょう。",
+}
+
+
+def normalize_hold_accent(value, fallback=DEFAULT_HOLD_ACCENT):
+    if value is True:
+        return "anchor"
+    if value is False:
+        return "off"
+    value = str(value or "").strip().lower()
+    return value if value in HOLD_ACCENT_IDS else fallback
+
+
+def load_anchors():
+    try:
+        with open(ANCHORS_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def write_anchors(anchors):
+    os.makedirs(DATA_DIR, exist_ok=True)
+    with open(ANCHORS_FILE, "w", encoding="utf-8") as f:
+        json.dump(anchors, f, indent=2)
+
+
+def forget_anchor(voice_id, code):
+    key = anchor_key(voice_id, code)
+    with ANCHORS_LOCK:
+        anchors = load_anchors()
+        gone = anchors.pop(key, None)
+        if gone is not None:
+            write_anchors(anchors)
+    if gone and gone.get("file"):
+        try:
+            os.remove(os.path.join(ANCHORS_DIR, gone["file"]))
+        except OSError:
+            pass
+    ANCHOR_FAILED_AT.pop(key, None)
+
+
+def voice_anchor(voice_id, code, delivery_v3):
+    """
+    The anchor for this voice and language: {"id": request id, "text":
+    what it said}. Made now if there isn't one (one v3 request), or None
+    when it can't be.
+    """
+    key = anchor_key(voice_id, code)
+    with ANCHORS_LOCK:
+        anchors = load_anchors()
+        if key in anchors and anchors[key].get("id"):
+            return anchors[key]
+    # Not retried for a while after a failure, so a voice that can't use v3
+    # doesn't cost a failed request on every reply.
+    if time.time() - ANCHOR_FAILED_AT.get(key, 0) < 600:
+        return None
+    text = ANCHOR_LINES.get(code, ANCHOR_LINES["en"])
+    accent = next((a for a in VOICE_ACCENTS if a["id"] == normalize_voice_accent(CFG.get("voice_accent"))), VOICE_ACCENTS[0])
+    said = f"[{accent['tag']}] {text}" if accent["tag"] else text
+    try:
+        resp = requests.post(
+            f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}",
+            headers={"xi-api-key": CFG["elevenlabs_api_key"], "Content-Type": "application/json",
+                     "Accept": "audio/mpeg"},
+            json={"text": said, "model_id": ELEVEN_V3_MODEL, "language_code": code,
+                  "voice_settings": {"stability": delivery_v3}},
+            timeout=60,
+        )
+        request_id = (resp.headers.get("request-id") or resp.headers.get("x-request-id") or "").strip() \
+            if resp.status_code == 200 and getattr(resp, "headers", None) else ""
+    except Exception as e:
+        ANCHOR_FAILED_AT[key] = time.time()
+        log_server_event(f"Hold the accent: couldn't make the anchor for {voice_id}: {e!r}")
+        return None
+    if not request_id:
+        ANCHOR_FAILED_AT[key] = time.time()
+        log_server_event(f"Hold the accent: no request id for the anchor ({getattr(resp, 'status_code', '?')})")
+        return None
+    log_server_event(f"Hold the accent: made the anchor for {voice_id} ({code}, {accent['name']}), {len(said)} credits once")
+    # Kept, so you can hear what the voice is being matched to.
+    filename = f"{uuid.uuid4().hex}.mp3"
+    try:
+        os.makedirs(ANCHORS_DIR, exist_ok=True)
+        with open(os.path.join(ANCHORS_DIR, filename), "wb") as f:
+            f.write(resp.content)
+    except OSError:
+        filename = ""
+    anchor = {"id": request_id, "text": said, "at": time.time(), "file": filename,
+              "accent": accent["id"], "voice_id": voice_id, "language": code}
+    with ANCHORS_LOCK:
+        anchors = load_anchors()
+        anchors[key] = anchor
+        write_anchors(anchors)
+    return anchor
 
 
 def remember_speech(resp, voiced):
@@ -3306,12 +3483,19 @@ def _elevenlabs_payload(text, force_v2=False):
         code = language_iso(style.get("language") or CFG.get("language") or "English")
         if code:
             payload["language_code"] = code
-        # Continuity with what this voice just said (see above). It's what
-        # holds the accent on short lines, and it also pulls each line
-        # toward how the last ones were delivered, which can soften the
-        # tags: "Hold the accent" in Settings > Voices turns it off.
+        # Hold the accent (see HOLD_ACCENT_MODES).
         from flask import has_request_context
-        if CFG.get("hold_accent", True) and has_request_context() and getattr(g, "speech_thread", None):
+        mode = normalize_hold_accent(CFG.get("hold_accent"))
+        if mode == "anchor" and has_request_context() and getattr(g, "speech_voice", None) and not getattr(g, "making_anchor", False):
+            g.making_anchor = True
+            try:
+                anchor = voice_anchor(g.speech_voice, code or "en", delivery["v3"])
+            finally:
+                g.making_anchor = False
+            if anchor:
+                payload["previous_request_ids"] = [anchor["id"]]
+                payload["previous_text"] = anchor["text"]
+        elif mode == "follow" and has_request_context() and getattr(g, "speech_thread", None):
             with SPEECH_THREADS_LOCK:
                 thread = SPEECH_THREADS.get(g.speech_thread)
             if thread and time.time() - thread.get("at", 0) < V3_STICKY_SECONDS:
@@ -3351,6 +3535,12 @@ def get_tts_audio(text, voice_id, language="English"):
     }
     payload = _elevenlabs_payload(text)   # CHANGED (1.5.0)
     resp = requests.post(url, headers=headers, json=payload, timeout=60)
+    # NEW (1.5.0): an anchor ElevenLabs no longer knows (history cleared):
+    # forget it and speak without, once.
+    if resp.status_code in (400, 404, 422) and payload.get("previous_request_ids"):
+        _drop_stale_anchor(payload)
+        payload = _elevenlabs_payload(text)
+        resp = requests.post(url, headers=headers, json=payload, timeout=60)
     # NEW (1.5.0): an account or voice that can't use v3 still gets spoken,
     # by the usual model and without the tags. A refusal isn't billed.
     if resp.status_code in (400, 403, 404, 422) and payload.get("model_id") == ELEVEN_V3_MODEL:
@@ -3414,6 +3604,10 @@ def elevenlabs_tts_timed(text, voice_id, pages, voiced=None):
     }
     payload = _elevenlabs_payload(voiced)
     resp = requests.post(url, headers=headers, json=payload, timeout=60)
+    if resp.status_code in (400, 404, 422) and payload.get("previous_request_ids"):   # NEW (1.5.0): a stale anchor
+        _drop_stale_anchor(payload)
+        payload = _elevenlabs_payload(voiced)
+        resp = requests.post(url, headers=headers, json=payload, timeout=60)
     if resp.status_code != 200:
         # Refused, so nothing was spoken or billed. The plain request is
         # tried next, and its error is the one you see if it fails too.
@@ -4091,7 +4285,9 @@ def settings():
         if "voice_delivery" in data:
             CFG["voice_delivery"] = normalize_voice_delivery(data.get("voice_delivery"), CFG.get("voice_delivery", DEFAULT_VOICE_DELIVERY))
         if "hold_accent" in data:
-            CFG["hold_accent"] = data.get("hold_accent") is not False
+            CFG["hold_accent"] = normalize_hold_accent(data.get("hold_accent"), normalize_hold_accent(CFG.get("hold_accent")))
+        if "voice_accent" in data:
+            CFG["voice_accent"] = normalize_voice_accent(data.get("voice_accent"), normalize_voice_accent(CFG.get("voice_accent")))
         if "response_style" in data:
             CFG["response_style"] = normalize_response_style(
                 data.get("response_style"), CFG.get("response_style", DEFAULT_RESPONSE_STYLE)
@@ -4193,7 +4389,10 @@ def settings():
             # NEW (1.5.0)
             "expressive_voice": CFG.get("expressive_voice") is True,
             "voice_delivery": normalize_voice_delivery(CFG.get("voice_delivery")),
-            "hold_accent": CFG.get("hold_accent", True) is not False,
+            "hold_accent": normalize_hold_accent(CFG.get("hold_accent")),
+            "hold_accent_modes": HOLD_ACCENT_MODES,
+            "voice_accent": normalize_voice_accent(CFG.get("voice_accent")),
+            "voice_accents": [{"id": a["id"], "name": a["name"]} for a in VOICE_ACCENTS],
             "voice_deliveries": VOICE_DELIVERIES,
             "audio_tag_groups": AUDIO_TAG_GROUPS,
             "min_speaking_speed": MIN_SPEAKING_SPEED,
@@ -6701,6 +6900,7 @@ def chat():
         if time.time() - V3_LAST_USED.get(sticky_key, 0) < V3_STICKY_SECONDS:
             g.voice_style["stay_on_v3"] = True
         g.speech_thread = speech_thread_key(session_id, profile_id, voice_id, ELEVEN_V3_MODEL)
+        g.speech_voice = voice_id   # NEW (1.5.0): for the anchor
         prompt_voice_style = voice_style
     else:
         g.voice_style = {"expressive": False, "delivery": DEFAULT_VOICE_DELIVERY}
@@ -7179,6 +7379,49 @@ def _saved_download_name(item, used=None):
             n += 1
         used.add(full)
     return full
+
+
+@app.route("/api/voice-anchor", methods=["GET", "POST", "DELETE"])
+def voice_anchor_route():
+    """
+    NEW (1.5.0): the anchor for a voice (the default profile's, or
+    ?voice_id=): GET says whether there is one and where to hear it; POST
+    makes one now (or a new one, replacing the old); DELETE forgets it.
+    """
+    voice_id = (request.args.get("voice_id") or (request.get_json(silent=True) or {}).get("voice_id")
+                or CFG.get("voice_id") or "").strip()
+    language = normalize_language(request.args.get("language") or (request.get_json(silent=True) or {}).get("language")) \
+        or CFG.get("language", "English")
+    code = language_iso(language) or "en"
+    if not voice_id or tts_engine(voice_id) != "elevenlabs":
+        return jsonify({"error": "Anchors are for ElevenLabs voices."}), 400
+    if request.method == "DELETE":
+        forget_anchor(voice_id, code)
+        return jsonify({"ok": True})
+    if request.method == "POST":
+        if not CFG.get("elevenlabs_api_key"):
+            return jsonify({"error": "Add your ElevenLabs key first."}), 400
+        forget_anchor(voice_id, code)
+        delivery = DELIVERY_SETTINGS[normalize_voice_delivery(CFG.get("voice_delivery"))]["v3"]
+        anchor = voice_anchor(voice_id, code, delivery)
+        if not anchor:
+            return jsonify({"error": "ElevenLabs didn't make the anchor. Check the server log; your account may not have v3."}), 502
+    else:
+        with ANCHORS_LOCK:
+            anchor = load_anchors().get(anchor_key(voice_id, code))
+    if not anchor:
+        return jsonify({"anchor": None, "voice_id": voice_id, "language": code})
+    return jsonify({"anchor": {
+        "text": anchor.get("text", ""), "accent": anchor.get("accent", "auto"), "at": anchor.get("at", 0),
+        "audio_url": f"/anchor-audio/{anchor['file']}" if anchor.get("file") else None,
+    }, "voice_id": voice_id, "language": code})
+
+
+@app.route("/anchor-audio/<filename>")
+def anchor_audio(filename):
+    if not re.match(r"^[0-9a-f]{32}\.mp3$", filename or ""):
+        return jsonify({"error": "Not found."}), 404
+    return send_from_directory(ANCHORS_DIR, filename)
 
 
 @app.route("/api/saved/<ident>/download")

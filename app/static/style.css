@@ -3682,40 +3682,63 @@ html.motion-ready .stage { transition: transform var(--dur-smooth) var(--spring-
    NEW (1.5.0): voice tags
    ============================================================ */
 
-/* The ✦ button and its popover, in the message box. */
+/* The ✦ menu, in the message box. CHANGED (1.5.0): redesigned. */
 .voice-tag-wrap { display: inline-flex; }
 .composer .voice-tag-pop {
   top: auto;
-  bottom: calc(100% + 16px);
+  bottom: calc(100% + 14px);
   left: auto;
   right: -8px;
-  width: 340px;
-  padding: 12px 14px 10px;
+  width: 400px;
+  padding: 0;
+  overflow: hidden;
 }
-.voice-tag-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
-.voice-tag-head .btn-sm { display: inline-flex; align-items: center; gap: 5px; }
-.voice-tag-head .btn-sm.is-busy { opacity: 0.6; }
-.voice-tag-group { display: grid; grid-template-columns: 58px minmax(0, 1fr); gap: 8px; align-items: start; padding: 5px 0; }
-.voice-tag-group + .voice-tag-group { border-top: 1px solid var(--rule); }
-.voice-tag-group-name { font-size: var(--text-caption); color: var(--ink-faint); padding-top: 5px; }
-.voice-tag-chips { display: flex; flex-wrap: wrap; gap: 5px; }
-.voice-tag-chip {
-  border: 1px solid var(--rule);
+.voice-tag-head {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 14px;
+  padding: 16px 16px 12px;
+  border-bottom: 1px solid var(--rule);
   background: var(--surface-2);
+}
+.voice-tag-title { display: block; font-size: var(--text-subhead); font-weight: 600; color: var(--ink); }
+.voice-tag-lede { display: block; margin-top: 2px; font-size: var(--text-caption); line-height: 1.4; color: var(--ink-dim); }
+.voice-tag-suggest { flex: none; display: inline-flex; align-items: center; gap: 5px; }
+.voice-tag-suggest.is-busy { opacity: 0.6; }
+.voice-tag-groups { padding: 6px 16px 4px; }
+.voice-tag-group { padding: 8px 0 6px; }
+.voice-tag-group + .voice-tag-group { border-top: 1px solid var(--rule-soft, var(--rule)); }
+.voice-tag-group-name { display: block; margin-bottom: 7px; }
+.voice-tag-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.voice-tag-chip {
+  border: 1px solid transparent;
+  background: var(--fill);
   color: var(--ink);
   font: inherit;
   font-size: var(--text-footnote);
+  font-style: italic;
   line-height: 1;
-  padding: 6px 9px;
-  border-radius: 999px;
+  padding: 7px 11px;
+  border-radius: 10px;
   cursor: pointer;
-  transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease);
+  transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease), scale 120ms var(--ease-press, var(--ease));
 }
+.voice-tag-chip::before { content: "+ "; color: var(--accent); font-style: normal; font-weight: 600; }
 .voice-tag-chip:hover { background: var(--accent-soft); border-color: var(--accent-line); }
-.voice-tag-chip:active { scale: 0.94; }
-.voice-tag-note { margin: 8px 0 0; font-size: var(--text-caption); line-height: 1.4; color: var(--ink-dim); }
+.voice-tag-chip:active { scale: 0.95; }
+.voice-tag-options { margin: 6px 16px 0; border-top: 1px solid var(--rule); }
+.voice-tag-option {
+  display: flex; align-items: center; justify-content: space-between; gap: 14px;
+  padding: 11px 0;
+  cursor: pointer;
+}
+.voice-tag-option + .voice-tag-option { border-top: 1px solid var(--rule-soft, var(--rule)); }
+.voice-tag-option-text { display: grid; gap: 2px; min-width: 0; }
+.voice-tag-option-label { font-size: var(--text-footnote); font-weight: 600; color: var(--ink); }
+.voice-tag-option-hint { font-size: var(--text-caption); line-height: 1.4; color: var(--ink-dim); }
+.voice-tag-note { margin: 0; padding: 0 16px 12px; font-size: var(--text-caption); line-height: 1.4; color: var(--ink-dim); }
+.voice-tag-note:empty { display: none; }
 .voice-tag-note.is-error { color: var(--alert); }
 .voice-tag-note .link-btn { margin-left: 2px; }
+@media (max-width: 560px) { .composer .voice-tag-pop { width: calc(100vw - 32px); right: -4px; } }
 
 /* A tag in a message: a small mark. Its word comes from CSS, so it isn't
    part of the message's text. */
@@ -3912,12 +3935,6 @@ html.motion-ready .stage { transition: transform var(--dur-smooth) var(--spring-
   background: color-mix(in srgb, var(--accent) 16%, transparent);
   box-shadow: inset 0 -2px 0 var(--accent);
 }
-.voice-tag-auto {
-  display: flex; align-items: center; justify-content: space-between; gap: 10px;
-  margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--rule);
-  font-size: var(--text-footnote); color: var(--ink);
-  cursor: pointer;
-}
 /* CHANGED (1.5.0): live tag ideas. Pills glide when their word moves and
    fade when they no longer fit; the ✦ button breathes while asking. */
 .tag-pill { transition: opacity 170ms var(--ease), translate 260ms var(--spring-snappy, var(--ease)),
@@ -3965,7 +3982,6 @@ html.motion-ready .stage { transition: transform var(--dur-smooth) var(--spring-
 .tag-split.is-auto .tag-split-more { border-left-color: rgba(255, 255, 255, 0.35) !important; }
 .tag-split.is-auto button:hover { background: rgba(255, 255, 255, 0.14); }
 @media (max-width: 760px) { .tag-split-main span { display: none; } .tag-split-main { padding: 0 7px 0 9px; } }
-.voice-tag-auto--sub { border-top: 0; margin-top: 2px; padding-top: 4px; }
 .voice-tag-wrap.is-thinking .tag-split-main svg { animation: pm-breathe 1.2s ease-in-out infinite; }
 
 /* NEW (1.5.0): saved clips: download one, or export all. */
@@ -3973,3 +3989,8 @@ html.motion-ready .stage { transition: transform var(--dur-smooth) var(--spring-
 .saved-row:hover .saved-download, .saved-download:focus-visible { opacity: 1; }
 @media (hover: none) { .saved-download { opacity: 1; } }
 .saved-export { margin-left: auto; margin-right: 8px; display: inline-flex; align-items: center; gap: 5px; text-decoration: none; }
+
+/* NEW (1.5.0): the anchor row in Settings > Voices. */
+.anchor-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+.anchor-actions .btn-sm { display: inline-flex; align-items: center; gap: 5px; }
+#voiceAccentRow.is-hidden, #anchorRow.is-hidden { display: none; }
