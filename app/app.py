@@ -3251,6 +3251,46 @@ V4_SIMILARITY = 0.85
 # A model ElevenLabs refused (not on the account yet, say) is skipped for an
 # hour: v4 steps down to v3, and v3 to the standard model without tags.
 REFUSED_MODELS = {}   # model id -> when it was refused
+# NEW (1.5.0): why, in ElevenLabs' words, for Settings and the status line.
+MODEL_REFUSALS = {}   # model id -> {"status", "message", "at"}
+# The optional extras a model refused (language_code, similarity_boost,
+# previous_request_ids...). Before a model is given up on, it's tried once
+# without them; if that works, it just isn't sent them again.
+REFUSED_EXTRAS = {}   # model id -> set of field names
+_OPTIONAL_FIELDS = ("language_code", "seed", "previous_request_ids", "previous_text")
+_OPTIONAL_SETTINGS = ("similarity_boost",)
+
+
+def _refusal_message(resp):
+    """ElevenLabs' own words for a refusal."""
+    try:
+        body = resp.json()
+        detail = body.get("detail", body)
+        if isinstance(detail, dict):
+            return str(detail.get("message") or detail.get("status") or detail)[:240]
+        if isinstance(detail, list) and detail:
+            first = detail[0]
+            return str(first.get("msg") if isinstance(first, dict) else first)[:240]
+        return str(detail)[:240]
+    except Exception:
+        return (getattr(resp, "text", "") or "")[:240]
+
+
+def _without_extras(payload):
+    """The same request without the optional extras; None if it had none."""
+    slim = {k: v for k, v in payload.items() if k not in _OPTIONAL_FIELDS}
+    settings = {k: v for k, v in (payload.get("voice_settings") or {}).items() if k not in _OPTIONAL_SETTINGS}
+    slim["voice_settings"] = settings
+    if slim == payload:
+        return None
+    return slim
+
+
+def _note_voice(message):
+    """A note for the status line about how this reply was spoken."""
+    from flask import has_request_context
+    if has_request_context():
+        g.voice_notice = message
 
 
 def is_expressive_model(model_id):
@@ -3330,6 +3370,45 @@ def voice_how(voiced):
             parts.append(f"{len(AUDIO_TAG_RE.findall(voiced))} tag{'s' if len(AUDIO_TAG_RE.findall(voiced)) != 1 else ''}")
         return " · ".join(parts)
     return f"standard (v2) · {delivery}"
+
+
+def _step_down(url, headers, text, payload, resp):
+    """
+    NEW (1.5.0): a refused expressive request. First the same model without
+    its optional extras (if that works, those extras aren't sent to it
+    again); then the next model (v4 to v3); then the standard model,
+    without the tags. Each refusal is remembered with ElevenLabs' reason.
+    A refusal isn't billed. Returns the payload and response that won.
+    """
+    refused = (400, 403, 404, 422)
+    first = payload.get("model_id")
+    for _ in range(4):
+        model = payload.get("model_id")
+        if not (resp.status_code in refused and is_expressive_model(model)):
+            break
+        reason = _refusal_message(resp)
+        slim = _without_extras(payload)
+        if slim is not None:
+            retry = requests.post(url, headers=headers, json=slim, timeout=60)
+            if retry.status_code == 200:
+                dropped = {k for k in _OPTIONAL_FIELDS if k in payload} | \
+                          {k for k in _OPTIONAL_SETTINGS if k in (payload.get("voice_settings") or {})}
+                REFUSED_EXTRAS.setdefault(model, set()).update(dropped)
+                log_server_event(f"Expressive voice: {model} refused {sorted(dropped)} ({resp.status_code}: {reason}); "
+                                 "not sending them again")
+                return slim, retry
+            reason = _refusal_message(retry) or reason
+        REFUSED_MODELS[model] = time.time()
+        MODEL_REFUSALS[model] = {"status": resp.status_code, "message": reason, "at": time.time()}
+        log_server_event(f"Expressive voice: {model} refused ({resp.status_code}: {reason}); trying the next model")
+        payload = _elevenlabs_payload(text) if expressive_model() else _elevenlabs_payload(text, force_v2=True)
+        resp = requests.post(url, headers=headers, json=payload, timeout=60)
+    if payload.get("model_id") != first and is_expressive_model(first):
+        why = MODEL_REFUSALS.get(first, {}).get("message", "")
+        now = model_label(payload.get("model_id"))
+        _note_voice(f"ElevenLabs refused {model_label(first)}{': ' + why if why else ''}. "
+                    f"Spoken with {now}{'' if is_expressive_model(payload.get('model_id')) else ', without the tags'}.")
+    return payload, resp
 
 
 def _drop_stale_anchor(payload):
@@ -3781,9 +3860,14 @@ def _elevenlabs_payload(text, force_v2=False):
                     payload["previous_request_ids"] = list(thread["ids"])
                 if thread.get("text"):
                     payload["previous_text"] = thread["text"]
+        # NEW (1.5.0): extras this model refused before aren't sent.
+        for field in REFUSED_EXTRAS.get(model, ()):
+            payload.pop(field, None)
+            payload["voice_settings"].pop(field, None)
         return payload
-    if force_v2:
-        text = strip_audio_tags(text)
+    # CHANGED (1.5.0): the standard model reads tags out as words, so it
+    # never gets them, however it came to be used.
+    text = strip_audio_tags(text) or text
     voice_settings = dict(delivery["v2"])
     # Only sent when it isn't the natural pace. Older ElevenLabs models
     # reject an unknown key outright, and there's no reason to risk that on
@@ -3819,21 +3903,7 @@ def get_tts_audio(text, voice_id, language="English"):
         _drop_stale_anchor(payload)
         payload = _elevenlabs_payload(text)
         resp = requests.post(url, headers=headers, json=payload, timeout=60)
-    # NEW (1.5.0): an account or voice that can't use the expressive model
-    # steps down: v4 to v3, then the usual model without the tags. A refusal
-    # isn't billed.
-    for _ in range(2):
-        if not (resp.status_code in (400, 403, 404, 422) and is_expressive_model(payload.get("model_id"))):
-            break
-        REFUSED_MODELS[payload["model_id"]] = time.time()
-        log_server_event(f"Expressive voice: {payload['model_id']} refused ({resp.status_code}: {resp.text[:160]}); "
-                         "trying the next model")
-        payload = _elevenlabs_payload(text) if expressive_model() else _elevenlabs_payload(text, force_v2=True)
-        resp = requests.post(url, headers=headers, json=payload, timeout=60)
-    if resp.status_code in (400, 403, 404, 422) and is_expressive_model(payload.get("model_id")):
-        REFUSED_MODELS[payload["model_id"]] = time.time()
-        payload = _elevenlabs_payload(text, force_v2=True)
-        resp = requests.post(url, headers=headers, json=payload, timeout=60)
+    payload, resp = _step_down(url, headers, text, payload, resp)
     if resp.status_code != 200:
         raise RuntimeError(f"ElevenLabs error {resp.status_code}: {resp.text[:300]}")
     if is_expressive_model(payload.get("model_id")):
@@ -4579,6 +4649,10 @@ def settings():
         if "expressive_model" in data:
             CFG["expressive_model"] = normalize_expressive_model(data.get("expressive_model"), normalize_expressive_model(CFG.get("expressive_model")))
             REFUSED_MODELS.pop(CFG["expressive_model"], None)   # a fresh pick is tried again
+        if data.get("retry_expressive_models"):   # NEW (1.5.0): "Try again"
+            REFUSED_MODELS.clear()
+            MODEL_REFUSALS.clear()
+            REFUSED_EXTRAS.clear()
         if "voice_accent" in data:
             CFG["voice_accent"] = normalize_voice_accent(data.get("voice_accent"), normalize_voice_accent(CFG.get("voice_accent")))
         if "response_style" in data:
@@ -4688,6 +4762,9 @@ def settings():
             "hold_accent_modes": HOLD_ACCENT_MODES,
             "voice_accent": normalize_voice_accent(CFG.get("voice_accent")),
             "expressive_model": normalize_expressive_model(CFG.get("expressive_model")),
+            # NEW (1.5.0): models ElevenLabs refused this hour, and why.
+            "expressive_refusals": {m: dict(r, label=model_label(m)) for m, r in MODEL_REFUSALS.items()
+                                    if time.time() - REFUSED_MODELS.get(m, 0) < 3600},
             "expressive_models": EXPRESSIVE_MODELS,
             "voice_accents": [{"id": a["id"], "name": a["name"]} for a in VOICE_ACCENTS],
             "voice_deliveries": VOICE_DELIVERIES,
@@ -7528,6 +7605,8 @@ def chat():
             # NEW (1.5.0): Auto tags added some (your message, or its reply).
             "auto_tagged": auto_tagged and has_audio_tags(voiced),
             "tag_shaped": shaping and not kept_exact and has_audio_tags(voiced),   # NEW (1.5.0)
+            # NEW (1.5.0): a model refused and stepped down from, in words.
+            "voice_notice": getattr(g, "voice_notice", "") or "",
             # NEW (1.5.0): which ElevenLabs model spoke it, when one did.
             "voice_model": (_elevenlabs_payload(voiced)["model_id"]
                             if speak and voice_engine == "elevenlabs" else ""),

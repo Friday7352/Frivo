@@ -4052,3 +4052,5 @@ html.motion-ready .stage { transition: transform var(--dur-smooth) var(--spring-
 .tag-words-arrow { color: var(--ink-faint); flex: none; }
 .tag-words-add .btn-sm { flex: none; }
 .tag-words-foot { margin: 0; font-size: var(--text-caption); color: var(--ink-dim); }
+
+#expressiveModelNote.is-error { color: var(--alert); }

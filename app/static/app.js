@@ -6292,6 +6292,8 @@ async function send() {
 
     const active = allProfiles.find((p) => p.id === currentProfileId);
     const speaker = active ? active.name : "Voice";
+    // NEW (1.5.0): ElevenLabs refused the tags model, and what was used instead.
+    if (data.voice_notice) setStatus(data.voice_notice, true);
 
     // NEW (1.5.0): a spoken reply too long for one chatbox page goes a page
     // at a time, each one as the voice reaches it. An app.py from before
@@ -9383,6 +9385,26 @@ function applyVoiceStyleSettings(data) {
     };
     buildRadioGroup(models, data.expressive_models, "expressiveModelSettings", pickModel, sayModel);
     sayModel(pickModel);
+    // NEW (1.5.0): a model ElevenLabs refused this hour, with its reason.
+    const refused = Object.entries(data.expressive_refusals || {});
+    if (modelNote && refused.length) {
+      modelNote.replaceChildren(refused.map(([, r]) => `ElevenLabs refused ${r.label}: "${r.message}".`).join(" ")
+        + " Frivo is using the next model down for an hour. ");
+      const again = document.createElement("button");
+      again.type = "button";
+      again.className = "link-btn";
+      again.textContent = "Try again now";
+      again.addEventListener("click", async () => {
+        await fetch("/api/settings", { method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ retry_expressive_models: true }) });
+        sayModel(getRadioValue(models, pickModel));
+        setStatus("The tags model will be tried again on the next message.");
+      });
+      modelNote.append(again);
+      modelNote.classList.add("is-error");
+    } else if (modelNote) {
+      modelNote.classList.remove("is-error");
+    }
   }
   const accent = $("voiceAccentSelect");
   if (accent && Array.isArray(data.voice_accents) && data.voice_accents.length) {

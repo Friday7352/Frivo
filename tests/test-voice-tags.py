@@ -108,7 +108,12 @@ def fake_post(url, **kw):
     body = kw["json"]
     posts.append((url, body))
     if refuse_v3["on"] and body["model_id"] in refuse_v3.get("models", ("eleven_v4", "eleven_v3", "eleven_v4_turbo")):
-        return SimpleNamespace(status_code=422, text="model not available", content=b"", json=lambda: {})
+        return SimpleNamespace(status_code=422, text="model not available", content=b"", headers={},
+                               json=lambda: {"detail": {"message": "model not available"}})
+    for field in refuse_v3.get("fields", ()):
+        if field in body or field in (body.get("voice_settings") or {}):
+            return SimpleNamespace(status_code=400, text=f"{field} is not supported", content=b"", headers={},
+                                   json=lambda: {"detail": {"message": f"{field} is not supported for this model"}})
     text = body["text"]
     align = {"characters": list(text),
              "character_start_times_seconds": [i / 10 for i in range(len(text))],
@@ -346,6 +351,37 @@ spoken_post = [p for p in posts if "plan for today" not in p[1].get("text", "")]
 check("... and goes straight to v3 for a while", spoken_post[1]["model_id"] == "eleven_v3")
 refuse_v3.update(on=False, models=("eleven_v4", "eleven_v3", "eleven_v4_turbo"))
 mod.REFUSED_MODELS.clear()
+
+print("--- refusals (tags read out as words) ---")
+refuse_v3.update(on=True, models=("eleven_v4", "eleven_v3", "eleven_v4_turbo"))
+mod.REFUSED_MODELS.clear(); mod.MODEL_REFUSALS.clear()
+status, data = chat("[confused] What is going on? [nervous]", profile_id=actor["id"])
+spoken_post = [p for p in posts if "plan for today" not in p[1].get("text", "")][-1]
+check("both refused: the standard model, without the tags", spoken_post[1]["model_id"] == "eleven_multilingual_v2"
+      and "[" not in spoken_post[1]["text"], spoken_post[1])
+check("... and the status line says why", "refused v4" in data.get("voice_notice", "") and "model not available" in data["voice_notice"]
+      and "without the tags" in data["voice_notice"], data.get("voice_notice"))
+status, data = chat("[confused] And again? [nervous]", profile_id=actor["id"])
+spoken_post = [p for p in posts if "plan for today" not in p[1].get("text", "")][-1]
+check("THE BUG: later messages in that hour never get tags on the standard model either",
+      spoken_post[1]["model_id"] == "eleven_multilingual_v2" and "[" not in spoken_post[1]["text"], spoken_post[1])
+got = client.get("/api/settings").get_json().get("expressive_refusals", {})
+check("Settings shows the refusals, with the reason", got.get("eleven_v4", {}).get("message") == "model not available", got)
+client.post("/api/settings", json={"retry_expressive_models": True})
+check("Try again clears them", not mod.REFUSED_MODELS and not mod.MODEL_REFUSALS)
+refuse_v3.update(on=False)
+refuse_v3["fields"] = ("language_code",)
+status, data = chat("[softly] Just the language hint is refused.", profile_id=actor["id"])
+spoken_post = [p for p in posts if "plan for today" not in p[1].get("text", "")][-1]
+check("an extra refused: same model, without that extra", spoken_post[1]["model_id"] == "eleven_v4"
+      and "language_code" not in spoken_post[1] and "language_code" in mod.REFUSED_EXTRAS.get("eleven_v4", set())
+      and "eleven_v4" not in mod.REFUSED_MODELS, (spoken_post[1], mod.REFUSED_EXTRAS))
+n = len(posts)
+status, data = chat("[softly] And the next one.", profile_id=actor["id"])
+check("... and it isn't sent that extra again (one request, no refusal)", len([p for p in posts[n:] if "plan for today" not in p[1].get("text", "")]) == 1
+      and "language_code" not in posts[-1][1], posts[n:])
+refuse_v3["fields"] = ()
+mod.REFUSED_EXTRAS.clear()
 
 res = client.put(f"/api/profiles/{actor['id']}", json={"expressive_voice": False, "voice_delivery": "lively"})
 p = (res.get_json() or {}).get("profile", {})
