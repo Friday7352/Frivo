@@ -340,3 +340,11 @@ Above the personality box, in the profile editor and in Settings > Replies. It u
 
 - Settings > Evora has two timers, passed on to Evora (which needs its own update): **Free the listening models** (after listening stops: 5 minutes, 15 minutes, 1 hour or never) and **Free speech-to-text** (after no dictation or listening: 15 minutes, 1 hour, 4 hours or never). Listening's models are the big ones; they stay while listening is on.
 - The GPU graph shows what Evora has loaded ("listening + speech") and when each will be freed, under Ollama's countdown, which now says it's Ollama's.
+
+## Better voice tags
+
+- **Tag rules.** What the AI adds is checked before the voice gets it: a feeling tag at the very end of a line (which colours nothing) is dropped, a tag that just repeats the words beside it (`[happy] I'm so happy`) is dropped, piles and repeats are thinned, and there's a cap per sentence. Sounds like `[laughs]` and `[sighs]` are kept first. Tags you type yourself are never touched.
+- **Context.** Suggest, the live ideas and Auto tags now see the last few lines of the conversation and the profile's personality, plus examples of good and bad tagging, so a line is tagged for what it means in the moment.
+- **Tag amount** (Settings > Voices, and each profile): Subtle, Normal or Dramatic.
+- **Your tag taste.** Frivo notices which suggested tags you keep, delete or add yourself, and which replies you retake without tags. The AI leans towards the ones you keep; one you always remove stops being added. Settings > Voices shows what it has learned, with Forget my taste.
+- **Retake** on a spoken ElevenLabs reply: Say it again, Without tags, or Different tags. The words stay the same, the new take replaces the old one, and the AI's memory of the conversation keeps the version you heard.

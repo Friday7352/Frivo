@@ -879,6 +879,22 @@
                     </span>
                     <div class="radio-row" id="voiceDeliveryRadios" role="radiogroup" aria-label="Delivery"></div>
                   </div>
+                  <!-- NEW (1.5.0): how many tags the AI adds, and what it has learned you like. -->
+                  <div class="srow">
+                    <span class="srow-main srow-main--flex">
+                      <span class="srow-label">Tag amount</span>
+                      <span class="srow-sub" id="tagAmountNote">How many tags the AI adds. Each profile can have its own.</span>
+                    </span>
+                    <div class="radio-row" id="tagAmountRadios" role="radiogroup" aria-label="Tag amount"></div>
+                  </div>
+                  <div class="srow srow--stacked" id="tagTasteRow">
+                    <span class="srow-main">
+                      <span class="srow-label">Your tag taste</span>
+                      <span class="srow-sub" id="tagTasteNote">Frivo learns which tags you like from the ones you keep and remove after Suggest.</span>
+                    </span>
+                    <div class="taste-chips is-hidden" id="tagTasteList"></div>
+                    <button type="button" class="link-btn is-hidden" id="tagTasteReset">Forget my taste</button>
+                  </div>
                   <!-- NEW (1.5.0): which ElevenLabs model performs the tags. -->
                   <div class="srow">
                     <span class="srow-main srow-main--flex">
@@ -1687,6 +1703,13 @@
         <label>Delivery</label>
         <div class="radio-row" id="profileDeliveryRadios" role="radiogroup" aria-label="Delivery"></div>
         <p class="field-note" id="profileDeliveryNote"></p>
+      </div>
+
+      <!-- NEW (1.5.0) -->
+      <div class="field">
+        <label>Tag amount</label>
+        <div class="radio-row" id="profileTagAmountRadios" role="radiogroup" aria-label="Tag amount"></div>
+        <p class="field-note" id="profileTagAmountNote"></p>
       </div>
 
       <div class="field">

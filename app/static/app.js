@@ -1547,6 +1547,10 @@ function addTurn(who, text, opts = {}) {
 
   // NEW (1.5.0): a spoken reply can be saved to play again later.
   if (opts.saveData && typeof makeSaveButton === "function") meta.appendChild(makeSaveButton(opts.saveData));
+  // NEW (1.5.0): Retake, for a reply an ElevenLabs voice spoke.
+  if (!isYou && opts.audioUrl && opts.voiceEngine === "elevenlabs" && !opts.saved && typeof makeRetakeButton === "function") {
+    meta.appendChild(makeRetakeButton(() => ({ turn, who, text, opts, at })));
+  }
 
   // NEW (1.5.0): where the reply was written, in a word: "Local" (Ollama,
   // on your own PC or server) or "OpenAI". Nothing when no AI was asked
@@ -1645,6 +1649,12 @@ function addTurn(who, text, opts = {}) {
     flag.textContent = "Shaped for tags";
     flag.title = "Clean up added voice tags and lightly adjusted the words next to them (Shape words for tags).";
     stack.appendChild(flag);
+  } else if (!isYou && opts.retaken) {
+    // NEW (1.5.0): spoken again with Retake.
+    const flag = document.createElement("span");
+    flag.className = "turn-flag";
+    flag.textContent = { same: "Said again", plain: "Said again, without tags", fresh: "Said again, different tags" }[opts.retaken] || "Said again";
+    stack.appendChild(flag);
   } else if (!isYou && opts.autoTagged) {
     // NEW (1.5.0): Auto tags added the voice tags shown in the bubble.
     const flag = document.createElement("span");
@@ -1657,6 +1667,13 @@ function addTurn(who, text, opts = {}) {
   // Under the bubble, in the margin — present when you look for it, out of
   // the way when you're reading.
   if (meta.childNodes.length) stack.appendChild(meta);
+
+  // NEW (1.5.0): Retake puts the new take where the old one was.
+  if (opts.replaceTurn && opts.replaceTurn.parentNode) {
+    opts.replaceTurn.replaceWith(turn);
+    removeTypingBubble();
+    return;
+  }
 
   // NEW (1.5.0): a reply grows out of the typing dots it replaces.
   const typingBubble = !isYou && typingNode ? typingNode.querySelector(".bubble") : null;
@@ -1925,6 +1942,7 @@ async function saveAllSettings({ close = false, quiet = false } = {}) {
     // NEW (1.5.0): Expressive voice and Delivery, for the default profile.
     expressive_voice: $("expressiveVoiceToggle") ? $("expressiveVoiceToggle").checked : false,
     tag_shaping: $("tagShapingToggle") ? $("tagShapingToggle").checked : false,   // NEW (1.5.0)
+    tag_amount: $("tagAmountRadios") ? getRadioValue($("tagAmountRadios"), "normal") : "normal",   // NEW (1.5.0)
     tag_words: Array.isArray(tagWordsState) ? tagWordsState : undefined,           // NEW (1.5.0)
     hold_accent: $("holdAccentRadios") ? getRadioValue($("holdAccentRadios"), "anchor") : "anchor",   // NEW (1.5.0)
     voice_accent: $("voiceAccentSelect") ? $("voiceAccentSelect").value : "auto",   // NEW (1.5.0)
@@ -3869,6 +3887,7 @@ profileModalSave.addEventListener("click", async () => {
     follow_length: profileFollowLength.checked,  // NEW (1.5.0)
     expressive_voice: $("profileExpressive") ? $("profileExpressive").checked : false,   // NEW (1.5.0)
     tag_shaping: $("profileShaping") ? $("profileShaping").checked : false,   // NEW (1.5.0)
+    tag_amount: $("profileTagAmountRadios") ? getRadioValue($("profileTagAmountRadios"), "normal") : "normal",   // NEW (1.5.0)
     voice_delivery: $("profileDeliveryRadios") ? getRadioValue($("profileDeliveryRadios"), "natural") : "natural",   // NEW (1.5.0)
     personality_preset: profilePersonalityPresetSelect.value,
     language: profileLanguageSelect.value,
@@ -6258,6 +6277,7 @@ async function send() {
   // away. Deliberately not awaited — nothing about sending should wait on
   // VRChat, and a failure here is reported in FrivOSC's own log.
   requestVrchatUnmute();
+  if (typeof reportTagTaste === "function") reportTagTaste(message);   // NEW (1.5.0)
   addTurn("You", message);
   showTypingBubble();
   setStatus("Generating…");
@@ -6330,6 +6350,7 @@ async function send() {
       autoTagged: data.auto_tagged === true,   // NEW (1.5.0)
       tagShaped: data.tag_shaped === true,     // NEW (1.5.0)
       voiceHow: data.voice_how || "",   // NEW (1.5.0)
+      profileId: currentProfileId || "",   // NEW (1.5.0): for Retake
       footer: pager ? pager.el : null,  // NEW (1.5.0)
       // NEW (1.5.0): what the Save button keeps, so it can be played again.
       saveData: data.audio_url ? {
@@ -9246,10 +9267,14 @@ function rememberTurn(who, text, opts, at) {
   Object.keys(opts || {}).forEach((key) => {
     const value = opts[key];
     if (typeof value === "function" || value instanceof Node) return;   // callbacks, the page dots
-    if (key === "restoring" || key === "at") return;
+    if (key === "restoring" || key === "at" || key === "replaceTurn") return;
     kept[key] = value;
   });
-  transcript.push({ kind: "turn", who, text, opts: kept, at });
+  // CHANGED (1.5.0): a retake replaces the record of the take before.
+  const record = { kind: "turn", who, text, opts: kept, at };
+  const same = opts && opts.replaceTurn ? transcript.findIndex((r) => r.kind === "turn" && r.at === at) : -1;
+  if (same >= 0) transcript[same] = record;
+  else transcript.push(record);
   if (transcript.length > TRANSCRIPT_MAX) transcript = transcript.slice(-TRANSCRIPT_MAX);
   persistTranscript();
 }
@@ -9457,6 +9482,18 @@ function applyVoiceStyleSettings(data) {
     });
     if (note) note.textContent = deliveryNoteText(pick);
   }
+  // NEW (1.5.0): Tag amount, and your tag taste.
+  if (Array.isArray(data.tag_amounts) && data.tag_amounts.length) tagAmounts = data.tag_amounts;
+  const amountRadios = $("tagAmountRadios");
+  const amountNote = $("tagAmountNote");
+  if (amountRadios) {
+    const pickAmount = data.tag_amount || "normal";
+    buildRadioGroup(amountRadios, tagAmounts, "tagAmountSettings", pickAmount, (id) => {
+      if (amountNote) amountNote.textContent = tagAmountNote(id);
+    });
+    if (amountNote) amountNote.textContent = tagAmountNote(pickAmount);
+  }
+  loadTagTaste();
   renderVoiceTagGroups();
 }
 
@@ -9481,6 +9518,17 @@ function fillProfileVoiceStyle(profile) {
     });
   }
   if (note) note.textContent = deliveryNoteText(pick);
+  // NEW (1.5.0): Tag amount.
+  const amountRadios = $("profileTagAmountRadios");
+  const amountNote = $("profileTagAmountNote");
+  const pickAmount = profile ? (profile.tag_amount || "normal")
+    : ($("tagAmountRadios") ? getRadioValue($("tagAmountRadios"), "normal") : "normal");
+  if (amountRadios) {
+    buildRadioGroup(amountRadios, tagAmounts, "tagAmountProfile", pickAmount, (id) => {
+      if (amountNote) amountNote.textContent = tagAmountNote(id);
+    });
+  }
+  if (amountNote) amountNote.textContent = tagAmountNote(pickAmount);
   if (hint) {
     const voiceId = profile ? profile.voice_id : (typeof activeVoiceId === "function" ? activeVoiceId() : "");
     const eleven = voiceId && voiceEngine({ voice_id: voiceId }) === "elevenlabs";
@@ -9668,7 +9716,7 @@ function updateVoiceTagButton() {
         const res = await fetch("/api/voice-tags/suggest", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text: before, profile_id: currentProfileId || null }),
+          body: JSON.stringify({ text: before, profile_id: currentProfileId || null, session_id: sessionId }),   // CHANGED (1.5.0): with the conversation
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || "Couldn't suggest tags.");
@@ -9679,6 +9727,8 @@ function updateVoiceTagButton() {
           return;
         }
         input.value = data.text;
+        const offered = tagsIn(data.text).filter((t) => !tagsIn(before).includes(t));   // NEW (1.5.0): for your taste
+        noteTagOffers(offered);
         if (typeof cancelAutoSend === "function") cancelAutoSend();
         if (typeof setTypedByHand === "function") setTypedByHand(true);
         input.dispatchEvent(new Event("input", { bubbles: true }));
@@ -9691,6 +9741,7 @@ function updateVoiceTagButton() {
           undo.className = "link-btn";
           undo.textContent = "Undo";
           undo.addEventListener("click", () => {
+            dropTagOffers(offered, true);   // NEW (1.5.0): turned down
             input.value = before;
             input.dispatchEvent(new Event("input", { bubbles: true }));
             note.textContent = "Put back as you typed it.";
@@ -10388,7 +10439,7 @@ function applyTagIdeas(list) {
   // Last first, so putting one in doesn't move where the others go.
   const sorted = list.slice().sort((a, b) => b.at - a.at);
   let any = false;
-  sorted.forEach((idea) => { if (putTagIdea(idea)) any = true; });
+  sorted.forEach((idea) => { if (putTagIdea(idea)) { any = true; noteTagOffers([idea.tag]); } });   // CHANGED (1.5.0): offered
   tagIdeasState.ideas = tagIdeasState.ideas.filter((i) => !list.includes(i));
   if (any) {
     if (typeof cancelAutoSend === "function") cancelAutoSend();
@@ -10430,7 +10481,7 @@ async function askTagIdeas() {
     const res = await fetch("/api/voice-tags/suggest", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text: input.value, profile_id: currentProfileId || null }),
+      body: JSON.stringify({ text: input.value, profile_id: currentProfileId || null, session_id: sessionId }),   // CHANGED (1.5.0)
     });
     const data = await res.json();
     if (!st.paused && input.value.trim()) {
@@ -10767,3 +10818,286 @@ async function saveTagWords(message) {
     saveTagWords("Defaults put back.");
   });
 })();
+
+
+// ---------------------------------------------------------------------------
+// NEW (1.5.0): better tags, on the page.
+//
+//   * Tag amount (Settings > Voices, and each profile).
+//   * Your tag taste: the tags Suggest and the live ideas offered are
+//     remembered until you send. Sent = kept, deleted (or Undo) = removed,
+//     any other tag you sent = added. Frivo counts these and the AI leans
+//     towards what you keep. Settings shows it, with a way to forget it.
+//   * Retake, on a spoken reply: say it again the same, without tags, or
+//     with different tags. The words stay; the new take replaces the old.
+// ---------------------------------------------------------------------------
+var tagAmounts = [
+  { id: "subtle", name: "Subtle", description: "A tag only where it really counts. Often none." },
+  { id: "normal", name: "Normal", description: "A tag or two where the feeling clearly calls for one." },
+  { id: "dramatic", name: "Dramatic", description: "Plenty of tags and bold choices: a performance." },
+];
+
+function tagAmountNote(id) {
+  const a = tagAmounts.find((x) => x.id === id);
+  return a ? a.description : "";
+}
+
+function tagsIn(text) {
+  const out = [];
+  const re = /\[([A-Za-z][A-Za-z' \-]{0,38})\]/g;
+  let m;
+  while ((m = re.exec(String(text || "")))) out.push(m[1].toLowerCase().replace(/\s+/g, " ").trim());
+  return out;
+}
+
+var tagOffers = new Set();
+
+function noteTagOffers(tags) {
+  (tags || []).forEach((t) => tagOffers.add(String(t).toLowerCase()));
+}
+
+function postTagFeedback(body) {
+  if (!["kept", "removed", "added"].some((k) => body[k] && body[k].length)) return;
+  fetch("/api/voice-tags/feedback", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  }).then(() => { tagTasteStale = true; }).catch(() => { /* taste is a nicety */ });
+}
+
+function dropTagOffers(tags, removed) {
+  (tags || []).forEach((t) => tagOffers.delete(String(t).toLowerCase()));
+  if (removed) postTagFeedback({ removed: tags });
+}
+
+// Called by send(), with the message as it goes.
+function reportTagTaste(message) {
+  const sent = Array.from(new Set(tagsIn(message)));
+  const offered = Array.from(tagOffers);
+  tagOffers = new Set();
+  const wrap = $("voiceTagWrap");
+  if (!wrap || wrap.classList.contains("is-hidden")) return;   // not an ElevenLabs voice
+  postTagFeedback({
+    kept: sent.filter((t) => offered.includes(t)),
+    removed: offered.filter((t) => !sent.includes(t)),
+    added: sent.filter((t) => !offered.includes(t)),
+  });
+}
+
+var tagTasteStale = true;
+
+async function loadTagTaste() {
+  const list = $("tagTasteList");
+  const note = $("tagTasteNote");
+  if (!list) return;
+  let data;
+  try {
+    const res = await fetch("/api/voice-tags/taste");
+    data = await res.json();
+    if (!res.ok) return;
+  } catch (err) {
+    return;
+  }
+  tagTasteStale = false;
+  const liked = data.liked || [];
+  const avoided = data.avoided || [];
+  list.replaceChildren();
+  const chip = (tag, kind) => {
+    const el = document.createElement("span");
+    el.className = `taste-chip is-${kind}`;
+    el.textContent = tag;
+    el.title = kind === "liked" ? "You keep or add this one: the AI leans towards it."
+      : "You usually remove this one: the AI avoids it" + ((data.never || []).includes(tag) ? ", and Frivo takes it out." : ".");
+    return el;
+  };
+  liked.forEach((t) => list.append(chip(t, "liked")));
+  avoided.forEach((t) => list.append(chip(t, "avoided")));
+  list.classList.toggle("is-hidden", !liked.length && !avoided.length);
+  const reset = $("tagTasteReset");
+  if (reset) reset.classList.toggle("is-hidden", !data.counted);
+  if (note) {
+    note.textContent = liked.length || avoided.length
+      ? "Learned from the tags you keep and remove. The AI leans towards the green ones and away from the red."
+      : data.counted
+        ? "Still learning: keep or delete a few more suggested tags."
+        : "Frivo learns which tags you like from the ones you keep and remove after Suggest.";
+  }
+}
+
+(function wireTagTaste() {
+  const reset = $("tagTasteReset");
+  if (reset) {
+    reset.addEventListener("click", async () => {
+      try {
+        await fetch("/api/voice-tags/taste", { method: "DELETE" });
+        setStatus("Forgot your tag taste.");
+      } catch (err) { /* shown as unchanged */ }
+      loadTagTaste();
+    });
+  }
+  // Fresh whenever Settings opens.
+  document.addEventListener("click", (e) => {
+    if (tagTasteStale && e.target.closest && e.target.closest("#settingsToggle, [data-settings-section], [data-settings-page]")) loadTagTaste();
+  });
+})();
+
+// The Retake button and its menu.
+var openRetakeMenu = null;
+
+function closeRetakeMenu() {
+  if (!openRetakeMenu) return;
+  openRetakeMenu.classList.remove("is-open");
+  const btn = openRetakeMenu.querySelector(".turn-save");
+  if (btn) btn.setAttribute("aria-expanded", "false");
+  openRetakeMenu = null;
+}
+
+document.addEventListener("click", (e) => {
+  if (openRetakeMenu && !openRetakeMenu.contains(e.target)) closeRetakeMenu();
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && openRetakeMenu) closeRetakeMenu();
+});
+
+function makeRetakeButton(getTurn) {
+  const wrap = document.createElement("span");
+  wrap.className = "retake";
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "turn-save retake-btn";
+  btn.title = "Say it again: the same, without tags, or with different tags";
+  btn.setAttribute("aria-haspopup", "menu");
+  btn.setAttribute("aria-expanded", "false");
+  const label = document.createElement("span");
+  label.textContent = "Retake";
+  btn.append(iconNode("i-refresh", "icon-12"), label);
+  const menu = document.createElement("span");
+  menu.className = "retake-menu";
+  menu.setAttribute("role", "menu");
+  const { opts, text } = getTurn();
+  const hasTags = tagsIn(opts.voiced || text).length > 0;
+  [
+    ["same", "Say it again", "The same words and tags, a new take."],
+    ["plain", "Without tags", hasTags ? "Just the words. Counts as not liking these tags." : "It has no tags already."],
+    ["fresh", "Different tags", "The AI picks other tags for the same words."],   // not counted against the old ones
+  ].forEach(([mode, name, sub]) => {
+    const item = document.createElement("button");
+    item.type = "button";
+    item.setAttribute("role", "menuitem");
+    item.className = "retake-item";
+    item.dataset.mode = mode;
+    if (mode === "plain" && !hasTags) item.disabled = true;
+    const n = document.createElement("span");
+    n.className = "retake-name";
+    n.textContent = name;
+    const s = document.createElement("span");
+    s.className = "retake-sub";
+    s.textContent = sub;
+    item.append(n, s);
+    item.addEventListener("click", (e) => {
+      e.stopPropagation();
+      closeRetakeMenu();
+      retakeTurn(getTurn(), mode, btn);
+    });
+    menu.append(item);
+  });
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (btn.disabled) return;
+    if (openRetakeMenu === wrap) { closeRetakeMenu(); return; }
+    closeRetakeMenu();
+    wrap.classList.add("is-open");
+    btn.setAttribute("aria-expanded", "true");
+    openRetakeMenu = wrap;
+    const first = menu.querySelector(".retake-item:not(:disabled)");
+    if (first) first.focus({ preventScroll: true });
+  });
+  wrap.append(btn, menu);
+  return wrap;
+}
+
+async function retakeTurn({ turn, who, text, opts, at }, mode, btn) {
+  ensureAudioContext();   // inside the click, so the browser lets it play
+  btn.disabled = true;
+  btn.classList.add("is-busy");
+  turn.classList.add("is-retaking");
+  setStatus(mode === "fresh" ? "Finding different tags…" : "Saying it again…");
+  setLamp("busy");
+  beginReplyTyping();
+  requestVrchatUnmute();
+  let data;
+  try {
+    const res = await fetch("/api/retake", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        voiced: opts.voiced || text,
+        reply: text,
+        language: opts.language || currentLanguage,
+        profile_id: opts.profileId || null,
+        session_id: sessionId,
+        mode,
+      }),
+    });
+    data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Couldn't say it again.");
+  } catch (err) {
+    endReplyTyping();
+    setStatus(err.message, true);
+    setLamp("ready");
+    btn.disabled = false;
+    btn.classList.remove("is-busy");
+    turn.classList.remove("is-retaking");
+    return;
+  }
+  if (data.removed_tags && data.removed_tags.length) postTagFeedback({ removed: data.removed_tags });
+  const pages = Array.isArray(data.chatbox_pages) ? data.chatbox_pages : [];
+  const pager = data.audio_url && pages.length > 1 && oscEnabled() && typeof makeChatboxPager === "function"
+    ? makeChatboxPager(pages.length) : null;
+  const follower = data.audio_url && pages.length > 1
+    ? makeChatboxFollower(pages, pager ? (i) => pager.show(i) : null) : null;
+  const kept = {};
+  Object.keys(opts).forEach((k) => {
+    if (typeof opts[k] !== "function" && !(opts[k] instanceof Node) && k !== "restoring") kept[k] = opts[k];
+  });
+  const voiced = data.voiced && data.voiced !== data.reply ? data.voiced : undefined;
+  addTurn(who, data.reply, {
+    ...kept,
+    at,
+    replaceTurn: turn,
+    audioUrl: data.audio_url,
+    wordTimes: data.word_times,
+    voiced,
+    credits: data.credits,
+    spoke: true,
+    voiceHow: data.voice_how || "",
+    totalSeconds: data.total_seconds,
+    textSeconds: data.text_seconds,
+    audioSeconds: data.audio_seconds,
+    autoTagged: false,
+    tagShaped: false,
+    retaken: mode,
+    footer: pager ? pager.el : null,
+    saveData: data.audio_url ? {
+      ...(opts.saveData || {}),
+      saved_done: false,
+      audio_url: data.audio_url,
+      text: data.reply,
+      voiced: data.voiced || data.reply,
+      voice_how: data.voice_how || "",
+      word_times: data.word_times,
+      chatbox_pages: data.chatbox_pages,
+    } : null,
+    onAudioStart: () => {
+      if (!oscEnabled()) endReplyTyping();
+      else if (!follower) sendToChatbox(data.reply, { speaking: true });
+    },
+    onPlayback: follower ? (playing, offset, dur) => follower.update(playing, offset, dur) : null,
+  });
+  addCredits(data.credits || 0);
+  loadCredits({ force: true });
+  setLamp("ready");
+  setStatus(data.voice_notice || ({ same: "Said again.", plain: "Said again, without tags.",
+    fresh: voiced ? "Said again, with different tags." : "Said again. The AI found no other tags that fit." }[mode]),
+  Boolean(data.voice_notice));
+}

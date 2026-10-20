@@ -685,6 +685,7 @@ def load_config():
         # default profile. Each profile has its own.
         "expressive_voice": False,
         "voice_delivery": "natural",
+        "tag_amount": "normal",   # NEW (1.5.0)
         # NEW (1.5.0): continuity between v3 lines (see _elevenlabs_payload).
         # CHANGED (1.5.0): Off by default. Anchor and Follow hold the accent
         # by pulling every line toward another recording, which dulls the
@@ -991,7 +992,8 @@ def build_system_prompt(base_prompt, max_words, language="English", response_sty
     if voice_style:
         if (voice_style.get("expressive") or voice_style.get("shaping")) and response_style != "mimic":
             voice_rules += expressive_voice_rules(response_style, language, voice_style.get("delivery"),
-                                                  shaping=bool(voice_style.get("shaping")) and response_style == "echo")
+                                                  shaping=bool(voice_style.get("shaping")) and response_style == "echo",
+                                                  amount=voice_style.get("amount"))
         elif response_style != "reply":
             voice_rules += audio_tag_keep_rule()
         if voice_style.get("delivery") == "calm" and response_style != "mimic":
@@ -3270,6 +3272,42 @@ _OPTIONAL_FIELDS = ("language_code", "seed", "previous_request_ids", "previous_t
 _OPTIONAL_SETTINGS = ("similarity_boost",)
 
 
+# NEW (1.5.0): ElevenLabs won't speak a line with no words in it once the
+# tags and emojis are taken out ("lol" turned into [laughs], or a message
+# that was only an emoji). That's the line, not the model, so it must never
+# count as the model refusing (it used to, and every reply dropped to v2
+# for an hour). The line is given a word to say instead.
+_INPUT_PROBLEM_RE = re.compile(r"empty text|non-empty text|must include", re.I)
+_EMOJI_TAGS = (("😂🤣😆😹😅", "laughs"), ("😭😢🥲", "sniffles"), ("😮‍💨😔😩😮", "sighs"),
+               ("😱😲😳", "gasps"), ("😏", "chuckles"))
+_STAND_INS = (("laugh", "Haha!"), ("giggl", "Hehe!"), ("chuckl", "Heh."), ("snicker", "Heh."),
+              ("sigh", "Hmm."), ("exhal", "Hmm."), ("gasp", "Oh!"), ("groan", "Ugh."), ("scoff", "Pfft."),
+              ("cry", "Oh..."), ("sob", "Oh..."), ("sniff", "Oh..."), ("hum", "Hmm."), ("yawn", "Mm."))
+
+
+def has_spoken_words(text):
+    """True when `text` has something to say besides tags, emojis and punctuation."""
+    return bool(re.search(r"[^\W_]", strip_audio_tags(text or "")))
+
+
+def ensure_spoken_words(text):
+    """
+    `text` unchanged when it has words; otherwise its sound said as a word,
+    with the tag kept so the voice performs it: "[laughs]" -> "[laughs] Haha!".
+    """
+    if not text or has_spoken_words(text):
+        return text
+    tags = [t for _, t in audio_tag_positions(text)]
+    if not tags:
+        for chars, tag in _EMOJI_TAGS:
+            if any(c in text for c in chars):
+                tags = [tag]
+                break
+    word = next((w for t in tags for k, w in _STAND_INS if k in t), "Hmm.")
+    lead = " ".join(f"[{t}]" for t in tags[:2])
+    return f"{lead} {word}".strip()
+
+
 def _refusal_message(resp):
     """ElevenLabs' own words for a refusal."""
     try:
@@ -3396,6 +3434,16 @@ def _step_down(url, headers, text, payload, resp):
         if not (resp.status_code in refused and is_expressive_model(model)):
             break
         reason = _refusal_message(resp)
+        if _INPUT_PROBLEM_RE.search(reason or ""):
+            # NEW (1.5.0): a problem with the line, not the model. Nothing is
+            # remembered against the model; the line goes to the standard
+            # model as plain words, or fails with ElevenLabs' reason.
+            log_server_event(f"Expressive voice: {model} couldn't speak this line ({reason}); not counted against it")
+            plain = strip_audio_tags(text)
+            if has_spoken_words(plain):
+                payload = _elevenlabs_payload(plain, force_v2=True)
+                resp = requests.post(url, headers=headers, json=payload, timeout=60)
+            break
         slim = _without_extras(payload)
         if slim is not None:
             retry = requests.post(url, headers=headers, json=slim, timeout=60)
@@ -3705,6 +3753,7 @@ def voice_style_of(profile=None):
         "delivery": normalize_voice_delivery(source.get("voice_delivery")),
         # NEW (1.5.0): Shape words for tags (Clean up only; see chat()).
         "shaping": source.get("tag_shaping") is True,
+        "amount": normalize_tag_amount(source.get("tag_amount")),   # NEW (1.5.0): Tag amount
     }
 
 
@@ -3750,7 +3799,259 @@ def alignment_without_tags(voiced, spoken, alignment):
     }
 
 
-def expressive_voice_rules(response_style, language, delivery, shaping=False):
+# ---------------------------------------------------------------------------
+# NEW (1.5.0): better tags
+#
+#   * Tag amount (per profile): Subtle, Normal or Dramatic.
+#   * The tagger is given context: the last lines of the conversation, the
+#     persona, examples of good and bad tagging, and the user's taste.
+#   * The rules (refine_tags): what the AI adds is checked, not trusted. A
+#     feeling tag at the very end colours nothing and goes; a tag that
+#     repeats a word next to it goes; there's a cap per sentence; repeats
+#     and piles go; tags the user keeps removing go. Tags the user typed are
+#     never touched.
+#   * Taste: which tags the user keeps, adds and removes is counted
+#     (tag_taste.json) and passed on.
+# ---------------------------------------------------------------------------
+
+TAG_AMOUNTS = [
+    {"id": "subtle", "name": "Subtle", "description": "A tag only where it really counts. Often none."},
+    {"id": "normal", "name": "Normal", "description": "A tag or two where the feeling clearly calls for one."},
+    {"id": "dramatic", "name": "Dramatic", "description": "Plenty of tags and bold choices: a performance."},
+]
+TAG_AMOUNT_IDS = {a["id"] for a in TAG_AMOUNTS}
+DEFAULT_TAG_AMOUNT = "normal"
+TAG_DENSITY = {
+    "subtle": ("At most one tag, and none if nothing clearly calls for it.", "at most one"),
+    "normal": ("Usually one or two; never more than one per sentence.", "one to three"),
+    "dramatic": ("Two to four, with bold, specific choices; up to two per sentence.", "two to four"),
+}
+# Reactions the voice performs (and which can end a line). Everything else
+# is a feeling or a delivery, which colours the words after it.
+_SOUND_TAG_RE = re.compile(r"laugh|chuckl|giggl|sigh|gasp|groan|scoff|cough|sniff|yawn|exhal|inhal|gulp|snort|"
+                           r"whistl|\bcr(y|ies|ying)\b|\bsob|\bhum|wheez|clears throat|snicker|tsk|mutter", re.I)
+TAG_TASTE_PATH = os.path.join(DATA_DIR, "tag_taste.json")
+TAG_TASTE_LOCK = threading.Lock()
+
+
+def normalize_tag_amount(value, fallback=DEFAULT_TAG_AMOUNT):
+    value = str(value or "").strip().lower()
+    return value if value in TAG_AMOUNT_IDS else fallback
+
+
+def is_sound_tag(tag):
+    return bool(_SOUND_TAG_RE.search(tag or ""))
+
+
+def _tag_stem(tag):
+    """'excited' -> 'excit', 'happily' -> 'happ': for spotting a tag that repeats a word."""
+    word = (tag or "").split()[0] if tag else ""
+    word = re.sub(r"(ily|ly|ed|ing|es|s)$", "", word.lower())
+    return word[:5] if len(word) >= 3 else ""
+
+
+def load_tag_taste():
+    try:
+        with open(TAG_TASTE_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def record_tag_taste(kept=(), removed=(), added=()):
+    """Counts what the user did with tags. Each a list of tag texts."""
+    with TAG_TASTE_LOCK:
+        taste = load_tag_taste()
+        for key, tags in (("kept", kept), ("removed", removed), ("added", added)):
+            for tag in tags:
+                tag = re.sub(r"\s+", " ", str(tag or "").strip().lower().strip("[]"))
+                if not tag or not AUDIO_TAG_RE.fullmatch(f"[{tag}]"):
+                    continue
+                entry = taste.setdefault(tag, {"kept": 0, "removed": 0, "added": 0})
+                entry[key] = entry.get(key, 0) + 1
+                entry["at"] = time.time()
+        if len(taste) > 200:   # keep the most recent
+            taste = dict(sorted(taste.items(), key=lambda kv: -kv[1].get("at", 0))[:200])
+        try:
+            os.makedirs(DATA_DIR, exist_ok=True)
+            with open(TAG_TASTE_PATH, "w", encoding="utf-8") as f:
+                json.dump(taste, f, indent=1)
+        except OSError:
+            pass
+
+
+def tag_taste_summary():
+    """(liked, avoided, never): tags the user favours, tends to remove, and always removes."""
+    taste = load_tag_taste()
+    liked, avoided, never = [], [], []
+    for tag, e in taste.items():
+        good = e.get("kept", 0) + 2 * e.get("added", 0)
+        bad = e.get("removed", 0)
+        if good >= 3 and good > bad * 2:
+            liked.append((good, tag))
+        elif bad >= 2 and bad > good:
+            avoided.append((bad, tag))
+            if bad >= 3 and good == 0:
+                never.append(tag)
+    return ([t for _, t in sorted(liked, reverse=True)[:6]],
+            [t for _, t in sorted(avoided, reverse=True)[:6]],
+            set(never))
+
+
+def tag_taste_prompt():
+    liked, avoided, _ = tag_taste_summary()
+    if not liked and not avoided:
+        return ""
+    parts = []
+    if liked:
+        parts.append("they like " + ", ".join(f"[{t}]" for t in liked))
+    if avoided:
+        parts.append("they usually remove " + ", ".join(f"[{t}]" for t in avoided) + " (avoid these)")
+    return "THE USER'S TASTE (from the tags they keep and remove): " + "; ".join(parts) + ".\n"
+
+
+TAG_EXAMPLES = (
+    "EXAMPLES OF GOOD TAGGING:\n"
+    "- \"Wait, you actually beat it?\" -> \"[gasps] Wait, you actually beat it?\"\n"
+    "- \"I guess I'll just do it myself then.\" -> \"[sighs] I guess I'll just do it myself then.\"\n"
+    "- \"That's the funniest thing I've heard all week.\" -> \"That's the funniest thing I've heard all week. [laughs]\"\n"
+    "- \"Sorry, I didn't mean to wake you.\" -> \"[softly] Sorry, I didn't mean to wake you.\"\n"
+    "- \"Oh sure, that'll definitely work.\" -> \"[sarcastic] Oh sure, that'll definitely work.\"\n"
+    "MISTAKES TO AVOID:\n"
+    "- \"[happy] I'm so happy for you!\": the tag repeats the words. Leave it out, or use a reaction.\n"
+    "- \"[confused] What is going on? [nervous]\": [confused] repeats the question, and [nervous] at the very end "
+    "colours nothing. A tag goes before the words it colours; only a sound like [laughs] or [sighs] can end a line.\n"
+    "- Prefer reactions the voice performs ([sighs], [chuckles], [gasps]) to feeling labels ([confused]).\n"
+)
+
+
+def tag_context(profile=None, session_id=None, profile_id=None, persona=True):
+    """The last lines of the conversation (and the persona), for the tagger."""
+    lines = []
+    if session_id:
+        key = f"{session_id}::{profile_id or 'default'}"
+        with SESSIONS_LOCK:
+            history = list(SESSIONS.get(key, []))
+        for m in history[-8:]:
+            content = m.get("content") or ""
+            if m.get("role") == "assistant":
+                label = "The voice"
+                text = content
+            elif m.get("role") == "user":
+                found = re.search(r"<SOURCE_TEXT>\n(.*?)\n</SOURCE_TEXT>", content, re.S)
+                if not found or "said to you" not in content:
+                    continue   # Clean up / Word for word: the voice's line says it already
+                label, text = "Said to the voice", found.group(1)
+            else:
+                continue
+            text = strip_audio_tags(text).strip()
+            if text:
+                lines.append(f"{label}: {text[:200]}")
+    who = ""
+    if persona:
+        source = profile if profile is not None else CFG
+        who = resolve_personality_text(source.get("system_prompt", ""),
+                                       source.get("personality_preset", DEFAULT_PERSONALITY_PRESET))[:400]
+    out = ""
+    if who:
+        out += f"THE VOICE'S PERSONA (for tone):\n{who}\n"
+    if lines:
+        out += "RECENT LINES IN THIS CONVERSATION (for tone only; don't tag these):\n" + "\n".join(f"- {l}" for l in lines[-4:]) + "\n"
+    return out
+
+
+def refine_tags(text, protected=(), amount=DEFAULT_TAG_AMOUNT):
+    """
+    The rules for tags the AI added (see the block comment above). Tags in
+    `protected` (the user's own) are never removed. Returns the text.
+    """
+    if not text or not has_audio_tags(text):
+        return text
+    amount = normalize_tag_amount(amount)
+    protected = {t.lower() for t in protected}
+    _, _, never = tag_taste_summary()
+    tokens = re.findall(r"\[[^\]\n]*\]|\S+", text)
+    items = []   # [kind, text, sentence, keep]
+    sentence = 0
+    for tok in tokens:
+        m = AUDIO_TAG_RE.fullmatch(tok)
+        if m:
+            items.append(["tag", m.group(1).lower(), None, True])
+        else:
+            items.append(["word", tok, sentence, True])
+            if re.search(r"[.!?]+[\"')\]]*$", tok):
+                sentence += 1
+    # A tag belongs to the sentence of the word after it; one with no word
+    # after it, to the last sentence.
+    last_sentence = max([it[2] for it in items if it[0] == "word"] or [0])
+    for i, it in enumerate(items):
+        if it[0] == "tag":
+            nxt = next((x for x in items[i + 1:] if x[0] == "word"), None)
+            it[2] = nxt[2] if nxt else last_sentence
+            it.append(nxt is None)   # trailing
+    words_plain = lambda seq: [re.sub(r"[^\w']", "", x[1]).lower() for x in seq if x[0] == "word"]
+
+    for i, it in enumerate(items):
+        if it[0] != "tag" or it[1] in protected:
+            continue
+        tag = it[1]
+        # The user always removes it.
+        if tag in never:
+            it[3] = False
+            continue
+        # A feeling (or a pause) at the very end colours nothing.
+        if it[4] and (not is_sound_tag(tag) or "pause" in tag):
+            it[3] = False
+            continue
+        # Repeats a word right next to it.
+        stem = _tag_stem(tag)
+        if stem and not is_sound_tag(tag):
+            near = words_plain(items[max(0, i - 4):i]) + words_plain(items[i + 1:i + 7])
+            if any(w.startswith(stem) for w in near):
+                it[3] = False
+                continue
+    # Repeats and piles: the same tag twice in a sentence; more than two
+    # tags with no words between them.
+    seen = set()
+    run = []
+    for it in items:
+        if it[0] == "word":
+            run = []
+            continue
+        if not it[3]:
+            continue
+        if (it[1], it[2]) in seen and it[1] not in protected:
+            it[3] = False
+            continue
+        seen.add((it[1], it[2]))
+        run.append(it)
+        if len(run) > 2 and it[1] not in protected:
+            it[3] = False
+    # The cap per sentence, by Tag amount. Sounds are kept before feelings,
+    # the user's own tags before the AI's, earlier before later.
+    cap = {"subtle": 1, "normal": 1, "dramatic": 2}[amount]
+    by_sentence = {}
+    for idx, it in enumerate(items):
+        if it[0] == "tag" and it[3]:
+            by_sentence.setdefault(it[2], []).append((idx, it))
+    for group in by_sentence.values():
+        ranked = sorted(group, key=lambda p: (p[1][1] not in protected, not is_sound_tag(p[1][1]), p[0]))
+        for n, (_, it) in enumerate(ranked):
+            if n >= cap and it[1] not in protected:
+                it[3] = False
+    if amount == "subtle":
+        # And few in all: one, plus one more for every three sentences.
+        allowed = 1 + (last_sentence + 1) // 3
+        kept = [it for it in items if it[0] == "tag" and it[3] and it[1] not in protected]
+        ranked = sorted(kept, key=lambda it: (not is_sound_tag(it[1]), items.index(it)))
+        for it in ranked[allowed:]:
+            it[3] = False
+    out = " ".join((f"[{it[1]}]" if it[0] == "tag" else it[1]) for it in items if it[3])
+    return tidy_audio_tags(out)
+
+
+def expressive_voice_rules(response_style, language, delivery, shaping=False, amount=DEFAULT_TAG_AMOUNT):
     """What the AI is told when Expressive voice is on (ElevenLabs voices only)."""
     examples = "[softly], [laughs], [sighs], [excited], [whispers], [sarcastic], [curious], [nervous], [chuckles], [pause]"
     if delivery == "calm":
@@ -3771,8 +4072,9 @@ def expressive_voice_rules(response_style, language, delivery, shaping=False):
             "Your reply is spoken by an expressive voice that follows audio tags.\n"
             + common
             + "Use them the way an actor uses stage directions: only where they genuinely fit your persona "
-            "and the moment. Usually none to two in a reply, never more than one per sentence.\n"
-            "Let the tags carry the emotion: no words in ALL CAPITALS and no strings of exclamation marks.\n\n"
+            "and the moment. " + TAG_DENSITY[normalize_tag_amount(amount)][0] + "\n"   # CHANGED (1.5.0): Tag amount
+            "Let the tags carry the emotion: no words in ALL CAPITALS and no strings of exclamation marks.\n"
+            + TAG_EXAMPLES + tag_taste_prompt() + "\n"
         )
     if response_style == "echo" and shaping:
         # NEW (1.5.0): Shape words for tags (a Clean up profile's switch).
@@ -3781,7 +4083,9 @@ def expressive_voice_rules(response_style, language, delivery, shaping=False):
             "The output is spoken by an expressive voice that follows audio tags.\n"
             + common
             + "Keep every tag already in the source text, in the same place.\n"
-            "Add one to three more where the message's feeling clearly calls for it; fewer for a short message.\n"
+            "Add " + TAG_DENSITY[normalize_tag_amount(amount)][1] + " more where the message's feeling clearly calls for it; "
+            "fewer for a short message.\n"
+            + TAG_EXAMPLES + tag_taste_prompt() +
             "SHAPING THE WORDS AROUND A TAG:\n"
             "Within a few words of each tag, and only there, you may make small changes so the line "
             "flows naturally with the tag performed:\n"
@@ -3829,6 +4133,7 @@ def _elevenlabs_payload(text, force_v2=False):
     # no tags, sends exactly what Frivo always sent.
     style = current_voice_style()
     delivery = DELIVERY_SETTINGS[normalize_voice_delivery(style.get("delivery"))]
+    text = ensure_spoken_words(text)   # NEW (1.5.0): never a line of only tags
     model = expressive_model()
     if model and not force_v2 and (style.get("expressive") or style.get("stay_on_v3") or has_audio_tags(text)):
         # v3 and v4 have no speed setting; the reply speaks at its natural pace.
@@ -4116,7 +4421,31 @@ def speak_reply(text, voice_id, language, plan, voiced=None):
 # NEW (1.5.0): "Suggest tags" — the AI adds audio tags to a message you're
 # about to send. Only tags: every word stays yours (transplant_audio_tags
 # puts back anything else it changed).
-def build_tag_suggestion_prompt(text, delivery):
+def build_tag_suggestion_prompt(text, delivery, context="", amount=DEFAULT_TAG_AMOUNT, avoid=()):
+    gentle = (" Keep it calm: no [shouts]." if delivery == "calm" else "")
+    # CHANGED (1.5.0): with the conversation, the persona, examples, the
+    # user's taste and the Tag amount.
+    density = TAG_DENSITY[normalize_tag_amount(amount)][1]
+    skip = ("Don't use these this time: " + ", ".join(f"[{t}]" for t in avoid) + ".\n") if avoid else ""
+    return (
+        context
+        + TAG_EXAMPLES + tag_taste_prompt() + skip + "\n"
+        + "Add ElevenLabs audio tags to the message below. It will be spoken aloud, as the writer's own words, "
+        "by an expressive voice that performs the tags instead of reading them.\n"
+        "An audio tag is a word or two of lowercase English in square brackets, placed right before the words "
+        "it colours. Good ones: [happy], [excited], [sad], [nervous], [curious], [sarcastic], [warmly], "
+        "[softly], [whispers], [slowly], [laughs], [chuckles], [sighs], [gasps], [pause]." + gentle + "\n"
+        "Never use accent tags.\n"
+        "Never put the message's own words in brackets: a tag is a stage direction you add, not part of the message.\n"
+        f"Add {density}, where they clearly fit the feeling of the message, read in the light of the conversation. "
+        "Keep any tags already there.\n"
+        "Do not change, add, remove or reorder any word or punctuation.\n"
+        "Output only the message with the tags added.\n\n"
+        f"<MESSAGE>\n{text}\n</MESSAGE>"
+    )
+
+
+def _old_build_tag_suggestion_prompt(text, delivery):
     gentle = (" Keep it calm: no [shouts]." if delivery == "calm" else "")
     return (
         "Add ElevenLabs audio tags to the message below. It will be spoken aloud, as the writer's own words, "
@@ -4133,7 +4462,34 @@ def build_tag_suggestion_prompt(text, delivery):
     )
 
 
-def tag_message_with_ai(text, delivery):
+def _plain_words(text):
+    return [w for w in re.sub(r"[^\w'\s]", " ", strip_audio_tags(text or "").lower()).split() if w]
+
+
+def unwrap_message_words(original, tagged):
+    """
+    NEW (1.5.0): a small model sometimes puts the message's own words in
+    brackets ("[i was thinking] [about] writing"), which then showed up as
+    tags. Brackets around words that are in the message are taken off, so
+    they count as the words they are. Tags already in the message stay.
+    """
+    words = _plain_words(original)
+    joined = " " + " ".join(words) + " "
+    kept = {t for _, t in audio_tag_positions(original)}
+
+    def fix(m):
+        inner = m.group(1)
+        if inner.lower() in kept:
+            return m.group(0)
+        seq = _plain_words(inner)
+        if seq and (" " + " ".join(seq) + " ") in joined:
+            return inner
+        return m.group(0)
+
+    return re.sub(r"\[([^\]\n]{1,60})\]", fix, tagged or "")
+
+
+def tag_message_with_ai(text, delivery, context="", amount=DEFAULT_TAG_AMOUNT, avoid=()):
     """
     NEW (1.5.0): `text` with the AI's audio tags added and nothing else
     changed. Used by Suggest, and by Auto tags on every message you send.
@@ -4147,19 +4503,135 @@ def tag_message_with_ai(text, delivery):
             provider=resolve_provider("chat_provider", CHAT_PROVIDERS),
             model=CFG.get("model", RECOMMENDED_TEXT_MODEL),
             ollama_model=active_ollama_model(),
-            messages=[{"role": "user", "content": build_tag_suggestion_prompt(text, delivery)}],
+            messages=[{"role": "user", "content": build_tag_suggestion_prompt(text, delivery, context, amount, avoid)}],
             max_tokens=int(len(text.split()) * 3) + 80,
-            temperature=0.4,
+            temperature=0.8 if avoid else 0.4,   # CHANGED (1.5.0): Retake asks for something different
         )
         raw = (response.choices[0].message.content or "").strip()
     except Exception as e:
         raise RuntimeError(f"Couldn't ask the AI: {e}")
     raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.S | re.I)
     raw = re.sub(r"</?MESSAGE>", "", raw).strip()
+    raw = unwrap_message_words(text, raw)   # NEW (1.5.0)
     suggested = transplant_audio_tags(strip_audio_tags(text), tidy_audio_tags(raw if ACCENT_TAG_RE.search(text) else ACCENT_TAG_RE.sub("", raw)))
     if delivery == "calm":
         suggested = re.sub(r"\[(?:shouts|shouting|yells|yelling|screams)\]\s*", "", suggested, flags=re.I)
-    return suggested
+    if avoid:
+        suggested = re.sub(r"\[(?:" + "|".join(re.escape(t) for t in avoid) + r")\]\s*", "", suggested)
+    # NEW (1.5.0): the rules, sparing the tags that were already there.
+    return refine_tags(suggested, protected=[t for _, t in audio_tag_positions(text)], amount=amount)
+
+
+# NEW (1.5.0): your tag taste. The page reports what happened to the tags
+# it offered: kept (sent), removed (offered, then deleted, or retaken
+# without), added (typed or picked by you).
+@app.route("/api/voice-tags/feedback", methods=["POST"])
+def voice_tags_feedback():
+    data = request.get_json(force=True) or {}
+    lists = {}
+    for key in ("kept", "removed", "added"):
+        value = data.get(key) or []
+        if not isinstance(value, list):
+            return jsonify({"error": f"{key} should be a list of tags."}), 400
+        lists[key] = [str(t)[:40] for t in value[:30]]
+    record_tag_taste(**lists)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/voice-tags/taste", methods=["GET", "DELETE"])
+def voice_tags_taste():
+    if request.method == "DELETE":
+        with TAG_TASTE_LOCK:
+            try:
+                os.remove(TAG_TASTE_PATH)
+            except OSError:
+                pass
+    liked, avoided, never = tag_taste_summary()
+    return jsonify({"liked": liked, "avoided": avoided, "never": sorted(never),
+                    "counted": len(load_tag_taste())})
+
+
+# NEW (1.5.0): Retake. Speaks the last reply again: the same ("same"),
+# without its tags ("plain"), or with different ones ("fresh"). The words
+# don't change. The reply in the conversation's history is replaced, so
+# the AI carries on from the version you kept.
+@app.route("/api/retake", methods=["POST"])
+def retake():
+    data = request.get_json(force=True) or {}
+    mode = data.get("mode") if data.get("mode") in ("same", "plain", "fresh") else "same"
+    voiced = tidy_audio_tags(str(data.get("voiced") or data.get("reply") or "").strip())[:SAVED_MAX_TEXT + 600]
+    reply = strip_audio_tags(voiced) or voiced
+    if not reply:
+        return jsonify({"error": "Nothing to say again."}), 400
+    session_id = data.get("session_id") or "default"
+    profile_id = data.get("profile_id")
+    language = normalize_language(data.get("language")) or CFG.get("language", "English")
+    profile = None
+    if profile_id:
+        profile = next((p for p in load_profiles() if p["id"] == profile_id), None)
+        if not profile:
+            return jsonify({"error": "That profile no longer exists."}), 400
+    voice_id = profile["voice_id"] if profile else CFG["voice_id"]
+    if tts_engine(voice_id) != "elevenlabs":
+        return jsonify({"error": "Retake is for ElevenLabs voices."}), 400
+    if not CFG["elevenlabs_api_key"]:
+        return jsonify({"error": "Add your ElevenLabs key in Settings."}), 400
+    style = voice_style_of(profile)
+    old_tags = [t for _, t in audio_tag_positions(voiced)]
+    tag_seconds = 0.0
+    if mode == "plain":
+        voiced = reply
+    elif mode == "fresh":
+        start = time.perf_counter()
+        try:
+            tagged = tag_message_with_ai(reply, style["delivery"], tag_context(profile, session_id, profile_id),
+                                         style["amount"], avoid=sorted(set(old_tags)))
+        except Exception as e:
+            return jsonify({"error": f"Couldn't get different tags: {e}"}), 502
+        tag_seconds = time.perf_counter() - start
+        voiced = tagged if has_audio_tags(tagged) else reply
+    voiced = ensure_spoken_words(voiced)   # NEW (1.5.0)
+    g.voice_style = dict(style, language=language, expressive=has_audio_tags(voiced) or style["expressive"])
+    g.speech_thread = speech_thread_key(session_id, profile_id, voice_id, ELEVEN_V3_MODEL)
+    g.speech_voice = voice_id
+    plan = chatbox_page_plan(reply)
+    audio_start = time.perf_counter()
+    try:
+        filename, page_ends, word_times = speak_reply(reply, voice_id, language, plan, voiced=voiced)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    audio_seconds = time.perf_counter() - audio_start
+    if page_ends and len(page_ends) == len(plan):
+        for i, page in enumerate(plan):
+            page["at"] = 0.0 if i == 0 else round(page_ends[i - 1], 3)
+    credits = len(voiced)
+    record_usage(credits)
+    # The history keeps the version you're hearing.
+    key = f"{session_id}::{profile_id or 'default'}"
+    old = tidy_audio_tags(str(data.get("voiced") or reply))
+    with SESSIONS_LOCK:
+        for m in reversed(SESSIONS.get(key, [])):
+            if m.get("role") == "assistant" and strip_audio_tags(m.get("content") or "") == strip_audio_tags(old):
+                m["content"] = voiced
+                break
+    return jsonify({
+        "reply": reply,
+        "voiced": voiced,
+        "mode": mode,
+        # Only "without tags" says you didn't like them; "different" may
+        # just be wanting variety.
+        "removed_tags": old_tags if mode == "plain" else [],
+        "audio_url": f"/audio/{filename}" if filename else None,
+        "word_times": word_times,
+        "chatbox_pages": plan,
+        "credits": credits,
+        "voice_notice": getattr(g, "voice_notice", "") or "",
+        "voice_model": _elevenlabs_payload(voiced)["model_id"],
+        "voice_how": voice_how(voiced),
+        "text_seconds": round(tag_seconds, 2),
+        "audio_seconds": round(audio_seconds, 2),
+        "total_seconds": round(tag_seconds + audio_seconds, 2),
+    })
 
 
 @app.route("/api/voice-tags/suggest", methods=["POST"])
@@ -4171,10 +4643,12 @@ def suggest_voice_tags():
     profile = None
     if data.get("profile_id"):
         profile = next((p for p in load_profiles() if p["id"] == data.get("profile_id")), None)
-    delivery = voice_style_of(profile)["delivery"]
+    style = voice_style_of(profile)
+    delivery = style["delivery"]
     started = time.perf_counter()
+    context = tag_context(profile, data.get("session_id"), data.get("profile_id"))   # NEW (1.5.0)
     try:
-        suggested = tag_message_with_ai(text, delivery)
+        suggested = tag_message_with_ai(text, delivery, context, style["amount"])
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
     except RuntimeError as e:
@@ -4649,6 +5123,8 @@ def settings():
             CFG["expressive_voice"] = data.get("expressive_voice") is True
         if "tag_shaping" in data:   # NEW (1.5.0)
             CFG["tag_shaping"] = data.get("tag_shaping") is True
+        if "tag_amount" in data:    # NEW (1.5.0)
+            CFG["tag_amount"] = normalize_tag_amount(data.get("tag_amount"), CFG.get("tag_amount", DEFAULT_TAG_AMOUNT))
         if "tag_words" in data:     # NEW (1.5.0)
             CFG["tag_words"] = normalize_tag_words(data.get("tag_words"))
         if "voice_delivery" in data:
@@ -4777,6 +5253,8 @@ def settings():
             # NEW (1.5.0)
             "expressive_voice": CFG.get("expressive_voice") is True,
             "tag_shaping": CFG.get("tag_shaping") is True,   # NEW (1.5.0)
+            "tag_amount": normalize_tag_amount(CFG.get("tag_amount")),   # NEW (1.5.0)
+            "tag_amounts": TAG_AMOUNTS,
             "tag_words": tag_words(),                        # NEW (1.5.0)
             "voice_delivery": normalize_voice_delivery(CFG.get("voice_delivery")),
             "hold_accent": normalize_hold_accent(CFG.get("hold_accent")),
@@ -6702,6 +7180,7 @@ def profiles():
     expressive_voice = data.get("expressive_voice") is True
     voice_delivery = normalize_voice_delivery(data.get("voice_delivery"))
     tag_shaping = data.get("tag_shaping") is True   # NEW (1.5.0)
+    tag_amount = normalize_tag_amount(data.get("tag_amount"))   # NEW (1.5.0)
 
     if not name or not voice_id:
         return jsonify({"error": "Name and voice are both required."}), 400
@@ -6721,6 +7200,7 @@ def profiles():
             "expressive_voice": expressive_voice,  # NEW (1.5.0)
             "voice_delivery": voice_delivery,      # NEW (1.5.0)
             "tag_shaping": tag_shaping,            # NEW (1.5.0)
+            "tag_amount": tag_amount,              # NEW (1.5.0)
         }
         all_profiles.append(new_profile)
         save_profiles(all_profiles)
@@ -6772,6 +7252,8 @@ def profile_detail(profile_id):
             match["expressive_voice"] = data.get("expressive_voice") is True
         if "tag_shaping" in data:   # NEW (1.5.0)
             match["tag_shaping"] = data.get("tag_shaping") is True
+        if "tag_amount" in data:    # NEW (1.5.0)
+            match["tag_amount"] = normalize_tag_amount(data.get("tag_amount"))
         if "voice_delivery" in data:
             match["voice_delivery"] = normalize_voice_delivery(
                 data.get("voice_delivery"), match.get("voice_delivery", DEFAULT_VOICE_DELIVERY))
@@ -7418,6 +7900,8 @@ def chat():
         prompt_voice_style = None
         message = strip_audio_tags(message) or message
     message = tidy_audio_tags(message)
+    typed_tags = [t for _, t in audio_tag_positions(message)]   # NEW (1.5.0): never removed by the rules
+    tag_profile = profile if profile_id else None
     auto_tagged = False
     tag_seconds = 0.0
     # NEW (1.5.0): Shape words for tags, for a Clean up profile with an
@@ -7434,7 +7918,8 @@ def chat():
         # call; if it can't, the message goes as typed.
         tag_start = time.perf_counter()
         try:
-            tagged = tag_message_with_ai(message, voice_style["delivery"])
+            tagged = tag_message_with_ai(message, voice_style["delivery"],
+                                         tag_context(tag_profile, session_id, profile_id), voice_style["amount"])
             if has_audio_tags(tagged):
                 message = tagged
                 auto_tagged = True
@@ -7539,7 +8024,9 @@ def chat():
                     if shaping:
                         # Your words, with tags only (no shaping).
                         try:
-                            tagged = tag_message_with_ai(message, voice_style["delivery"])
+                            tagged = tag_message_with_ai(message, voice_style["delivery"],
+                                                         tag_context(tag_profile, session_id, profile_id),
+                                                         voice_style["amount"])
                             if has_audio_tags(tagged):
                                 spoken = tagged
                         except Exception as e:
@@ -7587,6 +8074,11 @@ def chat():
                 voiced = ACCENT_TAG_RE.sub("", voiced).strip()
             if voice_style["delivery"] == "calm":
                 voiced = re.sub(r"\[(?:shouts|shouting|yells|yelling|screams)\]\s*", "", voiced, flags=re.I)
+            # NEW (1.5.0): the rules for the AI's tags (yours are kept).
+            voiced = refine_tags(voiced, protected=typed_tags, amount=voice_style["amount"])
+            # NEW (1.5.0): "lol" on its own became [laughs], which ElevenLabs
+            # won't say by itself: it's said as "[laughs] Haha!".
+            voiced = ensure_spoken_words(voiced)
         else:
             voiced = strip_audio_tags(spoken)
         spoken = strip_audio_tags(voiced) or voiced
