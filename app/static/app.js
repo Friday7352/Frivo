@@ -9468,34 +9468,104 @@ function showShapingState() {
     : "Only works with Clean up. Pick Clean up above to use it.";
 }
 
+// CHANGED (1.5.0): the tags in three columns, like stage directions, each
+// shown the way it looks in a message. Tags you type yourself are kept
+// under "Yours".
+var YOUR_TAGS_KEY = "frivo_your_tags";
+function yourTags() {
+  try { return JSON.parse(localStorage.getItem(YOUR_TAGS_KEY) || "[]").filter((t) => typeof t === "string"); }
+  catch (e) { return []; }
+}
+function rememberYourTag(tag) {
+  const known = new Set(audioTagGroups.flatMap((g) => g.tags || []));
+  if (known.has(tag)) return;
+  const list = [tag].concat(yourTags().filter((t) => t !== tag)).slice(0, 12);
+  try { localStorage.setItem(YOUR_TAGS_KEY, JSON.stringify(list)); } catch (e) { /* not kept */ }
+}
+function forgetYourTag(tag) {
+  try { localStorage.setItem(YOUR_TAGS_KEY, JSON.stringify(yourTags().filter((t) => t !== tag))); } catch (e) { /* fine */ }
+}
+
+function tagButton(tag, className) {
+  const b = document.createElement("button");
+  b.type = "button";
+  b.className = className;
+  b.title = `Put [${tag}] in your message`;
+  const word = document.createElement("span");
+  word.className = "voice-tag-word";
+  word.textContent = tag;
+  const plus = document.createElement("span");
+  plus.className = "voice-tag-plus";
+  plus.setAttribute("aria-hidden", "true");
+  plus.textContent = "+";
+  b.append(word, plus);
+  b.addEventListener("click", () => {
+    insertVoiceTag(tag);
+    if (typeof popOnce === "function") popOnce(b);
+  });
+  return b;
+}
+
 function renderVoiceTagGroups() {
   const box = $("voiceTagGroups");
   if (!box) return;
   box.replaceChildren();
   audioTagGroups.forEach((group) => {
-    const row = document.createElement("div");
-    row.className = "voice-tag-group";
+    const col = document.createElement("div");
+    col.className = "voice-tag-col";
     const name = document.createElement("span");
-    name.className = "voice-tag-group-name eyebrow";
+    name.className = "voice-tag-col-name";
     name.textContent = group.name;
-    const chips = document.createElement("div");
-    chips.className = "voice-tag-chips";
-    (group.tags || []).forEach((tag) => {
-      const chip = document.createElement("button");
-      chip.type = "button";
-      chip.className = "voice-tag-chip";
-      chip.textContent = tag;
-      chip.title = `Put [${tag}] in your message`;
-      chip.addEventListener("click", () => {
-        insertVoiceTag(tag);
-        if (typeof popOnce === "function") popOnce(chip);
-      });
-      chips.append(chip);
-    });
-    row.append(name, chips);
-    box.append(row);
+    col.append(name);
+    (group.tags || []).forEach((tag) => col.append(tagButton(tag, "voice-tag-item")));
+    box.append(col);
   });
+  renderYourTags();
 }
+
+function renderYourTags() {
+  const wrap = $("voiceTagYours");
+  const list = $("voiceTagYoursList");
+  if (!wrap || !list) return;
+  const tags = yourTags();
+  list.replaceChildren();
+  tags.forEach((tag) => {
+    const chip = document.createElement("span");
+    chip.className = "voice-tag-your";
+    const b = tagButton(tag, "voice-tag-your-add");
+    const x = document.createElement("button");
+    x.type = "button";
+    x.className = "voice-tag-your-forget";
+    x.title = `Forget [${tag}]`;
+    x.setAttribute("aria-label", `Forget ${tag}`);
+    x.textContent = "×";
+    x.addEventListener("click", (e) => { e.stopPropagation(); forgetYourTag(tag); renderYourTags(); });
+    chip.append(b, x);
+    list.append(chip);
+  });
+  wrap.classList.toggle("is-hidden", !tags.length);
+}
+
+(function wireCustomTag() {
+  const form = $("voiceTagCustom");
+  const input = $("voiceTagCustomInput");
+  if (!form || !input) return;
+  form.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const tag = input.value.replace(/[\[\]]/g, "").replace(/\s+/g, " ").trim().toLowerCase();
+    const note = $("voiceTagNote");
+    if (!tag) return;
+    if (!/^[a-z][a-z' \-]{0,37}$/.test(tag)) {
+      if (note) { note.classList.add("is-error"); note.textContent = "A tag is letters only (spaces, ' and - are fine), like trying not to laugh."; }
+      return;
+    }
+    if (note) { note.classList.remove("is-error"); note.textContent = ""; }
+    insertVoiceTag(tag);
+    rememberYourTag(tag);
+    renderYourTags();
+    input.value = "";
+  });
+})();
 
 function insertVoiceTag(tag) {
   const input = $("messageInput");
@@ -9518,6 +9588,7 @@ function insertVoiceTag(tag) {
 }
 
 function openVoiceTags() {
+  if (typeof renderYourTags === "function") renderYourTags();   // NEW (1.5.0)
   const note = $("voiceTagNote");
   if (note && !note.dataset.busy) {
     note.classList.remove("is-error");
@@ -10524,43 +10595,84 @@ var TAG_WORD_DEFAULTS = ["lol", "haha", "lmao", "lmfao", "rofl", "hehe", "heh", 
 var TAG_SUGGESTIONS = ["laughs", "laughs hard", "chuckles", "giggles", "nervous laugh", "scoffs", "sighs", "groans",
   "gasps", "whispers", "excited", "sarcastic", "sad", "pause", "clears throat"];
 
+// CHANGED (1.5.0): two sections, so "AI picks" isn't said twelve times:
+// the words the AI picks a tag for, on one line; and the words with their
+// own tag, one per row, the tag shown the way it looks in a message.
 function renderTagWords() {
   const list = $("tagWordsList");
   const note = $("tagWordsNote");
   if (!list || !Array.isArray(tagWordsState)) return;
   list.replaceChildren();
-  tagWordsState.forEach((entry, i) => {
-    const chip = document.createElement("span");
-    chip.className = "tag-word";
-    chip.setAttribute("role", "listitem");
-    const word = document.createElement("span");
-    word.className = "tag-word-word";
-    word.textContent = entry.word;
-    const arrow = document.createElement("span");
-    arrow.className = "tag-word-arrow";
-    arrow.textContent = "→";
-    const tag = document.createElement("span");
-    tag.className = "tag-word-tag" + (entry.tag ? "" : " is-auto");
-    tag.textContent = entry.tag ? `[${entry.tag}]` : "AI picks";
-    const remove = document.createElement("button");
-    remove.type = "button";
-    remove.className = "tag-word-remove";
-    remove.title = `Remove "${entry.word}": it'll be read out as typed`;
-    remove.setAttribute("aria-label", `Remove ${entry.word}`);
-    remove.textContent = "×";
-    remove.addEventListener("click", () => {
-      tagWordsState = tagWordsState.filter((_, j) => j !== i);
-      renderTagWords();
-      saveTagWords(`Removed "${entry.word}".`);
+  const removeEntry = (entry) => {
+    tagWordsState = tagWordsState.filter((x) => x !== entry);
+    renderTagWords();
+    saveTagWords(`Removed "${entry.word}". It's read out as typed now.`);
+  };
+  const removeBtn = (entry) => {
+    const x = document.createElement("button");
+    x.type = "button";
+    x.className = "tag-word-remove";
+    x.title = `Remove "${entry.word}": it'll be read out as typed`;
+    x.setAttribute("aria-label", `Remove ${entry.word}`);
+    x.textContent = "×";
+    x.addEventListener("click", () => removeEntry(entry));
+    return x;
+  };
+  const picks = tagWordsState.filter((e) => !e.tag);
+  const fixed = tagWordsState.filter((e) => e.tag);
+
+  if (picks.length) {
+    const sec = document.createElement("div");
+    sec.className = "tag-words-section";
+    const head = document.createElement("span");
+    head.className = "tag-words-head";
+    head.textContent = "The AI picks the tag from how it's meant";
+    const line = document.createElement("div");
+    line.className = "tag-words-line";
+    picks.forEach((entry) => {
+      const w = document.createElement("span");
+      w.className = "tag-words-pick";
+      const t = document.createElement("span");
+      t.textContent = entry.word;
+      w.append(t, removeBtn(entry));
+      line.append(w);
     });
-    chip.append(word, arrow, tag, remove);
-    list.append(chip);
-  });
-  if (note && !note.dataset.flash) {
-    note.textContent = tagWordsState.length
-      ? `${tagWordsState.length} word${tagWordsState.length === 1 ? "" : "s"}.`
-      : "Empty: nothing typed becomes a tag.";
+    sec.append(head, line);
+    list.append(sec);
   }
+  if (fixed.length) {
+    const sec = document.createElement("div");
+    sec.className = "tag-words-section";
+    const head = document.createElement("span");
+    head.className = "tag-words-head";
+    head.textContent = "Always the same tag";
+    sec.append(head);
+    fixed.forEach((entry) => {
+      const row = document.createElement("div");
+      row.className = "tag-words-row";
+      const w = document.createElement("span");
+      w.className = "tag-words-word";
+      w.textContent = entry.word;
+      const arrow = document.createElement("span");
+      arrow.className = "tag-words-arrow";
+      arrow.setAttribute("aria-hidden", "true");
+      arrow.textContent = "→";
+      const tag = document.createElement("span");
+      tag.className = "voice-tag";   // the same mark as in a message
+      tag.dataset.tag = entry.tag;
+      const gap = document.createElement("span");
+      row.append(w, arrow, tag, gap, removeBtn(entry));
+      sec.append(row);
+    });
+    list.append(sec);
+  }
+  if (!tagWordsState.length) {
+    const empty = document.createElement("p");
+    empty.className = "tag-words-empty";
+    empty.textContent = "Nothing typed becomes a tag. Add a word below, or put back the defaults.";
+    list.append(empty);
+  }
+  if (note && !note.dataset.flash) note.textContent = "";
 }
 
 async function saveTagWords(message) {

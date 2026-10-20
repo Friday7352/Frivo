@@ -542,14 +542,26 @@
                   <div class="voice-tag-head">
                     <div>
                       <span class="voice-tag-title">Voice tags</span>
-                      <span class="voice-tag-lede">How the next words are said. The voice acts it out; it isn't read aloud or sent to the chatbox.</span>
+                      <span class="voice-tag-lede">Acted out by the voice, never read aloud.</span>
                     </div>
                     <button type="button" class="btn btn-sm voice-tag-suggest" id="voiceTagSuggest"
                             title="The AI adds tags that fit what you've typed. Your words stay the same.">
                       <svg class="icon-14" aria-hidden="true"><use href="#i-sparkle"/></svg> Suggest
                     </button>
                   </div>
+                  <!-- CHANGED (1.5.0): any tag, typed; then the tags in three columns. -->
+                  <form class="voice-tag-custom" id="voiceTagCustom" autocomplete="off">
+                    <input type="text" id="voiceTagCustomInput" maxlength="38"
+                           placeholder="Any tag, like trying not to laugh" aria-label="Type any tag">
+                    <button type="submit" class="voice-tag-custom-go" aria-label="Put this tag in">
+                      <svg class="icon-14" aria-hidden="true"><use href="#i-arrow"/></svg>
+                    </button>
+                  </form>
                   <div id="voiceTagGroups" class="voice-tag-groups"></div>
+                  <div class="voice-tag-yours is-hidden" id="voiceTagYours">
+                    <span class="voice-tag-yours-name">Yours</span>
+                    <span class="voice-tag-yours-list" id="voiceTagYoursList"></span>
+                  </div>
                   <div class="voice-tag-options">
                     <label class="voice-tag-option">
                       <span class="voice-tag-option-text">
@@ -848,13 +860,13 @@
                   <div class="srow srow--stacked" id="tagWordsRow">
                     <span class="srow-main srow-main--flex">
                       <span class="srow-label">Tag words</span>
-                      <span class="srow-sub">Words and phrases that become voice tags instead of being read out, for every profile with Shape words for tags on. "AI picks" chooses the tag from how it's meant.</span>
+                      <span class="srow-sub">Typed words that become voice tags instead of being read out, for every profile with Shape words for tags on.</span>
                     </span>
-                    <div class="tag-words" id="tagWordsList" role="list" aria-label="Tag words"></div>
+                    <div class="tag-words" id="tagWordsList"></div>
                     <form class="tag-words-add" id="tagWordsForm" autocomplete="off">
                       <input type="text" id="tagWordsWord" maxlength="40" placeholder="Word or phrase, like brb" aria-label="Word or phrase">
                       <span class="tag-words-arrow" aria-hidden="true">→</span>
-                      <input type="text" id="tagWordsTag" maxlength="38" list="tagWordsTagList" placeholder="AI picks" aria-label="Tag it becomes">
+                      <input type="text" id="tagWordsTag" maxlength="38" list="tagWordsTagList" placeholder="Tag (empty: the AI picks)" aria-label="Tag it becomes">
                       <datalist id="tagWordsTagList"></datalist>
                       <button type="submit" class="btn btn-sm">Add</button>
                     </form>
