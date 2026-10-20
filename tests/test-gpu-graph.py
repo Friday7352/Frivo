@@ -73,7 +73,8 @@ def fake_get(url, timeout=None, **kw):
             return resp(200, {"ok": False, "reason": "No NVIDIA graphics card found"})
         return resp(200, {"ok": True, "name": "NVIDIA GeForce RTX 2070 SUPER", "total_mb": 8192,
                           "used_mb": 5792, "util_pct": 23, "temp_c": 54,
-                          "parts": dict(world["parts"]) if world["parts"] else None, "processes": []})
+                          "parts": dict(world["parts"]) if world["parts"] else None, "processes": [],
+                          **({"idle": world["idle"]} if world.get("idle") else {})})
     if url.endswith("/api/ps"):
         if not world["ollama_up"]:
             raise ConnectionError("down")
@@ -184,7 +185,36 @@ js = open(os.path.join(APP, "static", "app.js"), encoding="utf-8").read()
 check("graph in the status popover", 'id="gpuCard"' in html and html.index('id="gpuCard"') < html.index('id="creditsToggle"'))
 check("app.js draws it", "function renderGpu" in js and "/api/gpu" in js and "function drawGpuChart" in js)
 check("only polled while open", "watchGpuWhileStatusOpen" in js)
-check("shows the idle countdown", "function gpuIdleNote" in js and "Frees the graphics card in" in js)   # NEW (1.5.0)
+check("shows the idle countdown", "function gpuIdleNote" in js and "frees the graphics card in" in js)   # NEW (1.5.0)
+
+print("Evora's idle timers")   # NEW (1.5.0)
+reset_world()
+configure()
+world["idle"] = {"listening": False, "listen": {"loaded": True, "unload_in": 200}, "speech": {"loaded": True, "unload_in": 3000}}
+data = get()
+check("Evora's countdowns reach the graph, not inside the card", data.get("evora_idle", {}).get("listen", {}).get("unload_in") == 200
+      and "idle" not in (data.get("card") or {}), data.get("evora_idle"))
+world.pop("idle")
+configure()
+check("an older Evora: none", get().get("evora_idle") is None)
+check("app.js shows them", "function evoraIdleNote" in js and "frees the listening models in" in js)
+posted = []
+mod.requests.post = lambda url, json=None, **kw: posted.append((url, json)) or resp(200, {})
+mod.CFG.update(evora_idle_listen="15m", evora_idle_speech="never")
+mod.apply_evora_idle_timers()
+check("Frivo passes its timers to Evora, in minutes", posted == [("http://192.168.1.250:9000/idle", {"listen_minutes": 15, "speech_minutes": 0})], posted)
+posted.clear()
+res = client.post("/api/settings", json={"evora_idle_listen": "1h", "evora_idle_speech": "bogus"})
+import time as _t
+_t.sleep(0.3)
+check("a change in Settings is passed on; nonsense is ignored", mod.CFG["evora_idle_listen"] == "1h" and mod.CFG["evora_idle_speech"] == "never"
+      and posted and posted[-1][1] == {"listen_minutes": 60, "speech_minutes": 0}, (posted, mod.CFG.get("evora_idle_speech")))
+configure(transcription="openai")
+posted.clear()
+mod.apply_evora_idle_timers()
+check("not using Evora: nothing sent", posted == [])
+html = open(os.path.join(APP, "templates", "index.html"), encoding="utf-8").read()
+check("the two timers are in Settings", 'id="evoraIdleListen"' in html and 'id="evoraIdleSpeech"' in html)
 
 print()
 if failures:

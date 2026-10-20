@@ -231,6 +231,13 @@ OLLAMA_TIER_KEYS = {"fast": "ollama_model", "balanced": "ollama_model_balanced",
 # it, so it counts from the last request and every reply restarts it.
 OLLAMA_IDLE_UNLOAD = {"15m": "15 minutes", "1h": "1 hour", "4h": "4 hours", "never": "Never"}
 DEFAULT_OLLAMA_IDLE_UNLOAD = "1h"
+# NEW (1.5.0): Evora's two idle timers (see Evora's evora_idle.py): its
+# listening models after listening stops, and speech-to-text after no
+# dictation or listening. In minutes for Evora; 0 is never.
+EVORA_IDLE_LISTEN = {"5m": 5, "15m": 15, "1h": 60, "never": 0}
+EVORA_IDLE_SPEECH = {"15m": 15, "1h": 60, "4h": 240, "never": 0}
+DEFAULT_EVORA_IDLE_LISTEN = "5m"
+DEFAULT_EVORA_IDLE_SPEECH = "1h"
 OLLAMA_TIER_DEFAULTS = {"fast": DEFAULT_OLLAMA_MODEL, "balanced": "qwen3.5:4b", "best": "qwen3.5:9b"}
 DEFAULT_WHISPER_URL = "http://localhost:9000"
 
@@ -708,6 +715,8 @@ def load_config():
         "ollama_model_best": OLLAMA_TIER_DEFAULTS["best"],
         "ollama_tier": "fast",
         "ollama_idle_unload": DEFAULT_OLLAMA_IDLE_UNLOAD,   # NEW (1.5.0)
+        "evora_idle_listen": DEFAULT_EVORA_IDLE_LISTEN,     # NEW (1.5.0)
+        "evora_idle_speech": DEFAULT_EVORA_IDLE_SPEECH,     # NEW (1.5.0)
         # Blank uses the chat model for translation.
         "ollama_translation_model": "",
         "whisper_url": DEFAULT_WHISPER_URL,
@@ -4687,6 +4696,16 @@ def settings():
                 CFG[key] = (data.get(key) or "").strip() or default
         if data.get("ollama_tier") in OLLAMA_TIER_KEYS:   # NEW (1.5.0)
             CFG["ollama_tier"] = data["ollama_tier"]
+        # NEW (1.5.0): Evora's idle timers, passed straight on to Evora.
+        evora_changed = False
+        if data.get("evora_idle_listen") in EVORA_IDLE_LISTEN and data["evora_idle_listen"] != CFG.get("evora_idle_listen"):
+            CFG["evora_idle_listen"] = data["evora_idle_listen"]
+            evora_changed = True
+        if data.get("evora_idle_speech") in EVORA_IDLE_SPEECH and data["evora_idle_speech"] != CFG.get("evora_idle_speech"):
+            CFG["evora_idle_speech"] = data["evora_idle_speech"]
+            evora_changed = True
+        if evora_changed:
+            threading.Thread(target=apply_evora_idle_timers, daemon=True, name="evora-idle").start()
         if data.get("ollama_idle_unload") in OLLAMA_IDLE_UNLOAD:   # NEW (1.5.0)
             changed = CFG.get("ollama_idle_unload") != data["ollama_idle_unload"]
             CFG["ollama_idle_unload"] = data["ollama_idle_unload"]
@@ -4729,6 +4748,8 @@ def settings():
             "ollama_model_best": tier_model("best"),           # NEW (1.5.0)
             "ollama_tier": ollama_tier(),                      # NEW (1.5.0)
             "ollama_idle_unload": CFG.get("ollama_idle_unload") or DEFAULT_OLLAMA_IDLE_UNLOAD,   # NEW (1.5.0)
+            "evora_idle_listen": CFG.get("evora_idle_listen") or DEFAULT_EVORA_IDLE_LISTEN,      # NEW (1.5.0)
+            "evora_idle_speech": CFG.get("evora_idle_speech") or DEFAULT_EVORA_IDLE_SPEECH,      # NEW (1.5.0)
             "ollama_translation_model": CFG.get("ollama_translation_model", ""),
             "whisper_url": CFG.get("whisper_url", DEFAULT_WHISPER_URL),
             "allow_openai_fallback": bool(CFG.get("allow_openai_fallback", False)),
@@ -6899,6 +6920,28 @@ def apply_ollama_idle_timer(wait=0):
         log_server_event(f"Ollama idle timer: {e!r}")
 
 
+def apply_evora_idle_timers(wait=0):
+    """
+    NEW (1.5.0): gives Evora the idle timers from Settings. Evora keeps them
+    itself too, so it works the same without Frivo. Quiet when Evora isn't
+    in use, isn't running, or is too old to have them.
+    """
+    if wait:
+        time.sleep(wait)
+    try:
+        _, uses_evora = gpu_watch_targets()
+        if not uses_evora:
+            return
+        listen = EVORA_IDLE_LISTEN.get(CFG.get("evora_idle_listen"), EVORA_IDLE_LISTEN[DEFAULT_EVORA_IDLE_LISTEN])
+        speech = EVORA_IDLE_SPEECH.get(CFG.get("evora_idle_speech"), EVORA_IDLE_SPEECH[DEFAULT_EVORA_IDLE_SPEECH])
+        response = requests.post(f"{whisper_base_url()}/idle", json={"listen_minutes": listen, "speech_minutes": speech},
+                                 timeout=(LOCAL_CONNECT_TIMEOUT, 4))
+        if response.status_code == 404:
+            log_server_event("Evora idle timers: this Evora is too old to have them (update Evora)")
+    except Exception as e:
+        log_server_event(f"Evora idle timers: {e!r}")
+
+
 def _same_model(a, b):
     """'gemma3:4b' and 'gemma3:4b', or 'llama3.1' and 'llama3.1:latest'."""
     norm = lambda name: name if ":" in name else name + ":latest"
@@ -7100,6 +7143,8 @@ def gpu_sample():
         "same_card": same_card,
         "ollama_models": models,
         "ollama_problem": ollama_problem,
+        # NEW (1.5.0): Evora's idle countdowns, when it has them.
+        "evora_idle": (card or {}).pop("idle", None) if card else None,
     }
 
 
@@ -8304,6 +8349,8 @@ def serve(host, port, cert_path, key_path):
     threading.Thread(target=gpu_sampler_loop, name="gpu-graph", daemon=True).start()
     # NEW (1.5.0): and puts the idle timer on a model loaded before this start.
     threading.Thread(target=apply_ollama_idle_timer, kwargs={"wait": 5}, name="ollama-idle", daemon=True).start()
+    # NEW (1.5.0): and Evora's, in case they were changed while it was off.
+    threading.Thread(target=apply_evora_idle_timers, kwargs={"wait": 6}, name="evora-idle", daemon=True).start()
 
     try:
         import cheroot

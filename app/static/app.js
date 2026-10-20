@@ -505,6 +505,8 @@ function buildProviderPickers(settings) {
   if (ollamaModelBalanced) ollamaModelBalanced.value = settings.ollama_model_balanced || "";   // NEW (1.5.0)
   if (ollamaModelBest) ollamaModelBest.value = settings.ollama_model_best || "";               // NEW (1.5.0)
   if (ollamaIdleUnload) ollamaIdleUnload.value = settings.ollama_idle_unload || "1h";        // NEW (1.5.0)
+  if ($("evoraIdleListen")) $("evoraIdleListen").value = settings.evora_idle_listen || "5m";   // NEW (1.5.0)
+  if ($("evoraIdleSpeech")) $("evoraIdleSpeech").value = settings.evora_idle_speech || "1h";   // NEW (1.5.0)
   if (typeof setAiChipTier === "function") setAiChipTier(settings.ollama_tier || "fast");     // NEW (1.5.0)
   if (ollamaTranslationModel) {
     ollamaTranslationModel.value = settings.ollama_translation_model || "";
@@ -1939,6 +1941,8 @@ async function saveAllSettings({ close = false, quiet = false } = {}) {
     ollama_model_balanced: ollamaModelBalanced ? ollamaModelBalanced.value.trim() : "",   // NEW (1.5.0)
     ollama_model_best: ollamaModelBest ? ollamaModelBest.value.trim() : "",               // NEW (1.5.0)
     ollama_idle_unload: ollamaIdleUnload ? ollamaIdleUnload.value : "1h",                  // NEW (1.5.0)
+    evora_idle_listen: $("evoraIdleListen") ? $("evoraIdleListen").value : "5m",           // NEW (1.5.0)
+    evora_idle_speech: $("evoraIdleSpeech") ? $("evoraIdleSpeech").value : "1h",           // NEW (1.5.0)
     ollama_translation_model: ollamaTranslationModel
       ? ollamaTranslationModel.value.trim()
       : "",
@@ -8417,8 +8421,37 @@ function gpuIdleNote(models) {
   if (!timed.length) return "";
   const soonest = Math.min(...timed.map((m) => m.unload_in));
   return soonest <= 1
-    ? "Freeing the graphics card now."
-    : `Frees the graphics card in ${gpuIdleText(soonest)} if there are no more replies.`;
+    ? "Ollama is freeing the graphics card now."
+    : `Ollama frees the graphics card in ${gpuIdleText(soonest)} if there are no more replies.`;   // CHANGED (1.5.0): says whose
+}
+
+// NEW (1.5.0): Evora's idle countdowns, short for the legend and in full
+// for the note under the graph.
+function evoraIdleShort(idle) {
+  if (!idle) return "";
+  const parts = [];
+  if (idle.listen && idle.listen.loaded) parts.push("listening");
+  if (idle.speech && idle.speech.loaded) parts.push("speech");
+  if (!parts.length) return "freed while idle";
+  return parts.join(" + ");
+}
+function evoraIdleNote(idle) {
+  if (!idle) return "";
+  const bits = [];
+  const l = idle.listen || {};
+  const sp = idle.speech || {};
+  if (l.loaded && !idle.listening && l.unload_in != null) {
+    bits.push(l.unload_in <= 1 ? "freeing the listening models now" : `frees the listening models in ${gpuIdleText(l.unload_in)}`);
+  }
+  if (sp.loaded && sp.unload_in != null) {
+    bits.push(sp.unload_in <= 1 ? "freeing speech-to-text now" : `frees speech-to-text in ${gpuIdleText(sp.unload_in)} if nothing's said`);
+  }
+  if (!bits.length) {
+    if (!l.loaded && !sp.loaded) return "Evora has freed the graphics card; it loads again on the next clip.";
+    if (idle.listening && l.loaded) return "Evora keeps its listening models while listening is on.";
+    return "";
+  }
+  return "Evora " + bits.join(", and ") + ".";
 }
 
 function renderGpu(data) {
@@ -8446,6 +8479,7 @@ function renderGpu(data) {
       let label = s.name;
       let note = "";
       if (s.key === "ollama") note = ollamaModelNote(models);
+      if (s.key === "evora") note = evoraIdleShort(data.evora_idle);   // NEW (1.5.0)
       if (s.key === "other" && parts.estimated) { value = (parts.other_mb || 0) + (parts.evora_mb || 0); label = "Other"; note = "includes Evora"; }
       if (s.key === "other" && !parts.estimated) note = "desktop, games, driver";
       legend.append(gpuLegendRow(s.key, label, gpuGb(value), note));
@@ -8462,6 +8496,8 @@ function renderGpu(data) {
     if (data.uses_ollama && data.ollama_problem) notes.push(data.ollama_problem);
     const idle = gpuIdleNote(models);   // NEW (1.5.0): the idle countdown
     if (idle) notes.push(idle);
+    const evoraIdle = evoraIdleNote(data.evora_idle);   // NEW (1.5.0): and Evora's
+    if (evoraIdle) notes.push(evoraIdle);
   } else {
     // No card report: show what Ollama says about its own models.
     plot.classList.add("is-hidden");

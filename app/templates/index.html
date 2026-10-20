@@ -1221,6 +1221,35 @@
                       <button id="applyWhisperModelBtn" class="btn-ghost btn-sm" type="button">Apply</button>
                     </span>
                   </div>
+                  <!-- NEW (1.5.0): Evora frees the graphics card when idle. -->
+                  <div class="srow">
+                    <label class="srow-main srow-main--flex" for="evoraIdleListen">
+                      <span class="srow-label">Free the listening models</span>
+                      <span class="srow-sub">After listening stops. They take the most memory; starting listening again reloads them in a few seconds.</span>
+                    </label>
+                    <span class="srow-control">
+                      <select id="evoraIdleListen" aria-label="Free the listening models after">
+                        <option value="5m" selected>After 5 minutes</option>
+                        <option value="15m">After 15 minutes</option>
+                        <option value="1h">After 1 hour</option>
+                        <option value="never">Never</option>
+                      </select>
+                    </span>
+                  </div>
+                  <div class="srow">
+                    <label class="srow-main srow-main--flex" for="evoraIdleSpeech">
+                      <span class="srow-label">Free speech-to-text</span>
+                      <span class="srow-sub">After no dictation or listening for this long. The next clip waits a few seconds while it loads.</span>
+                    </label>
+                    <span class="srow-control">
+                      <select id="evoraIdleSpeech" aria-label="Free speech-to-text after">
+                        <option value="15m">After 15 minutes</option>
+                        <option value="1h" selected>After 1 hour</option>
+                        <option value="4h">After 4 hours</option>
+                        <option value="never">Never</option>
+                      </select>
+                    </span>
+                  </div>
                 </div>
 
                 <h3 class="settings-section-title">Ollama <span class="settings-inline-value" id="settingsOllamaValue">Not set</span></h3>
