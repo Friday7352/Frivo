@@ -151,7 +151,7 @@ def _safe_members(archive, top):
 
 def _new_staging(parent, prefix):
     """
-    NEW (1.6.0): an empty folder to unpack into, inside `parent`.
+    NEW (1.6.1): an empty folder to unpack into, inside `parent`.
 
     Not tempfile.mkdtemp: on Windows, Python 3.12.4 and later create that
     folder readable by only the account that made it, and files moved out
@@ -187,7 +187,7 @@ def _move_into(source_dir, dest_dir):
 def _unpack(voice, archive_path, root, log):
     top = voice["archive"][: -len(".tar.bz2")]
     paths = voice_paths(voice, root)
-    staging = _new_staging(root, ".unpack-")   # CHANGED (1.6.0): not mkdtemp
+    staging = _new_staging(root, ".unpack-")   # CHANGED (1.6.1): not mkdtemp
     try:
         need_espeak = not espeak_ready(root)
         with tarfile.open(archive_path, "r:bz2") as archive:

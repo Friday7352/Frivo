@@ -633,7 +633,7 @@ function Sync-VenvDependencies {
 
 function Reset-FrivoVoicePermissions {
     <#
-        NEW (1.6.0): makes the voices folder take its permissions from the
+        NEW (1.6.1): makes the voices folder take its permissions from the
         Frivo folder again. Earlier setups unpacked the voices in a folder
         that newer Python makes readable by only the account running setup
         (an administrator), so Frivo, running as you, couldn't load them:

@@ -308,7 +308,7 @@ class BuiltinAI:
         archive = os.path.join(self.root, asset)
         self._fetch(GH_DOWNLOAD.format(repo=ENGINE_REPO, tag=ENGINE_TAG, asset=asset), archive,
                     sha[len("sha256:"):], int(info.get("size") or 0) or None)
-        staging = _new_staging(self.root, ".engine-")   # CHANGED (1.6.0): not mkdtemp
+        staging = _new_staging(self.root, ".engine-")   # CHANGED (1.6.1): not mkdtemp
         try:
             _safe_extract(archive, staging)
             found = None
@@ -487,7 +487,7 @@ class BuiltinAI:
 
 def _new_staging(parent, prefix):
     """
-    NEW (1.6.0): an empty folder to unpack into, inside `parent`.
+    NEW (1.6.1): an empty folder to unpack into, inside `parent`.
 
     Not tempfile.mkdtemp: on Windows, Python 3.12.4 and later create that
     folder readable by only the account that made it, and files moved out

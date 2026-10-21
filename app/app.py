@@ -2860,7 +2860,7 @@ def piper_problem(voice_id, language):
 
 def _new_staging(parent, prefix):
     """
-    NEW (1.6.0): an empty folder to unpack into, inside `parent`.
+    NEW (1.6.1): an empty folder to unpack into, inside `parent`.
 
     Not tempfile.mkdtemp: on Windows, Python 3.12.4 and later create that
     folder readable by only the account that made it, and files moved out
@@ -2899,7 +2899,7 @@ def piper_engine(voice):
             vits=sherpa_onnx.OfflineTtsVitsModelConfig(model=paths["model"], tokens=paths["tokens"],
                                                        data_dir=paths["espeak"]))))
     except Exception as e:
-        # NEW (1.6.0): "system error number 13" is Windows refusing to let
+        # NEW (1.6.1): "system error number 13" is Windows refusing to let
         # Frivo read the voice's files (see _new_staging). Say how to fix it.
         if re.search(r"error number 13|permission denied|access is denied", str(e), re.I):
             folder = os.path.dirname(os.path.dirname(paths["model"]))
@@ -3162,7 +3162,7 @@ def add_custom_voice(paths, name=""):
         raise ValueError(piper_package_problem() or "Frivo's voices aren't set up. Run Frivo's setup again (Repair).")
     if not VOICE_PACK.espeak_ready(PIPER_DIR):
         raise ValueError("Voices you add use the pronunciation data that comes with Frivo's voices. Run Frivo's setup again (Repair).")
-    staging = _new_staging(CUSTOM_VOICES_DIR, ".adding-")   # CHANGED (1.6.0): not mkdtemp
+    staging = _new_staging(CUSTOM_VOICES_DIR, ".adding-")   # CHANGED (1.6.1): not mkdtemp
     try:
         files = _unpack_voice_upload(paths, staging)
         models = [(p, b) for p, b in files if b.lower().endswith(".onnx")]
@@ -3255,7 +3255,7 @@ def custom_voice_add():
     if not uploads:
         return jsonify({"error": "Choose the voice's files to add."}), 400
     os.makedirs(CUSTOM_VOICES_DIR, exist_ok=True)
-    holding = _new_staging(CUSTOM_VOICES_DIR, ".upload-")   # CHANGED (1.6.0)
+    holding = _new_staging(CUSTOM_VOICES_DIR, ".upload-")   # CHANGED (1.6.1)
     try:
         saved, total = [], 0
         for upload in uploads[:10]:
@@ -3539,7 +3539,7 @@ def _voice_lib_job(key, **changes):
 def _voice_lib_download(key, entry):
     import hashlib
     model, config, _, files = _voice_lib_files(entry)
-    staging = _new_staging(CUSTOM_VOICES_DIR, ".library-")   # CHANGED (1.6.0)
+    staging = _new_staging(CUSTOM_VOICES_DIR, ".library-")   # CHANGED (1.6.1)
     try:
         paths = []
         for rel in (config, model):
