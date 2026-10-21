@@ -2768,6 +2768,36 @@ html[data-theme="light"] .rail-theme .rail-sun { display: block; }
 .settings-section-sub { margin: 0 0 10px; font-size: var(--text-subhead); color: var(--ink-dim); }
 .settings-section-sub + .settings-card { margin-top: 4px; }
 
+/* NEW (1.5.0): the built-in AI */
+.bai-models { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px; margin-top: 8px; }
+.bai-model {
+  position: relative; display: flex; flex-direction: column; gap: 3px;
+  padding: 10px 12px; border-radius: 12px; border: 1px solid var(--rule);
+  background: var(--fill); cursor: pointer; text-align: left;
+  transition: border-color var(--dur) var(--ease), background var(--dur) var(--ease);
+}
+.bai-model input { position: absolute; opacity: 0; pointer-events: none; }
+.bai-model:hover { border-color: var(--accent-line); }
+.bai-model.is-checked { border-color: var(--accent); background: var(--accent-soft); }
+.bai-model:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+.bai-model-top { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.bai-model-name { font-weight: 600; color: var(--ink); }
+.bai-model-sub { font-size: var(--text-caption); color: var(--ink-dim); }
+.bai-model-note { font-size: var(--text-caption); color: var(--ink-faint); }
+.bai-model .om-badge { margin-left: auto; }
+.bai-model-remove { align-self: flex-start; margin-top: 2px; padding: 0; border: 0; background: none; color: var(--ink-faint);
+  font: inherit; font-size: var(--text-caption); cursor: pointer; text-decoration: underline; }
+.bai-model-remove:hover { color: var(--alert); }
+.bai-action { display: flex; flex-direction: column; gap: 8px; padding: 12px 0; border-top: 1px solid var(--rule-soft); }
+.bai-buttons { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.bai-status { margin: 0; font-size: var(--text-footnote); color: var(--ink-dim); line-height: 1.45; }
+.bai-status:empty { display: none; }
+.bai-status.is-error { color: var(--alert); }
+.bai-status.is-ok { color: var(--signal); }
+.bai-progress-line { display: flex; justify-content: space-between; gap: 10px; font-size: var(--text-caption); color: var(--ink-dim);
+  font-variant-numeric: tabular-nums; }
+.bai-progress.is-hidden, .bai-remove-row.is-hidden { display: none; }
+
 /* NEW (1.5.0): the free voice library */
 .vlib-overlay { z-index: 85; }
 .vlib-dialog { width: min(760px, 100%); }

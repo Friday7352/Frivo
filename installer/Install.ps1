@@ -401,6 +401,9 @@ function Copy-AppFiles {
     Copy-Item (Join-Path $SourceApp 'windows_speech.ps1') -Destination $Target -Force
     # NEW (1.5.0): gets Frivo's own voices (see Sync-FrivoVoices).
     Copy-Item (Join-Path $SourceApp 'voice_pack.py')      -Destination $Target -Force
+    # NEW (1.5.0): Clean up without AI, and the built-in AI.
+    Copy-Item (Join-Path $SourceApp 'cleanup_rules.py')   -Destination $Target -Force
+    Copy-Item (Join-Path $SourceApp 'builtin_ai.py')      -Destination $Target -Force
     # Installed alongside the app so a running Frivo can say which version
     # it is — /diagnose reads it. Written rather than copied, because the
     # payload keeps VERSION one level up from the app folder and this is

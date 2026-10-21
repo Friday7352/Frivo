@@ -13,6 +13,9 @@ app/audio_cache/
 app/saved/
 app/anchors/
 app/voice_library/
+# NEW (1.5.0): the built-in AI's engine and models (gigabytes)
+app/builtin_ai/
+*.gguf
 # Backups made from Settings > Updates hold your settings and replies.
 Frivo backup*.zip
 

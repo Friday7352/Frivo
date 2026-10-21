@@ -1263,6 +1263,52 @@
                   </div>
                 </div>
 
+                <!-- NEW (1.5.0): the built-in AI: one click, no Ollama, no key. -->
+                <h3 class="settings-section-title">Built-in AI <span class="settings-inline-value" id="builtinValue"></span></h3>
+                <p class="settings-section-sub">A small AI that runs inside Frivo, on this PC's processor. No Ollama, no account, no key: download it and it works. Replies are simpler than OpenAI's or a big Ollama model's. Without any AI, Clean up in English still fixes spelling and punctuation by itself.</p>
+                <div class="settings-card bai" id="builtinCard">
+                  <div class="srow srow--stacked">
+                    <span class="srow-main srow-main--flex">
+                      <span class="srow-label">Model</span>
+                      <span class="srow-sub" id="builtinModelNote"></span>
+                    </span>
+                    <div class="bai-models" id="builtinModels" role="radiogroup" aria-label="Built-in AI model"></div>
+                  </div>
+                  <div class="bai-action" id="builtinAction">
+                    <div class="bai-progress is-hidden" id="builtinProgress">
+                      <div class="bai-progress-line"><span id="builtinProgressText">Starting…</span><span id="builtinProgressPct"></span></div>
+                      <div class="om-progress"><span id="builtinProgressBar" style="width:0%"></span></div>
+                    </div>
+                    <p class="bai-status" id="builtinStatus" aria-live="polite"></p>
+                    <div class="bai-buttons">
+                      <button type="button" class="btn" id="builtinGetBtn">Download and use</button>
+                      <button type="button" class="btn-ghost btn-sm is-hidden" id="builtinCancelBtn">Cancel</button>
+                      <button type="button" class="btn-ghost btn-sm is-hidden" id="builtinTestBtn">Test</button>
+                    </div>
+                  </div>
+                  <div class="srow">
+                    <label class="srow-main srow-main--flex" for="builtinIdle">
+                      <span class="srow-label">Free its memory when idle</span>
+                      <span class="srow-sub">It's started when a reply needs it, which takes a few seconds, and stopped after this long with no replies.</span>
+                    </label>
+                    <span class="srow-control">
+                      <select id="builtinIdle" aria-label="Free the built-in AI's memory after">
+                        <option value="15m">After 15 minutes</option>
+                        <option value="1h">After 1 hour</option>
+                        <option value="4h">After 4 hours</option>
+                        <option value="never">Never</option>
+                      </select>
+                    </span>
+                  </div>
+                  <div class="srow bai-remove-row is-hidden" id="builtinRemoveRow">
+                    <span class="srow-main srow-main--flex">
+                      <span class="srow-label">Remove the built-in AI</span>
+                      <span class="srow-sub" id="builtinFolder"></span>
+                    </span>
+                    <button type="button" class="btn-ghost btn-sm" id="builtinRemoveBtn">Remove</button>
+                  </div>
+                </div>
+
                 <!-- CHANGED (2.0): Evora and Ollama are set up right here,
                      not on pages of their own. -->
                 <h3 class="settings-section-title">Evora <span class="settings-inline-value" id="settingsWhisperValue">Not set</span></h3>
