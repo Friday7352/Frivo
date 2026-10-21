@@ -4660,3 +4660,52 @@ html.motion-ready .stage { transition: transform var(--dur-smooth) var(--spring-
   .rich-drop-glass { transition: none; }
   .rich-chip.is-landed, .rich-chip.is-ghost { animation: none; }
 }
+
+
+/* NEW (1.5.0): how to get an API key, step by step. */
+.key-guide { padding: 14px 18px 16px; }
+.key-steps {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: keystep;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.key-steps li {
+  position: relative;
+  padding-left: 36px;
+  counter-increment: keystep;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.key-steps li::before {
+  content: counter(keystep);
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-line);
+  color: var(--accent);
+  font-size: var(--text-caption);
+  font-weight: 600;
+  line-height: 22px;
+  text-align: center;
+}
+.key-step-title { font-size: var(--text-subhead); font-weight: 600; color: var(--ink); }
+.key-step-text { font-size: var(--text-footnote); line-height: 1.5; color: var(--ink-dim); }
+.key-step-text a { color: var(--accent); }
+.key-step-text code {
+  padding: 0 5px;
+  border-radius: 5px;
+  background: var(--fill);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink);
+}
+.key-guide-note { margin-top: 14px; }

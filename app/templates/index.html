@@ -1471,12 +1471,49 @@
             <div class="settings-card">
               <div class="field">
                 <label for="elevenKey">Key</label>
-                <input type="password" id="elevenKey" placeholder="Paste to change">
+                <!-- CHANGED (1.5.0): with a link to where the key is made. -->
+                <div class="row">
+                  <input type="password" id="elevenKey" placeholder="Paste your key here (sk_…)" autocomplete="off" spellcheck="false">
+                  <a class="btn btn-sm" href="https://elevenlabs.io/app/settings/api-keys"
+                     target="_blank" rel="noopener noreferrer">Get a key ↗</a>
+                </div>
                 <p class="field-note">
-                  Only needed for ElevenLabs voices. The voice itself is chosen from the
-                  chip above the message box, per profile.
+                  Only needed for ElevenLabs voices. Stored on this server in config.json and
+                  only ever sent to ElevenLabs. Paste a new one to replace it. The voice itself is
+                  chosen from the chip above the message box, per profile.
                 </p>
               </div>
+            </div>
+
+            <!-- NEW (1.5.0): how to get one, step by step. -->
+            <h3 class="settings-section-title">How to get your key</h3>
+            <div class="settings-card key-guide">
+              <ol class="key-steps">
+                <li>
+                  <span class="key-step-title">Sign in to ElevenLabs</span>
+                  <span class="key-step-text">At <a href="https://elevenlabs.io/app/sign-in" target="_blank" rel="noopener noreferrer">elevenlabs.io</a>. A free account works; paid plans get more credits and the better voices.</span>
+                </li>
+                <li>
+                  <span class="key-step-title">Open API keys</span>
+                  <span class="key-step-text">Go straight to <a href="https://elevenlabs.io/app/settings/api-keys" target="_blank" rel="noopener noreferrer">Settings › API keys</a>. If ElevenLabs moves it, look for <em>API keys</em> under your account or developer settings.</span>
+                </li>
+                <li>
+                  <span class="key-step-title">Create a key</span>
+                  <span class="key-step-text">Click <em>Create API key</em> and name it something like <em>Frivo</em>. Leave its expiry on <em>Never</em>, or Frivo stops speaking when it runs out.</span>
+                </li>
+                <li>
+                  <span class="key-step-title">If you restrict what it can do</span>
+                  <span class="key-step-text">Frivo needs <em>Text to Speech</em>, <em>Voices</em> (read, and write if you want to remove voices from your library here) and <em>User</em> (read, for the credits left). You can also set a credit limit for the key.</span>
+                </li>
+                <li>
+                  <span class="key-step-title">Copy it, and paste it above</span>
+                  <span class="key-step-text">ElevenLabs shows the key once only, so copy it before closing the window. It starts with <code>sk_</code>. Paste it into the box above and press <em>Save key</em> (top of Settings).</span>
+                </li>
+              </ol>
+              <p class="field-note key-guide-note">
+                Lost it, or think someone else has it? Delete it on the same page and make a new one.
+                Once the key works, Frivo lists your ElevenLabs voices and shows your credits left.
+              </p>
             </div>
           </div>
 
