@@ -281,7 +281,8 @@ function Enable-FrivoFirewallRule {
         $netshArgs = ConvertTo-ArgumentString @(
             'advfirewall', 'firewall', 'add', 'rule', 'name=Frivo',
             'dir=in', 'action=allow', ('program=' + $PythonW),
-            'profile=private', 'remoteip=localsubnet', 'protocol=TCP', 'localport=5000'
+            # CHANGED (1.5.0): other VLANs on your network too (see Install.ps1).
+            'profile=private', 'remoteip=localsubnet,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16', 'protocol=TCP', 'localport=5000'
         )
         Start-Process -FilePath 'netsh.exe' -ArgumentList $netshArgs -Verb RunAs -Wait -WindowStyle Hidden | Out-Null
         return (Test-FrivoFirewallRule)

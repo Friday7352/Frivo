@@ -236,6 +236,13 @@ client.post("/api/settings", json={"expressive_every_line": False})
 check("the setting is kept", client.get("/api/settings").get_json().get("expressive_every_line") is False)
 client.post("/api/settings", json={"expressive_every_line": True})
 
+print("--- tags that ask for nothing ---")
+got = R("[neutral] I went to the store today.")
+check("[neutral] is dropped", got == "I went to the store today.", got)
+check("... and [normal]", R("[normal] Fine.") == "Fine.")
+check("... unless you typed it", R("[neutral] Fine.", protected=["neutral"]) == "[neutral] Fine.")
+check("the AI is told not to", "Never use [neutral]" in mod.build_tag_suggestion_prompt("hi there", "natural"))
+
 print()
 if failures:
     print(f"{len(failures)} failed: {failures}")

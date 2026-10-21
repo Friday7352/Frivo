@@ -10535,6 +10535,17 @@ function renderTagIdeas({ now = false } = {}) {
   const marks = $("tagMarks");
   const input = $("messageInput");
   if (!float || !pills || !marks || !input) return;
+  // CHANGED (1.5.0): with the rich box, the ideas are ghost tags in the
+  // text itself (richRenderGhosts), not pills over the words.
+  if (typeof richActive === "function" && richActive()) {
+    tagIdeasState.ideas = tagIdeasState.ideas.filter((idea) => tagIdeaPlace(idea));
+    float.classList.add("is-hidden");
+    marks.classList.add("is-hidden");
+    const composer = input.closest(".composer");
+    if (composer) composer.classList.remove("has-tag-ideas");
+    richRenderGhosts();
+    return;
+  }
   const st = tagIdeasState;
   st.ideas = st.ideas.filter((idea) => tagIdeaPlace(idea));
   const composer = input.closest(".composer");
@@ -11390,7 +11401,9 @@ var TAG_CHECK_KEY = "frivo_tag_check";
   let narrow = 0;
   const tall = () => {
     if (!composer) return;
-    if (!composer.classList.contains("is-tall")) narrow = input.clientWidth || narrow;
+    // CHANGED (1.5.0): the rich box is the one you see.
+    const shown = composer.classList.contains("has-rich") && $("messageRich") ? $("messageRich") : input;
+    if (!composer.classList.contains("is-tall")) narrow = shown.clientWidth || narrow;
     let want = false;
     if (input.value.includes("\n")) want = true;
     else if (input.value && narrow) {
@@ -11437,6 +11450,17 @@ function tagCheckOn() {
 
 // Where the composer's own popups go: just above a point in the text.
 function composerPoint(input, offset) {
+  // CHANGED (1.5.0): the rich box says where its text is drawn.
+  if (typeof richActive === "function" && richActive()) {
+    const composer = input.closest(".composer");
+    const p = richPointAt(offset);
+    const r = document.createRange();
+    let rect = null;
+    try { r.setStart(p.node, p.offset); r.collapse(true); rect = r.getClientRects()[0] || null; } catch (e) { rect = null; }
+    if (!rect) rect = rich.el.getBoundingClientRect();
+    const c = composer.getBoundingClientRect();
+    return { x: rect.left - c.left, bottom: c.bottom - rect.top + 6, visible: true };
+  }
   const box = textBoxIn(input, offset, Math.min(offset + 1, input.value.length) || offset);
   const composer = input.closest(".composer");
   const top = input.offsetTop + input.clientTop + box.y;
@@ -11485,7 +11509,8 @@ function renderBracket() {
   const input = $("messageInput");
   const pop = $("tagBracket");
   if (!input || !pop) return;
-  const query = bracketOn() && elevenVoiceNow() && document.activeElement === input ? bracketQuery(input) : null;
+  const focused = document.activeElement === input || (typeof rich === "object" && rich.el && document.activeElement === rich.el);   // CHANGED (1.5.0)
+  const query = bracketOn() && elevenVoiceNow() && focused ? bracketQuery(input) : null;
   if (!query || query.start === bracketState.dismissed) { closeBracket(); return; }
   const items = bracketChoices(query.q);
   if (!items.length) { closeBracket(); return; }
@@ -11571,7 +11596,9 @@ function putBracketTag(tag) {
     renderBracket();
   });
   input.addEventListener("click", renderBracket);
-  input.addEventListener("blur", () => setTimeout(() => { if (document.activeElement !== input) closeBracket(); }, 120));
+  input.addEventListener("blur", () => setTimeout(() => {
+    if (document.activeElement !== input && !(rich.el && document.activeElement === rich.el)) closeBracket();   // CHANGED (1.5.0)
+  }, 120));
   // Before the box's own Enter (send), so Enter picks a tag while the list is open.
   composer.addEventListener("keydown", (e) => {
     if (!bracketState.open || e.target !== input) return;
@@ -11814,8 +11841,11 @@ function finishTagCheck(withTags) {
   if (!input || !composer) return;
   // On the page, not just the box: clicking a tag in the card moves the focus.
   document.addEventListener("keydown", (e) => {
+    // CHANGED (1.5.0): keys in the rich box come through the plain one.
+    if (typeof rich === "object" && rich.el && e.target === rich.el) return;
     const where = document.activeElement;
-    const ours = !where || where === document.body || where === input || (where.closest && where.closest("#tagReview"));
+    const ours = !where || where === document.body || where === input || (where.closest && where.closest("#tagReview"))
+      || (typeof rich === "object" && where === rich.el);
     if (tagCheck.open && !ours) return;
     if (!tagCheck.open && e.target !== input) return;
     if (!tagCheck.open) {
@@ -12344,4 +12374,812 @@ async function omCheck(name) {
   } else {
     ask();
   }
+})();
+
+
+// ---------------------------------------------------------------------------
+// NEW (1.5.0): the message box with real tag chips.
+//
+// What you type goes into a rich box (#messageRich) where every [tag] is a
+// chip: one Backspace removes it, the cursor can't land inside it, a click
+// swaps or removes it, and it can be dragged to another word (it lifts,
+// follows your finger smoothly, and a magnifier shows where it will land,
+// like moving the cursor on iOS).
+//
+// The plain box (#messageInput) is still the message as far as the rest of
+// Frivo is concerned: the rich box writes into it as you type, and anything
+// that sets it (dictation, Suggest, sending) is drawn into the rich box.
+// Keys the rest of Frivo listens for (Enter, Tab, Esc, the arrows) are
+// passed on to it.
+//
+// Also here:
+//   * Ghost tags: the AI's tag ideas appear faintly in the text, right where
+//     they'd go. Tab takes the next one, a click takes that one, Esc hides
+//     them. (They replace the pills over the words.)
+//   * Instant tags: with a Clean up or Word for word profile and an
+//     ElevenLabs voice, "lol", "haha", "ugh"... (your Tag words) and 😂 become
+//     their tag as soon as you finish the word. Backspace straight after
+//     puts the word back. "Turn lol into tags" in the ✦ menu turns it off.
+// ---------------------------------------------------------------------------
+var SHORTCUTS_KEY = "frivo_tag_shortcuts";
+var TAG_WORD_GUESS = {
+  lol: "laughs", haha: "laughs", lmao: "laughs hard", lmfao: "laughs hard", rofl: "laughs hard",
+  hehe: "giggles", teehee: "giggles", heh: "chuckles", lel: "chuckles", omg: "gasps",
+  ugh: "sighs", smh: "sighs", pfft: "scoffs",
+};
+var EMOJI_TAGS = [["😂🤣😆😹", "laughs"], ["😭", "sobs"], ["😮‍💨😔😩", "sighs"], ["😱😲", "gasps"], ["😏", "chuckles"]];
+var rich = { el: null, input: null, rendering: false, syncing: false, composing: false,
+             lastConv: null, keep: new Set(), drag: null, ghostKey: "", menu: null };
+
+function richActive() {
+  return Boolean(rich.el && rich.el.isConnected && !rich.el.hidden);
+}
+
+function shortcutsOn() {
+  try { return localStorage.getItem(SHORTCUTS_KEY) !== "off"; } catch (e) { return true; }
+}
+
+function richMakeChip(tag, ghost) {
+  const c = document.createElement("span");
+  c.className = "rich-chip" + (ghost ? " is-ghost" : "");
+  c.contentEditable = "false";
+  c.dataset.tag = String(tag).toLowerCase();
+  c.textContent = String(tag).toLowerCase();
+  if (ghost) c.title = `Tab or click to add [${tag}]`;
+  else c.title = "Drag to move · click to swap or remove";
+  return c;
+}
+
+// The rich box as segments of the message: text, chips, line breaks.
+// Ghosts take no room in the message.
+function richSegments() {
+  const segs = [];
+  let pos = 0;
+  const walk = (node) => {
+    node.childNodes.forEach((n) => {
+      if (n.nodeType === 3) {
+        segs.push({ n, kind: "text", start: pos, len: n.data.length });
+        pos += n.data.length;
+      } else if (n.nodeType === 1) {
+        if (n.classList.contains("rich-chip")) {
+          if (n.classList.contains("is-ghost")) segs.push({ n, kind: "ghost", start: pos, len: 0 });
+          else { const len = n.dataset.tag.length + 2; segs.push({ n, kind: "chip", start: pos, len }); pos += len; }
+        } else if (n.tagName === "BR") {
+          // Every new line here is typed as "\n"; a <br> is only the
+          // browser's placeholder at the end, so it takes no room.
+          segs.push({ n, kind: "br", start: pos, len: 0 });
+        } else {
+          // A block the browser made (Enter in some cases): a new line.
+          if (pos > 0 && (n.tagName === "DIV" || n.tagName === "P")) { segs.push({ n, kind: "nl", start: pos, len: 1 }); pos += 1; }
+          walk(n);
+        }
+      }
+    });
+  };
+  walk(rich.el);
+  segs.total = pos;
+  return segs;
+}
+
+function richSerialize() {
+  let s = "";
+  richSegments().forEach((seg) => {
+    if (seg.kind === "text") s += seg.n.data.replace(/ /g, " ");
+    else if (seg.kind === "chip") s += `[${seg.n.dataset.tag}]`;
+    else if (seg.kind === "nl") s += "\n";
+  });
+  return s;
+}
+
+function richOffsetOf(container, offset) {
+  const segs = richSegments();
+  if (container.nodeType === 3) {
+    const seg = segs.find((s) => s.n === container);
+    return seg ? seg.start + Math.min(offset, seg.len) : segs.total;
+  }
+  const child = container.childNodes[offset];
+  if (!child) {
+    // After the last child of `container`: the end of whatever it holds.
+    let end = null;
+    segs.forEach((s) => { if (container.contains(s.n)) end = s.start + s.len; });
+    return end === null ? (container === rich.el ? segs.total : 0) : end;
+  }
+  const seg = segs.find((s) => s.n === child || child.contains(s.n));
+  return seg ? seg.start : segs.total;
+}
+
+function richPointAt(offset) {
+  const segs = richSegments();
+  for (const s of segs) {
+    if (s.kind === "text" && offset >= s.start && offset <= s.start + s.len) return { node: s.n, offset: offset - s.start };
+    if ((s.kind === "chip" || s.kind === "ghost" || s.kind === "br") && offset <= s.start) {
+      const parent = s.n.parentNode;
+      return { node: parent, offset: Array.prototype.indexOf.call(parent.childNodes, s.n) };
+    }
+  }
+  return { node: rich.el, offset: rich.el.childNodes.length };
+}
+
+function richCaretOffset() {
+  const sel = window.getSelection();
+  if (!sel || !sel.rangeCount || !rich.el.contains(sel.anchorNode)) return null;
+  const a = richOffsetOf(sel.anchorNode, sel.anchorOffset);
+  const f = richOffsetOf(sel.focusNode, sel.focusOffset);
+  return { start: Math.min(a, f), end: Math.max(a, f) };
+}
+
+function richSetCaret(start, end = start) {
+  const sel = window.getSelection();
+  if (!sel) return;
+  const a = richPointAt(start);
+  const b = end === start ? a : richPointAt(end);
+  const range = document.createRange();
+  try {
+    range.setStart(a.node, a.offset);
+    range.setEnd(b.node, b.offset);
+    sel.removeAllRanges();
+    sel.addRange(range);
+  } catch (e) { /* the box changed under us */ }
+}
+
+// The rich box, drawn from the message. Keeps the cursor where it was.
+function richRender(value, caret) {
+  if (!rich.el) return;
+  rich.rendering = true;
+  const focused = document.activeElement === rich.el;
+  const keep = caret != null ? caret : (focused ? richCaretOffset() : null);
+  const frag = document.createDocumentFragment();
+  const re = /\[([A-Za-z][A-Za-z' \-]{0,38})\]/g;
+  let last = 0;
+  let m;
+  while ((m = re.exec(value))) {
+    if (m.index > last) frag.append(document.createTextNode(value.slice(last, m.index)));
+    frag.append(richMakeChip(m[1]));
+    last = m.index + m[0].length;
+  }
+  if (last < value.length) frag.append(document.createTextNode(value.slice(last)));
+  if (value.endsWith("\n")) {   // so a new last line shows
+    const pad = document.createElement("br");
+    pad.dataset.pad = "1";
+    frag.append(pad);
+  }
+  rich.el.replaceChildren(frag);
+  rich.ghostKey = "";
+  richRenderGhosts();
+  if (focused && keep) richSetCaret(typeof keep === "number" ? keep : keep.start, typeof keep === "number" ? keep : keep.end);
+  rich.el.classList.toggle("is-empty", !value);
+  rich.rendering = false;
+}
+
+// Writes the rich box's message into the plain box, and tells everyone.
+function richPush(inputType) {
+  const value = richSerialize();
+  const caret = richCaretOffset();
+  rich.syncing = true;
+  rich.nativeSet.call(rich.input, value);
+  if (caret) rich.nativeSelect.call(rich.input, caret.start, caret.end);
+  rich.syncing = false;
+  rich.el.classList.toggle("is-empty", !value);
+  rich.input.dispatchEvent(new Event("input", { bubbles: true }));
+  return { value, caret };
+}
+
+function richSyncSelection() {
+  if (!richActive() || document.activeElement !== rich.el || rich.rendering) return;
+  const caret = richCaretOffset();
+  if (caret) rich.nativeSelect.call(rich.input, caret.start, caret.end);
+}
+
+// ---- instant tags ----
+function wordTag(word) {
+  const raw = String(word || "");
+  for (const [chars, tag] of EMOJI_TAGS) {
+    if ([...chars].some((c) => raw.includes(c)) && !/[A-Za-z]/.test(raw)) return tag;
+  }
+  const w = raw.toLowerCase().replace(/^[^\w]+|[^\w]+$/g, "").replace(/\s+/g, " ");
+  if (!w) return null;
+  const list = Array.isArray(tagWordsState) ? tagWordsState : Object.keys(TAG_WORD_GUESS).map((x) => ({ word: x, tag: "" }));
+  for (const entry of list) {
+    const base = String(entry.word || "").toLowerCase();
+    if (!base) continue;
+    let hit = w === base;
+    if (!hit && /^([a-z]{2})\1+$/.test(base)) {            // haha, hehe: any number of repeats
+      const unit = base.slice(0, 2);
+      hit = new RegExp(`^a?(?:${unit}){2,}${unit[0]}?$`).test(w);
+    }
+    if (!hit && base === "lol") hit = /^lo+l(?:ol)*$/.test(w);
+    if (!hit && base === "omg") hit = /^omg+$/.test(w);
+    if (!hit && base === "ugh") hit = /^ug+h+$/.test(w);
+    if (hit) {
+      if (entry.tag) return entry.tag;
+      const guess = TAG_WORD_GUESS[base];
+      if (guess === "laughs" && /^[A-Z]{3,}$/.test(raw.replace(/[^A-Za-z]/g, ""))) return "laughs hard";
+      return guess || null;
+    }
+  }
+  return null;
+}
+
+function richShortcut(typed) {
+  if (!shortcutsOn() || !elevenVoiceNow() || activeVoiceStyle().style === "reply") return;
+  if (bracketState.open) return;
+  const value = rich.input.value;
+  const caret = richCaretOffset();
+  if (!caret || caret.start !== caret.end) return;
+  const before = value.slice(0, caret.start - typed.length);
+  // The last word, or the last two ("im dead").
+  let word = "";
+  let tag = null;
+  for (const re of [/(^|\s)([^\s\[\]]+ [^\s\[\]]+)$/, /(^|\s)([^\s\[\]]+)$/]) {
+    const m = before.match(re);
+    if (m && (tag = wordTag(m[2]))) { word = m[2]; break; }
+  }
+  if (!tag) return;
+  const start = before.length - word.length;
+  if (rich.keep.has(`${start}:${word}`)) return;
+  const next = value.slice(0, start) + `[${tag}]` + value.slice(before.length);
+  const shift = `[${tag}]`.length - word.length;
+  rich.syncing = true;
+  rich.nativeSet.call(rich.input, next);
+  rich.syncing = false;
+  richRender(next, caret.start + shift);
+  richPush();
+  rich.lastConv = { start, word, tag, caret: caret.start + shift, typed };
+  if (typeof noteTagOffers === "function") { /* your own: counts as added */ }
+}
+
+function richUndoShortcut() {
+  const c = rich.lastConv;
+  rich.lastConv = null;
+  if (!c) return false;
+  const value = rich.input.value;
+  const caret = richCaretOffset();
+  const chip = `[${c.tag}]`;
+  if (!caret || caret.start !== c.caret || value.slice(c.start, c.start + chip.length) !== chip) return false;
+  const next = value.slice(0, c.start) + c.word + value.slice(c.start + chip.length);
+  rich.keep.add(`${c.start}:${c.word}`);
+  rich.syncing = true;
+  rich.nativeSet.call(rich.input, next);
+  rich.syncing = false;
+  richRender(next, c.caret - chip.length + c.word.length);
+  richPush();
+  return true;
+}
+
+// ---- ghost tags (the AI's ideas, in place) ----
+function richRenderGhosts() {
+  if (!richActive() || rich.composing) return;
+  const st = typeof tagIdeasState === "object" ? tagIdeasState : null;
+  const ideas = st && !st.paused && tagIdeasOn() && !autoTagsOn() && elevenVoiceNow()
+    ? st.ideas.filter((i) => tagIdeaPlace(i)) : [];
+  const key = ideas.map((i) => `${i.key}`).join("|");
+  const present = rich.el.querySelectorAll(".rich-chip.is-ghost").length;
+  if (key === rich.ghostKey && present === ideas.length) return;
+  rich.ghostKey = key;
+  const caret = document.activeElement === rich.el ? richCaretOffset() : null;
+  const wasRendering = rich.rendering;
+  rich.rendering = true;
+  rich.el.querySelectorAll(".rich-chip.is-ghost").forEach((g) => g.remove());
+  rich.el.normalize();
+  ideas.slice().sort((a, b) => tagIdeaPlace(b).offset - tagIdeaPlace(a).offset).forEach((idea) => {
+    const place = tagIdeaPlace(idea);
+    const ghost = richMakeChip(idea.tag, true);
+    ghost._idea = idea;
+    ghost.addEventListener("mousedown", (e) => e.preventDefault());
+    ghost.addEventListener("click", (e) => { e.preventDefault(); applyTagIdeas([idea]); });
+    const point = richPointAt(place.offset);
+    if (point.node.nodeType === 3) {
+      const after = point.node.splitText(point.offset);
+      after.parentNode.insertBefore(ghost, after);
+      if (place.end) ghost.before(document.createTextNode(" "));
+    } else {
+      point.node.insertBefore(ghost, point.node.childNodes[point.offset] || null);
+    }
+  });
+  if (caret) richSetCaret(caret.start, caret.end);
+  rich.rendering = wasRendering;
+}
+
+function richTakeGhost() {
+  const ghosts = Array.from(rich.el.querySelectorAll(".rich-chip.is-ghost"));
+  if (!ghosts.length) return false;
+  const caret = richCaretOffset();
+  const segs = richSegments();
+  const at = (g) => (segs.find((s) => s.n === g) || { start: 0 }).start;
+  const after = caret ? ghosts.filter((g) => at(g) >= caret.start) : ghosts;
+  const pick = (after.length ? after : ghosts).sort((a, b) => at(a) - at(b))[0];
+  applyTagIdeas([pick._idea]);
+  return true;
+}
+
+// ---- a chip's menu: swap or remove ----
+function richCloseMenu() {
+  if (rich.menu) { rich.menu.remove(); rich.menu = null; }
+}
+
+function richOpenMenu(chip) {
+  richCloseMenu();
+  const composer = rich.el.closest(".composer");
+  const menu = document.createElement("div");
+  menu.className = "rich-chip-menu";
+  menu.setAttribute("role", "menu");
+  const label = document.createElement("span");
+  label.className = "rich-chip-menu-label";
+  label.textContent = "Swap for";
+  menu.append(label);
+  const replaceWith = (tag) => {
+    const segs = richSegments();
+    const seg = segs.find((s) => s.n === chip);
+    if (!seg) return;
+    const value = rich.input.value;
+    let next = value.slice(0, seg.start) + (tag ? `[${tag}]` : "") + value.slice(seg.start + seg.len);
+    if (!tag) next = next.replace(/ {2,}/g, " ").replace(/^ /, "");
+    rich.syncing = true;
+    rich.nativeSet.call(rich.input, next);
+    rich.syncing = false;
+    richRender(next, seg.start + (tag ? tag.length + 2 : 0));
+    richPush();
+    richCloseMenu();
+    rich.el.focus();
+  };
+  (typeof tagSwaps === "function" ? tagSwaps(chip.dataset.tag) : []).forEach((t) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.setAttribute("role", "menuitem");
+    b.textContent = t;
+    b.addEventListener("mousedown", (e) => e.preventDefault());
+    b.addEventListener("click", () => replaceWith(t));
+    menu.append(b);
+  });
+  const remove = document.createElement("button");
+  remove.type = "button";
+  remove.className = "is-remove";
+  remove.setAttribute("role", "menuitem");
+  remove.textContent = "Remove";
+  remove.addEventListener("mousedown", (e) => e.preventDefault());
+  remove.addEventListener("click", () => replaceWith(null));
+  menu.append(remove);
+  composer.append(menu);
+  const c = chip.getBoundingClientRect();
+  const box = composer.getBoundingClientRect();
+  const width = menu.offsetWidth || 180;
+  menu.style.left = `${Math.max(8, Math.min(c.left - box.left, box.width - width - 8))}px`;
+  menu.style.bottom = `${box.bottom - c.top + 6}px`;
+  rich.menu = menu;
+}
+
+// ---- dragging a chip: lift, follow, magnify, settle ----
+function richDropTargets(chip) {
+  // Every place a tag can go: before each word, and the end. Measured once,
+  // as nothing moves while you drag.
+  const out = [];
+  const segs = richSegments();
+  const chipSeg = segs.find((s) => s.n === chip);
+  const value = rich.input.value;
+  const re = /\S+/g;
+  const box = rich.el.getBoundingClientRect();
+  const rectAt = (offset) => {
+    const p = richPointAt(offset);
+    const r = document.createRange();
+    try { r.setStart(p.node, p.offset); r.collapse(true); } catch (e) { return null; }
+    let rect = r.getClientRects()[0];
+    if (!rect) {
+      const probe = document.createElement("span");
+      probe.textContent = "​";
+      r.insertNode(probe);
+      rect = probe.getBoundingClientRect();
+      probe.remove();
+      rich.el.normalize();
+    }
+    return rect;
+  };
+  let m;
+  const starts = [];
+  while ((m = re.exec(value))) {
+    const token = m[0];
+    if (/^\[[A-Za-z][A-Za-z' \-]{0,38}\]$/.test(token)) continue;
+    starts.push(m.index);
+  }
+  starts.push(value.length);
+  starts.forEach((offset) => {
+    if (chipSeg && (offset === chipSeg.start || offset === chipSeg.start + chipSeg.len + 1)) return;   // where it is now
+    const rect = rectAt(offset);
+    if (!rect || (!rect.width && !rect.height && !rect.top)) return;
+    out.push({ offset, x: rect.left, y: rect.top, h: rect.height || 20, inBox: rect.top >= box.top - 4 && rect.bottom <= box.bottom + 4 });
+  });
+  return out;
+}
+
+// CHANGED (1.5.0): while you drag, the text where the tag would land is
+// gently magnified: a soft-edged circle, no outline, that blends into the
+// words around it and glides smoothly from place to place.
+var DROP_SIZE = 58;
+var dropMapUrl = null;
+
+function dropRefractionMap() {
+  // A displacement map that pulls the middle of the drop outward (it
+  // magnifies there) and leaves the rim alone: what a lens does.
+  if (dropMapUrl) return dropMapUrl;
+  const n = DROP_SIZE * 2;
+  const canvas = document.createElement("canvas");
+  canvas.width = n;
+  canvas.height = n;
+  const ctx = canvas.getContext("2d");
+  const img = ctx.createImageData(n, n);
+  const c = (n - 1) / 2;
+  for (let y = 0; y < n; y++) {
+    for (let x = 0; x < n; x++) {
+      const nx = (x - c) / c;
+      const ny = (y - c) / c;
+      const r2 = nx * nx + ny * ny;
+      const f = r2 < 1 ? (1 - r2) * (1 - r2) : 0;   // strongest in the middle, nothing at the edge: no seam
+      const i = (y * n + x) * 4;
+      img.data[i] = Math.round(255 * (0.5 - 0.5 * nx * f));
+      img.data[i + 1] = Math.round(255 * (0.5 - 0.5 * ny * f));
+      img.data[i + 2] = 128;
+      img.data[i + 3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  dropMapUrl = canvas.toDataURL();
+  return dropMapUrl;
+}
+
+function ensureDropFilter() {
+  if (document.getElementById("frivoDropFilter")) return;
+  const ns = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(ns, "svg");
+  svg.setAttribute("width", "0");
+  svg.setAttribute("height", "0");
+  svg.setAttribute("aria-hidden", "true");
+  svg.style.position = "absolute";
+  const filter = document.createElementNS(ns, "filter");
+  filter.id = "frivoDropFilter";
+  filter.setAttribute("x", "0");
+  filter.setAttribute("y", "0");
+  filter.setAttribute("width", String(DROP_SIZE));
+  filter.setAttribute("height", String(DROP_SIZE));
+  filter.setAttribute("filterUnits", "userSpaceOnUse");
+  filter.setAttribute("color-interpolation-filters", "sRGB");
+  const image = document.createElementNS(ns, "feImage");
+  image.setAttribute("href", dropRefractionMap());
+  image.setAttribute("x", "0");
+  image.setAttribute("y", "0");
+  image.setAttribute("width", String(DROP_SIZE));
+  image.setAttribute("height", String(DROP_SIZE));
+  image.setAttribute("preserveAspectRatio", "none");
+  image.setAttribute("result", "map");
+  const displace = document.createElementNS(ns, "feDisplacementMap");
+  displace.setAttribute("in", "SourceGraphic");
+  displace.setAttribute("in2", "map");
+  displace.setAttribute("scale", String(Math.round(DROP_SIZE * 0.24)));   // about 1.3× in the middle
+  displace.setAttribute("xChannelSelector", "R");
+  displace.setAttribute("yChannelSelector", "G");
+  filter.append(image, displace);
+  svg.append(filter);
+  document.body.append(svg);
+}
+
+function richStartDrag(chip, e) {
+  richCloseMenu();
+  rich.el.querySelectorAll(".rich-chip.is-ghost").forEach((g) => g.remove());
+  const rect = chip.getBoundingClientRect();
+  const targets = richDropTargets(chip);
+  const floating = chip.cloneNode(true);
+  floating.className = "rich-chip is-floating";
+  floating.style.left = `${rect.left}px`;
+  floating.style.top = `${rect.top}px`;
+  document.body.append(floating);
+  chip.classList.add("is-lifted");
+  // The drop: a circle holding a copy of the text, enlarged about its
+  // middle and bent by the filter. A caret in the copy marks the spot.
+  const drop = document.createElement("div");
+  drop.className = "rich-drop";
+  const glass = document.createElement("div");
+  glass.className = "rich-drop-glass";
+  const lens = rich.el.cloneNode(true);
+  lens.removeAttribute("id");
+  lens.removeAttribute("contenteditable");
+  lens.className = "rich-lens";
+  lens.style.width = `${rich.el.clientWidth}px`;
+  const lensCaret = document.createElement("span");
+  lensCaret.className = "rich-lens-caret";
+  glass.append(lens, lensCaret);
+  drop.append(glass);
+  document.body.append(drop);
+  rich.el.classList.add("is-dragging");
+  const d = {
+    chip, floating, drop, glass, lens, lensCaret, targets,
+    grabX: e.clientX - rect.left, grabY: e.clientY - rect.top,
+    px: e.clientX, py: e.clientY, x: rect.left, y: rect.top, vx: 0,
+    target: null, raf: 0, fx: null, fy: null, dvx: 0, dvy: 0, h: 20, shown: false,
+  };
+  rich.drag = d;
+  const frame = () => {
+    if (rich.drag !== d) return;
+    // The chip follows with a little lag, like something with weight.
+    const tx = d.px - d.grabX;
+    const ty = d.py - d.grabY - 46;   // held above the pointer, so the drop shows
+    const nx = d.x + (tx - d.x) * 0.32;
+    const ny = d.y + (ty - d.y) * 0.32;
+    d.vx = d.vx * 0.7 + (nx - d.x) * 0.3;
+    d.x = nx;
+    d.y = ny;
+    const tilt = Math.max(-6, Math.min(6, d.vx * 0.6));
+    floating.style.transform = `translate3d(${d.x - rect.left}px, ${d.y - rect.top}px, 0) scale(1.1) rotate(${tilt}deg)`;
+    // The nearest place it could go.
+    let best = null;
+    let bestD = Infinity;
+    d.targets.forEach((t) => {
+      const dx = d.px - t.x;
+      const dy = (d.py - (t.y + t.h / 2)) * 2.2;   // lines matter more than columns
+      const dist = dx * dx + dy * dy;
+      if (dist < bestD) { bestD = dist; best = t; }
+    });
+    d.target = best;
+    if (best) {
+      // The drop glides there, and stretches the way it's moving.
+      const gx = best.x;
+      const gy = best.y + best.h / 2;
+      if (d.fx === null) { d.fx = gx; d.fy = gy; }
+      const ox = d.fx;
+      const oy = d.fy;
+      d.fx += (gx - d.fx) * 0.24;
+      d.fy += (gy - d.fy) * 0.24;
+      d.dvx = d.dvx * 0.6 + (d.fx - ox) * 0.4;
+      d.dvy = d.dvy * 0.6 + (d.fy - oy) * 0.4;
+      d.h += (best.h - d.h) * 0.3;
+      const half = DROP_SIZE / 2;
+      d.drop.style.transform = `translate3d(${(d.fx - half).toFixed(1)}px, ${(d.fy - half).toFixed(1)}px, 0)`;
+      // The copy of the text lines up with the real text under the drop,
+      // enlarged about the drop's middle.
+      const box = rich.el.getBoundingClientRect();
+      const lx = box.left - (d.fx - half);
+      const ly = box.top - (d.fy - half) - rich.el.scrollTop;
+      const ix = d.fx - box.left;
+      const iy = d.fy - box.top + rich.el.scrollTop;
+      lens.style.left = `${lx.toFixed(1)}px`;
+      lens.style.top = `${ly.toFixed(1)}px`;
+      lens.style.transformOrigin = `${ix.toFixed(1)}px ${iy.toFixed(1)}px`;
+      lensCaret.style.height = `${(d.h * 1.25).toFixed(1)}px`;
+      lensCaret.style.top = `${(half - d.h * 0.625).toFixed(1)}px`;
+      if (!d.shown) { d.shown = true; d.drop.classList.add("is-on"); }
+    }
+    d.raf = requestAnimationFrame(frame);
+  };
+  d.raf = requestAnimationFrame(frame);
+}
+
+function richEndDrag(cancel) {
+  const d = rich.drag;
+  if (!d) return;
+  rich.drag = null;
+  cancelAnimationFrame(d.raf);
+  rich.el.classList.remove("is-dragging");
+  // The drop shrinks away as the tag falls into place.
+  d.drop.classList.remove("is-on");
+  d.drop.classList.add("is-leaving");
+  setTimeout(() => d.drop.remove(), 240);
+  richFinishDrop(d, cancel);
+}
+
+function richFinishDrop(d, cancel) {
+  const settle = (el) => {
+    // The floating chip glides into its new place, then the real one shows.
+    const to = el ? el.getBoundingClientRect() : null;
+    const base = { left: parseFloat(d.floating.style.left), top: parseFloat(d.floating.style.top) };
+    d.floating.classList.add("is-settling");
+    if (to) d.floating.style.transform = `translate3d(${to.left - base.left}px, ${to.top - base.top}px, 0) scale(1)`;
+    if (el) el.classList.add("is-arriving");
+    setTimeout(() => {
+      d.floating.remove();
+      if (el) {
+        el.classList.remove("is-arriving", "is-lifted");
+        el.classList.add("is-landed");
+        setTimeout(() => el.classList.remove("is-landed"), 260);
+      }
+    }, 230);
+  };
+  const value = rich.input.value;
+  if (cancel || !d.target) {
+    richRender(value);
+    const back = richSegments().find((s) => s.kind === "chip" && s.n.dataset.tag === d.chip.dataset.tag);
+    settle(back ? back.n : null);
+    return;
+  }
+  // Read where the chip was before the box is redrawn.
+  const segs = richSegments();
+  const seg = segs.find((s) => s.n === d.chip);
+  if (!seg) { richRender(value); d.floating.remove(); return; }
+  const token = `[${d.chip.dataset.tag}]`;
+  // Out of its old place, with the space after it.
+  let from = seg.start;
+  let len = seg.len;
+  if (value[from + len] === " ") len += 1;
+  else if (from > 0 && value[from - 1] === " ") { from -= 1; len += 1; }
+  let to = d.target.offset;
+  const without = value.slice(0, from) + value.slice(from + len);
+  if (to > from) to -= len;
+  const atEnd = to >= without.length;
+  const insert = atEnd ? (without && !without.endsWith(" ") ? " " : "") + token : token + " ";
+  const next = without.slice(0, to) + insert + without.slice(to);
+  const chipAt = atEnd ? to + insert.length - token.length : to;
+  rich.syncing = true;
+  rich.nativeSet.call(rich.input, next);
+  rich.syncing = false;
+  richRender(next);
+  richPush();
+  const landed = richSegments().find((s) => s.kind === "chip" && s.start === chipAt);
+  if (landed) landed.n.classList.add("is-lifted");
+  settle(landed ? landed.n : null);
+}
+
+(function wireRichBox() {
+  const input = $("messageInput");
+  const box = $("messageRich");
+  if (!input || !box || input.tagName !== "TEXTAREA") return;
+  rich.el = box;
+  rich.input = input;
+  const proto = HTMLTextAreaElement.prototype;
+  const own = Object.getOwnPropertyDescriptor(input, "value");
+  const base = own || Object.getOwnPropertyDescriptor(proto, "value");
+  rich.nativeSet = (v) => base.set.call(input, v);
+  rich.nativeSet = function (v) { base.set.call(input, v); };
+  rich.nativeSelect = proto.setSelectionRange;
+  const composer = input.closest(".composer");
+  if (composer) composer.classList.add("has-rich");
+  box.dataset.placeholder = input.getAttribute("placeholder") || "";
+
+  // Anything that sets the plain box is drawn here.
+  Object.defineProperty(input, "value", {
+    configurable: true,
+    get() { return base.get.call(this); },
+    set(v) {
+      base.set.call(this, v);
+      if (!rich.syncing) richRender(String(v), document.activeElement === box ? String(v).length : null);
+    },
+  });
+  input.setSelectionRange = function (start, end, dir) {
+    rich.nativeSelect.call(this, start, end, dir);
+    if (document.activeElement === box) richSetCaret(start, end);
+  };
+  input.select = function () {   // "select all" means in the box you see
+    const n = rich.input.value.length;
+    rich.nativeSelect.call(this, 0, n);
+    if (document.activeElement !== box) box.focus({ preventScroll: true });
+    richSetCaret(0, n);
+  };
+  input.focus = function () {
+    box.focus({ preventScroll: true });
+    const s = rich.input.selectionStart;
+    richSetCaret(Number.isInteger(s) ? s : rich.input.value.length);
+  };
+  // A test or the browser setting the plain box directly.
+  input.addEventListener("input", () => { if (!rich.syncing && richSerialize() !== input.value) richRender(input.value); });
+  input.addEventListener("focus", () => input.focus());
+  // Text selected in the plain box (by a script) is selected here too.
+  const mirrorSelection = () => {
+    if (rich.syncing || rich.rendering) return;
+    const now = document.activeElement === box ? richCaretOffset() : null;
+    if (now && now.start === input.selectionStart && now.end === input.selectionEnd) return;   // already so
+    if (document.activeElement !== box) box.focus({ preventScroll: true });
+    richSetCaret(input.selectionStart, input.selectionEnd);
+  };
+  input.addEventListener("select", mirrorSelection);
+  input.addEventListener("selectionchange", mirrorSelection);
+
+  box.addEventListener("compositionstart", () => { rich.composing = true; });
+  box.addEventListener("compositionend", () => { rich.composing = false; richPush(); });
+  box.addEventListener("beforeinput", (e) => {
+    // Pasted or dropped text comes in plain.
+    if (e.inputType === "insertFromPaste" || e.inputType === "insertFromDrop") return;
+    if (e.inputType === "insertParagraph" || e.inputType === "insertLineBreak") {
+      e.preventDefault();
+      document.execCommand("insertText", false, "\n");
+    }
+  });
+  box.addEventListener("paste", (e) => {
+    e.preventDefault();
+    const text = (e.clipboardData && e.clipboardData.getData("text/plain")) || "";
+    document.execCommand("insertText", false, text);
+  });
+  box.addEventListener("drop", (e) => e.preventDefault());
+  box.addEventListener("input", (e) => {
+    if (rich.rendering || rich.composing) return;
+    const typed = e.data || "";
+    if (e.inputType !== "insertText" || !/^[\s.,!?;:]$/.test(typed)) rich.lastConv = null;
+    // The browser wrapped something (a pasted block, a new line): tidy it.
+    const messy = box.querySelector("div, p, span:not(.rich-chip), font, b, i");
+    const { value, caret } = richPush();
+    // A tag typed in full ("[laughs]"), or pasted: a chip.
+    const typedTag = Array.from(box.childNodes).some((n) => n.nodeType === 3 && /\[[A-Za-z][A-Za-z' \-]{0,38}\]/.test(n.data));
+    if (messy || typedTag) richRender(value, caret ? caret.start : value.length);
+    if (e.inputType === "insertText" && /^[\s.,!?;:]$/.test(typed)) richShortcut(typed);
+  });
+  // The keys the rest of Frivo listens for on the plain box.
+  box.addEventListener("keydown", (e) => {
+    if (rich.drag) {
+      if (e.key === "Escape") { e.preventDefault(); richEndDrag(true); }
+      return;
+    }
+    if (e.key === "Backspace" && rich.lastConv && !e.shiftKey) {
+      if (richUndoShortcut()) { e.preventDefault(); return; }
+    }
+    if (e.key !== "Backspace") rich.lastConv = e.key.length === 1 ? rich.lastConv : null;
+    if (e.key === "Escape" && rich.menu) { e.preventDefault(); richCloseMenu(); return; }
+    if (e.key === "Tab" && !e.shiftKey && !bracketState.open) {
+      if (richTakeGhost()) { e.preventDefault(); return; }
+    }
+    if (e.key === "Escape" && !bracketState.open && box.querySelector(".rich-chip.is-ghost")) {
+      e.preventDefault();
+      if (typeof tagIdeasState === "object") { tagIdeasState.paused = true; tagIdeasState.ideas = []; }
+      richRenderGhosts();
+      return;
+    }
+    if (!["Enter", "Tab", "Escape", "ArrowUp", "ArrowDown"].includes(e.key)) return;
+    richSyncSelection();
+    const copy = new KeyboardEvent("keydown", {
+      key: e.key, code: e.code, shiftKey: e.shiftKey, ctrlKey: e.ctrlKey, altKey: e.altKey, metaKey: e.metaKey,
+      isComposing: e.isComposing, bubbles: true, cancelable: true,
+    });
+    input.dispatchEvent(copy);
+    if (copy.defaultPrevented) e.preventDefault();
+    else if (e.key === "Enter" && !e.isComposing) {
+      e.preventDefault();
+      document.execCommand("insertText", false, "\n");
+    }
+  });
+  ["click", "keyup"].forEach((type) => box.addEventListener(type, () => {
+    richSyncSelection();
+    input.dispatchEvent(new Event(type, { bubbles: false }));
+  }));
+  box.addEventListener("blur", () => input.dispatchEvent(new Event("blur")));
+  document.addEventListener("selectionchange", richSyncSelection);
+  box.addEventListener("scroll", () => input.dispatchEvent(new Event("scroll")));
+
+  // Chips: click for the menu, drag to move.
+  box.addEventListener("pointerdown", (e) => {
+    const chip = e.target.closest && e.target.closest(".rich-chip:not(.is-ghost)");
+    if (!chip || e.button !== 0) return;
+    e.preventDefault();
+    const sx = e.clientX;
+    const sy = e.clientY;
+    let started = false;
+    const move = (ev) => {
+      if (!started && Math.hypot(ev.clientX - sx, ev.clientY - sy) > 4) {
+        started = true;
+        richStartDrag(chip, ev);
+      }
+      if (started && rich.drag) { rich.drag.px = ev.clientX; rich.drag.py = ev.clientY; }
+    };
+    const up = () => {
+      document.removeEventListener("pointermove", move);
+      document.removeEventListener("pointerup", up);
+      document.removeEventListener("pointercancel", cancel);
+      if (started) richEndDrag(false);
+      else richOpenMenu(chip);
+    };
+    const cancel = () => {
+      document.removeEventListener("pointermove", move);
+      document.removeEventListener("pointerup", up);
+      document.removeEventListener("pointercancel", cancel);
+      if (started) richEndDrag(true);
+    };
+    document.addEventListener("pointermove", move);
+    document.addEventListener("pointerup", up);
+    document.addEventListener("pointercancel", cancel);
+  });
+  document.addEventListener("pointerdown", (e) => {
+    if (rich.menu && !rich.menu.contains(e.target) && !(e.target.closest && e.target.closest(".rich-chip"))) richCloseMenu();
+  });
+
+  // The ✦ menu switch.
+  const toggle = $("tagShortcutsToggle");
+  if (toggle) {
+    toggle.checked = shortcutsOn();
+    toggle.addEventListener("change", () => {
+      try { localStorage.setItem(SHORTCUTS_KEY, toggle.checked ? "on" : "off"); } catch (e) { /* not kept */ }
+    });
+  }
+  richRender(input.value);
 })();

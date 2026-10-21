@@ -89,7 +89,7 @@ function check(name, cond, got) {
   await wait(300);
 
   console.log('--- typed while quiet ---');
-  await p.click('#messageInput');
+  await p.click('#messageRich');   // CHANGED (1.5.0): the box you type in
   await p.keyboard.type('hey you');
   await wait(200);
   await level(0.2); await wait(1500); await level(0);
@@ -104,7 +104,7 @@ function check(name, cond, got) {
   await level(0.2); await wait(1400);           // previews are showing now
   t = await box();
   check('(a preview is on screen)', said(t).length === 1, t);
-  await p.click('#messageInput');
+  await p.click('#messageRich');   // CHANGED (1.5.0): the box you type in
   await p.keyboard.press('End');
   await p.keyboard.type(' lol');
   await wait(900);                               // still talking: more previews would have come
@@ -118,7 +118,7 @@ function check(name, cond, got) {
 
   console.log('--- a space you typed ---');
   await p.evaluate(() => { messageInput.value = ''; messageInput.dispatchEvent(new Event('input')); });
-  await p.click('#messageInput');
+  await p.click('#messageRich');   // CHANGED (1.5.0): the box you type in
   await p.keyboard.type('ok ');
   await level(0.2); await wait(1200); await level(0); await wait(2000);
   t = await box();

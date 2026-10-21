@@ -510,6 +510,9 @@
             <div class="composer">
               <textarea id="messageInput" rows="1" placeholder="Say something…" autocomplete="off"
                         aria-label="Message"></textarea>
+              <!-- NEW (1.5.0): the box you type in: tags are chips you can drag. -->
+              <div id="messageRich" class="rich-input is-empty" contenteditable="true" role="textbox"
+                   aria-multiline="true" aria-label="Message" spellcheck="true"></div>
 
               <!-- NEW (1.5.0): type [ for a tag. A short list at the cursor. -->
               <div class="tag-bracket is-hidden" id="tagBracket" role="listbox" aria-label="Voice tags"></div>
@@ -601,6 +604,14 @@
                         <span class="voice-tag-option-hint">A tag list pops up at the cursor. Esc leaves a plain bracket.</span>
                       </span>
                       <span class="switch"><input type="checkbox" id="tagBracketToggle" checked><span class="switch-track" aria-hidden="true"></span></span>
+                    </label>
+                    <!-- NEW (1.5.0) -->
+                    <label class="voice-tag-option">
+                      <span class="voice-tag-option-text">
+                        <span class="voice-tag-option-label">Turn lol into tags</span>
+                        <span class="voice-tag-option-hint">Your Tag words (lol, haha, ugh…) and 😂 become their tag as you type. Backspace puts the word back.</span>
+                      </span>
+                      <span class="switch"><input type="checkbox" id="tagShortcutsToggle" checked><span class="switch-track" aria-hidden="true"></span></span>
                     </label>
                   </div>
                   <p class="voice-tag-note" id="voiceTagNote"></p>

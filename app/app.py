@@ -3980,6 +3980,12 @@ def tag_context(profile=None, session_id=None, profile_id=None, persona=True):
     return out
 
 
+# NEW (1.5.0): tags that ask for nothing ("[neutral]" was suggested a lot):
+# dropped unless you typed them.
+EMPTY_TAGS = {"neutral", "normal", "normally", "plain", "plainly", "default", "none", "no emotion",
+              "neutral tone", "neutrally", "flat", "regular", "matter-of-fact"}
+
+
 def refine_tags(text, protected=(), amount=DEFAULT_TAG_AMOUNT):
     """
     The rules for tags the AI added (see the block comment above). Tags in
@@ -4015,6 +4021,10 @@ def refine_tags(text, protected=(), amount=DEFAULT_TAG_AMOUNT):
         if it[0] != "tag" or it[1] in protected:
             continue
         tag = it[1]
+        # NEW (1.5.0): a tag that asks for nothing.
+        if tag in EMPTY_TAGS:
+            it[3] = False
+            continue
         # The user always removes it.
         if tag in never:
             it[3] = False
@@ -4467,6 +4477,7 @@ def build_tag_suggestion_prompt(text, delivery, context="", amount=DEFAULT_TAG_A
         "[softly], [whispers], [slowly], [laughs], [chuckles], [sighs], [gasps], [pause]." + gentle + "\n"
         "Never use accent tags.\n"
         "Never put the message's own words in brackets: a tag is a stage direction you add, not part of the message.\n"
+        "Never use [neutral] or any tag that means no feeling: leave the words plain instead.\n"
         f"Add {density}, where they clearly fit the feeling of the message, read in the light of the conversation. "
         "Keep any tags already there.\n"
         "Do not change, add, remove or reorder any word or punctuation.\n"

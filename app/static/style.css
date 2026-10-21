@@ -4441,3 +4441,222 @@ html.motion-ready .stage { transition: transform var(--dur-smooth) var(--spring-
   .om-row { flex-wrap: wrap; }
   .om-actions { width: 100%; justify-content: flex-end; }
 }
+
+
+/* =========================================================================
+   NEW (1.5.0): the rich message box: tag chips, ghosts, dragging
+   ========================================================================= */
+.composer.has-rich textarea#messageInput {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 1px;
+  height: 1px;
+  min-height: 0;
+  padding: 0;
+  opacity: 0;
+  pointer-events: none;
+  overflow: hidden;
+  field-sizing: fixed;
+}
+.rich-input { display: none; }
+.composer.has-rich .rich-input {
+  display: block;
+  flex: 1;
+  align-self: stretch;
+  min-width: 0;
+  min-height: 40px;
+  max-height: min(42vh, 288px);
+  overflow-y: auto;
+  padding: 8px 4px;
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: var(--text-body);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  outline: none;
+  cursor: text;
+  scrollbar-width: thin;
+}
+.composer.has-rich.is-tall .rich-input { flex: 1 0 100%; order: -1; }
+.rich-input.is-empty::before {
+  content: attr(data-placeholder);
+  color: var(--ink-faint);
+  pointer-events: none;
+}
+.composer.is-checking .rich-input { opacity: 0.55; }
+
+.rich-chip {
+  display: inline-block;
+  margin: 0 1px;
+  padding: 0 8px;
+  border: 1px solid var(--accent-line);
+  border-radius: 8px;
+  background: var(--accent-soft);
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-style: italic;
+  line-height: 1.55;
+  vertical-align: 1px;
+  white-space: nowrap;
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: grab;
+  touch-action: none;
+  transition: opacity 180ms var(--ease), transform 220ms var(--spring-snappy, var(--ease)),
+              background var(--dur) var(--ease), border-color var(--dur) var(--ease);
+}
+.rich-chip:hover { border-color: var(--accent); }
+.rich-chip.is-lifted { opacity: 0.22; transform: scale(0.92); }
+.rich-chip.is-arriving { opacity: 0; }
+.rich-chip.is-landed { animation: chip-land 260ms var(--spring-bouncy, var(--ease)); }
+@keyframes chip-land { 0% { transform: scale(1.12); } 60% { transform: scale(0.97); } 100% { transform: scale(1); } }
+
+/* The AI's ideas, faint, right where they'd go. */
+.rich-chip.is-ghost {
+  border-style: dashed;
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  background: transparent;
+  color: var(--ink-dim);
+  opacity: 0.7;
+  cursor: pointer;
+  animation: ghost-in 260ms var(--ease);
+}
+.rich-chip.is-ghost::before { content: "+ "; font-style: normal; color: var(--accent); }
+.rich-chip.is-ghost:hover { opacity: 1; background: var(--accent-soft); }
+@keyframes ghost-in { from { opacity: 0; transform: translateY(3px); } }
+
+/* Dragging: the chip lifts and follows; a caret marks where it will land,
+   gliding between places; the magnifier shows it close up. */
+.rich-input.is-dragging { cursor: grabbing; }
+.rich-chip.is-floating {
+  position: fixed;
+  z-index: 1000;
+  margin: 0;
+  pointer-events: none;
+  cursor: grabbing;
+  background: color-mix(in srgb, var(--accent) 22%, var(--surface-2));
+  border-color: var(--accent);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.35);
+  transform-origin: 50% 60%;
+  will-change: transform;
+  transition: none;
+}
+.rich-chip.is-floating.is-settling {
+  transition: transform 230ms cubic-bezier(0.2, 0.9, 0.25, 1.05), box-shadow 230ms var(--ease);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+}
+.rich-drop-caret {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 999;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent);
+  opacity: 0;
+  pointer-events: none;
+  will-change: transform;
+  transition: transform 140ms cubic-bezier(0.25, 0.9, 0.3, 1), height 140ms var(--ease), opacity 120ms var(--ease);
+}
+.rich-drop-caret.is-on { opacity: 1; }
+/* CHANGED (1.5.0): where the tag would land, the text is gently
+   magnified: a soft-edged circle (no outline) that blends into the words
+   around it and glides from place to place. */
+.rich-drop {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 999;
+  width: 58px;
+  height: 58px;
+  pointer-events: none;
+  opacity: 0;
+  will-change: transform, opacity;
+  -webkit-mask-image: radial-gradient(circle closest-side, #000 86%, transparent 100%);
+          mask-image: radial-gradient(circle closest-side, #000 86%, transparent 100%);
+  transition: opacity 180ms ease-out;
+}
+.rich-drop.is-on { opacity: 1; }
+.rich-drop.is-leaving { opacity: 0; transition: opacity 200ms ease-out; }
+.rich-drop-glass {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: var(--surface-2);
+  transform: scale(0.7);
+  transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.rich-drop.is-on .rich-drop-glass { transform: scale(1); }
+.rich-lens {
+  position: absolute;
+  box-sizing: border-box;
+  padding: 8px 4px;
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: var(--text-body);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  transform: scale(1.28);
+  pointer-events: none;
+}
+.rich-lens.is-empty::before { content: none; }
+.rich-lens-caret {
+  position: absolute;
+  left: 28px;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--accent);
+  transition: height 140ms ease-out, top 140ms ease-out;
+}
+
+/* A chip's menu. */
+.rich-chip-menu {
+  position: absolute;
+  z-index: 45;
+  display: flex;
+  flex-direction: column;
+  min-width: 170px;
+  padding: 4px;
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  background: var(--surface-3);
+  box-shadow: var(--shadow-md);
+  animation: picker-in 140ms var(--ease);
+}
+.rich-chip-menu-label {
+  padding: 4px 8px;
+  font-size: var(--text-caption2);
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+.rich-chip-menu button {
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.rich-chip-menu button:hover { background: var(--accent-soft); }
+.rich-chip-menu button.is-remove {
+  margin-top: 2px;
+  border-top: 1px solid var(--rule-soft);
+  border-radius: 0 0 6px 6px;
+  font-family: var(--font-body);
+  color: var(--ink-dim);
+}
+@media (prefers-reduced-motion: reduce) {
+  .rich-chip, .rich-drop-caret, .rich-chip.is-floating.is-settling { transition-duration: 0ms; }
+  .rich-drop-glass { transition: none; }
+  .rich-chip.is-landed, .rich-chip.is-ghost { animation: none; }
+}

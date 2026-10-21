@@ -82,7 +82,8 @@ Assert-True 'scoped to this install pythonw' (@($a | Where-Object { $_ -like 'pr
 # exists. Assert the path is fused onto the flag, not merely present.
 Assert-True 'program= is one fused argument, not split in two' (@($a | Where-Object { $_ -eq 'program=' }).Count -eq 0) 'bare program= means the concatenation was not parenthesised'
 Assert-True 'private profile only' ($a -contains 'profile=private')
-Assert-True 'local subnet only' ($a -contains 'remoteip=localsubnet')
+# CHANGED (1.5.0): this subnet and the private ranges (other VLANs), never the internet.
+Assert-True 'local subnet and private networks only' ($a -contains 'remoteip=localsubnet,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16')
 
 # Scoped to the dashboard's port and nothing else. Frivo speaks no OSC of
 # its own any more — FrivOSC owns that, from the VRChat PC, over outbound
@@ -122,7 +123,7 @@ $lfn = $last.Find({
 Assert-True 'Enable-FrivoFirewallRule exists' ($null -ne $lfn)
 $body = $lfn.Extent.Text
 Assert-True 'launcher rule is pinned to port 5000' ($body -match 'localport=5000')
-Assert-True 'launcher rule keeps localsubnet scoping' ($body -match 'remoteip=localsubnet')
+Assert-True 'launcher rule keeps private-network scoping' ($body -match [regex]::Escape('remoteip=localsubnet,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16'))
 Assert-True 'launcher rule keeps private profile' ($body -match 'profile=private')
 Assert-True 'does not assign to the automatic $args variable' ($body -notmatch '\$args\s*=')
 Assert-True 'still quotes via ConvertTo-ArgumentString' ($body -match 'ConvertTo-ArgumentString')

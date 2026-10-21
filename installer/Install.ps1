@@ -700,7 +700,10 @@ function Set-FirewallRule {
     $r = Invoke-Tool -FilePath 'netsh.exe' -Arguments @(
         'advfirewall', 'firewall', 'add', 'rule', 'name=Frivo',
         'dir=in', 'action=allow', ('program=' + $pythonw),
-        'profile=private', 'remoteip=localsubnet', 'protocol=TCP', 'localport=5000'
+        # CHANGED (1.5.0): this subnet and the other private networks, so a PC on
+        # another VLAN (routed by the router) can reach Frivo too. Still never
+        # the internet, and still only on a Private network.
+        'profile=private', 'remoteip=localsubnet,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16', 'protocol=TCP', 'localport=5000'
     )
     if ($r.ExitCode -ne 0) {
         & $Log 'The firewall rule could not be added. Continuing.'
