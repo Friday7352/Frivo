@@ -43,6 +43,8 @@ spec = importlib.util.spec_from_file_location("frivo_words", os.path.join(ws, "a
 mod = importlib.util.module_from_spec(spec)
 sys.modules["frivo_words"] = mod
 spec.loader.exec_module(mod)
+# CHANGED (1.5.0): these checks are for the whole-clip request; streaming is in test-speech-stream.py.
+mod.CFG["elevenlabs_streaming"] = False
 
 TEXT = "Hey there,  friend. Ready?"
 # Character i starts at i/10 s and ends at i/10 + 0.08 s.

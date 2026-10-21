@@ -43,6 +43,8 @@ spec = importlib.util.spec_from_file_location("frivo_tags", os.path.join(ws, "ap
 mod = importlib.util.module_from_spec(spec)
 sys.modules["frivo_tags"] = mod
 spec.loader.exec_module(mod)
+# CHANGED (1.5.0): these checks are for the whole-clip request; streaming is in test-speech-stream.py.
+mod.CFG["elevenlabs_streaming"] = False
 
 print("--- the tags themselves ---")
 check("taken out cleanly", mod.strip_audio_tags("[laughs] Okay, fine. [sighs] That's [whispers] ours!")

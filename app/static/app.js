@@ -1308,9 +1308,144 @@ function attachBubbleAudio(wrap, url, onStart, onPlayback, extras = {}) {   // C
       wrap.appendChild(audio);
     });
   }
+  // NEW (1.5.0): a streamed reply ("Start speaking sooner"). It plays as
+  // the audio arrives, through the same volume. Its timings (word glow,
+  // chatbox pages) and its finished file come once ElevenLabs is done; after
+  // it has played, the bubble plays that file like any other reply.
+  function startStream() {
+    const ctx = ensureAudioContext();
+    const el = new Audio();
+    el.preload = "auto";
+    let analyser = null;
+    let samples = null;
+    try {
+      const source = ctx.createMediaElementSource(el);
+      analyser = ctx.createAnalyser();
+      analyser.fftSize = 1024;
+      samples = new Float32Array(analyser.fftSize);
+      source.connect(analyser);
+      analyser.connect(masterGain);
+    } catch (e) {
+      el.volume = Math.min(1, masterVolume);   // straight out, without the mixer
+      analyser = null;
+    }
+    let playing = false;
+    let ended = false;
+    let finalUrl = null;
+    let knownDuration = null;
+    let rafS = null;
+    const estimate = () => {
+      const words = (wrap.textContent || "").trim().split(/\s+/).length;
+      return Math.max(1, words / 2.6);
+    };
+    const dur = () => knownDuration || (Number.isFinite(el.duration) ? el.duration : 0);
+    function ui() {
+      const d = dur();
+      const cur = el.currentTime;
+      time.textContent = d ? formatTime(playing ? Math.max(0, d - cur) : d) : "";
+      fill.style.width = d ? `${Math.min(100, (cur / d) * 100)}%` : "0%";
+    }
+    function loop() {
+      ui();
+      if (visuals && playing) {
+        visuals.update(el.currentTime);
+        if (analyser) {
+          analyser.getFloatTimeDomainData(samples);
+          let sum = 0;
+          for (let i = 0; i < samples.length; i += 2) sum += samples[i] * samples[i];
+          visuals.liveLevel(Math.min(1, Math.sqrt(sum / (samples.length / 2)) / 0.12));
+        }
+      }
+      if (playing) rafS = requestAnimationFrame(loop);
+    }
+    function becomeFile() {
+      // Played to the end and the file is ready: from now on it's an
+      // ordinary reply (click to play again, from the file).
+      if (!ended || !finalUrl) return;
+      url = finalUrl;
+      delete wrap._toggle;
+      wrap._pause = pause;
+      loadStarted = false;
+      el.removeAttribute("src");
+    }
+    el.addEventListener("playing", () => {
+      wrap.classList.remove("is-loading");
+      playing = true;
+      setPlayingUI(true);
+      fireStart();
+      report(true, el.currentTime, dur() || estimate());
+      loop();
+    });
+    el.addEventListener("pause", () => {
+      if (ended) return;
+      playing = false;
+      if (rafS) cancelAnimationFrame(rafS);
+      setPlayingUI(false);
+      report(false, el.currentTime, dur() || estimate());
+      ui();
+    });
+    el.addEventListener("ended", () => {
+      ended = true;
+      playing = false;
+      if (rafS) cancelAnimationFrame(rafS);
+      setPlayingUI(false);
+      report(false, dur() || el.currentTime, dur() || el.currentTime);
+      ui();
+      becomeFile();
+    });
+    el.addEventListener("error", () => {
+      if (ended) return;
+      // The stream broke: the finished file, once there is one.
+      playing = false;
+      wrap.classList.remove("is-loading");
+      setPlayingUI(false);
+      ended = true;
+      becomeFile();
+    });
+    wrap._pause = () => { if (!el.paused) el.pause(); };
+    wrap._toggle = () => {
+      if (ended) return;
+      if (el.paused) { pauseOtherPlayers(wrap); el.play().catch(() => {}); } else el.pause();
+    };
+    pauseOtherPlayers(wrap);
+    el.src = url;
+    el.play().catch(() => {
+      // The browser wouldn't start it on its own: a click will.
+      wrap.classList.remove("is-loading");
+      wrap.setAttribute("aria-label", "Play reply");
+    });
+    // The timings and the file, when ElevenLabs is done.
+    (async function follow() {
+      for (let tries = 0; tries < 30; tries++) {
+        let t;
+        try {
+          const res = await fetch(`${extras.stream.timingUrl}?wait=8`);
+          if (!res.ok) return;
+          t = await res.json();
+        } catch (e) {
+          await new Promise((r) => setTimeout(r, 1000));
+          continue;
+        }
+        if (!t.done) continue;
+        if (t.duration) knownDuration = t.duration;
+        if (t.word_times && visuals) visuals.setWordTimes(t.word_times);
+        if (t.audio_url) finalUrl = t.audio_url;
+        if (typeof extras.onTiming === "function") {
+          try { extras.onTiming(t); } catch (e) { console.warn("Stream timing:", e); }
+        }
+        if (t.error && !t.audio_url) setStatus(t.error, true);
+        else if (t.notice) setStatus(t.notice, true);
+        becomeFile();
+        return;
+      }
+    })();
+  }
+
   if (extras.lazy) {
     wrap.classList.remove("is-loading");
     wrap.setAttribute("aria-label", "Play reply");
+  } else if (extras.stream && extras.stream.timingUrl) {
+    startStream();   // NEW (1.5.0)
   } else {
     load();
   }
@@ -1618,7 +1753,20 @@ function addTurn(who, text, opts = {}) {
   // was the only part of a message that didn't look like a message.
   if (opts.audioUrl) {
     attachBubbleAudio(body, opts.audioUrl, opts.onAudioStart, opts.onPlayback,
-      { wordTimes: opts.wordTimes, lazy: Boolean(opts.restoring) });   // CHANGED (1.5.0): a restored reply waits for a click
+      { wordTimes: opts.wordTimes, lazy: Boolean(opts.restoring),   // CHANGED (1.5.0): a restored reply waits for a click
+        // NEW (1.5.0): a streamed reply, and what to do with its timings.
+        stream: !opts.restoring && opts.stream ? { timingUrl: opts.stream.timing_url } : null,
+        onTiming: (t) => {
+          if (t.word_times) {   // kept, so it glows word by word after a refresh too
+            const record = (typeof transcript !== "undefined" ? transcript : []).find((r) => r.kind === "turn" && r.at === at);
+            if (record) {
+              record.opts.wordTimes = t.word_times;
+              if (t.audio_url) record.opts.audioUrl = t.audio_url;
+              if (typeof persistTranscript === "function") persistTranscript();
+            }
+          }
+          if (typeof opts.onStreamTiming === "function") opts.onStreamTiming(t);
+        } });
   }
   // NEW (1.5.0): the chatbox page dots, under a reply that goes to VRChat
   // a page at a time.
@@ -1948,6 +2096,7 @@ async function saveAllSettings({ close = false, quiet = false } = {}) {
     voice_accent: $("voiceAccentSelect") ? $("voiceAccentSelect").value : "auto",   // NEW (1.5.0)
     expressive_model: $("expressiveModelRadios") ? getRadioValue($("expressiveModelRadios"), "eleven_v4") : "eleven_v4",   // NEW (1.5.0)
     expressive_every_line: $("expressiveEveryLine") ? $("expressiveEveryLine").checked : true,   // NEW (1.5.0)
+    elevenlabs_streaming: $("elevenStreamingToggle") ? $("elevenStreamingToggle").checked : true,   // NEW (1.5.0)
     voice_delivery: $("voiceDeliveryRadios") ? getRadioValue($("voiceDeliveryRadios"), "natural") : "natural",
     temperature: temperatureSlider ? parseInt(temperatureSlider.value, 10) / 100 : 0.7,
     max_tokens: readMaxTokensSetting(),
@@ -6330,6 +6479,7 @@ async function send(opts = {}) {
 
     const active = allProfiles.find((p) => p.id === currentProfileId);
     const speaker = active ? active.name : "Voice";
+    let streamSave = null;   // NEW (1.5.0): the Save data, finished once a stream is
     // NEW (1.5.0): ElevenLabs refused the tags model, and what was used instead.
     if (data.voice_notice) setStatus(data.voice_notice, true);
 
@@ -6366,8 +6516,24 @@ async function send(opts = {}) {
       voiceHow: data.voice_how || "",   // NEW (1.5.0)
       profileId: currentProfileId || "",   // NEW (1.5.0): for Retake
       footer: pager ? pager.el : null,  // NEW (1.5.0)
+      // NEW (1.5.0): a streamed reply. When ElevenLabs is done: the chatbox
+      // pages get their exact times, Save gets the finished file, and the
+      // credits are counted.
+      stream: data.stream || null,
+      onStreamTiming: data.stream ? (t) => {
+        if (Array.isArray(t.page_ends) && Array.isArray(data.chatbox_pages) && t.page_ends.length === data.chatbox_pages.length) {
+          data.chatbox_pages.forEach((page, i) => { page.at = i === 0 ? 0 : t.page_ends[i - 1]; });
+        }
+        if (streamSave && t.audio_url) {
+          streamSave.audio_url = t.audio_url;
+          streamSave.word_times = t.word_times;
+          streamSave.chatbox_pages = data.chatbox_pages;
+          if (typeof persistTranscript === "function") persistTranscript();
+        }
+        if (typeof loadCredits === "function") loadCredits({ force: true });
+      } : null,
       // NEW (1.5.0): what the Save button keeps, so it can be played again.
-      saveData: data.audio_url ? {
+      saveData: data.audio_url ? (streamSave = {
         audio_url: data.audio_url,
         text: data.reply,
         voiced: data.voiced || data.reply,   // NEW (1.5.0)
@@ -6381,7 +6547,7 @@ async function send(opts = {}) {
         chatbox_pages: data.chatbox_pages,
         profile_id: currentProfileId || "",
         profile_name: speaker,
-      } : null,
+      }) : null,
       credits: data.credits,  // NEW (1.5.0): what was actually billed
       spoke: data.spoke,
       totalSeconds: data.total_seconds,
@@ -8865,6 +9031,20 @@ function makeSpeechVisuals(bubble, wordTimes) {
       const index = wordAt(t);
       if (index !== current) moveMarker(index);
     },
+    // NEW (1.5.0): a streamed reply's timings arrive once the voice is
+    // made, after it may have started playing.
+    setWordTimes(times) {
+      wordTimes = times;
+      if (words !== null && !words.length) words = null;
+    },
+    // NEW (1.5.0): the glow for a streamed reply, from what's playing now.
+    liveLevel(target) {
+      level += (target - level) * (target > level ? 0.45 : 0.18);
+      if (Math.abs(level - shownLevel) > 0.015) {
+        shownLevel = level;
+        bubble.style.setProperty("--speak", level.toFixed(3));
+      }
+    },
     stop() {
       level = 0;
       shownLevel = -1;
@@ -9458,6 +9638,8 @@ function applyVoiceStyleSettings(data) {
   }
   const everyLine = $("expressiveEveryLine");   // NEW (1.5.0)
   if (everyLine) everyLine.checked = data.expressive_every_line !== false;
+  const streaming = $("elevenStreamingToggle");   // NEW (1.5.0)
+  if (streaming) streaming.checked = data.elevenlabs_streaming !== false;
   const models = $("expressiveModelRadios");
   const modelNote = $("expressiveModelNote");
   if (models && Array.isArray(data.expressive_models) && data.expressive_models.length) {

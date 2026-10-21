@@ -62,6 +62,8 @@ def load(path, name):
     mod = importlib.util.module_from_spec(spec)
     sys.modules[name] = mod
     spec.loader.exec_module(mod)
+    # CHANGED (1.5.0): these checks are for the whole-clip request; streaming is in test-speech-stream.py.
+    mod.CFG["elevenlabs_streaming"] = False
     return mod
 
 

@@ -63,7 +63,7 @@ import uuid
 import tempfile  # NEW (1.5.0): adding your own voices
 import threading
 
-from flask import Flask, request, jsonify, render_template, send_from_directory, redirect, g  # CHANGED (1.5.0): g
+from flask import Flask, request, jsonify, render_template, send_from_directory, redirect, g, Response  # CHANGED (1.5.0): g, Response
 from urllib.parse import urlsplit
 import requests
 from openai import OpenAI
@@ -698,6 +698,8 @@ def load_config():
         # NEW (1.5.0): the Tags model speaks every line, not only the ones
         # with tags, so the voice sounds the same either way.
         "expressive_every_line": True,
+        # NEW (1.5.0): ElevenLabs replies start playing as they're made.
+        "elevenlabs_streaming": True,
         "voice_accent": "auto",   # NEW (1.5.0): the accent the anchor is made in
         # NEW (1.5.0): Tag words (see DEFAULT_TAG_WORDS); None means the defaults.
         "tag_words": None,
@@ -5160,6 +5162,8 @@ def settings():
             CFG["voice_delivery"] = normalize_voice_delivery(data.get("voice_delivery"), CFG.get("voice_delivery", DEFAULT_VOICE_DELIVERY))
         if "hold_accent" in data:
             CFG["hold_accent"] = normalize_hold_accent(data.get("hold_accent"), normalize_hold_accent(CFG.get("hold_accent")))
+        if "elevenlabs_streaming" in data:   # NEW (1.5.0)
+            CFG["elevenlabs_streaming"] = data.get("elevenlabs_streaming") is not False
         if "expressive_every_line" in data:   # NEW (1.5.0)
             CFG["expressive_every_line"] = data.get("expressive_every_line") is not False
         if "expressive_model" in data:
@@ -5293,6 +5297,7 @@ def settings():
             "voice_accent": normalize_voice_accent(CFG.get("voice_accent")),
             "expressive_model": normalize_expressive_model(CFG.get("expressive_model")),
             "expressive_every_line": CFG.get("expressive_every_line", True) is not False,   # NEW (1.5.0)
+            "elevenlabs_streaming": elevenlabs_streaming_on(),   # NEW (1.5.0)
             # NEW (1.5.0): models ElevenLabs refused this hour, and why.
             "expressive_refusals": {m: dict(r, label=model_label(m)) for m, r in MODEL_REFUSALS.items()
                                     if time.time() - REFUSED_MODELS.get(m, 0) < 3600},
@@ -8488,7 +8493,16 @@ def chat():
         chatbox_plan = chatbox_page_plan(spoken)   # NEW (1.5.0)
         page_ends = None                           # NEW (1.5.0)
         word_times = None                          # NEW (1.5.0)
-        if speak:
+        stream = None                              # NEW (1.5.0): streaming
+        if speak and voice_engine == "elevenlabs" and elevenlabs_streaming_on():
+            # NEW (1.5.0): the reply goes back now and the voice follows as
+            # ElevenLabs makes it (see SpeechStream).
+            audio_start = time.perf_counter()
+            stream = start_speech_stream(spoken, voiced, voice_id, language, chatbox_plan)
+            if is_expressive_model(_elevenlabs_payload(voiced)["model_id"]):
+                V3_LAST_USED[f"{session_id}::{profile_id or 'default'}"] = time.time()
+            audio_seconds = time.perf_counter() - audio_start
+        elif speak:
             audio_start = time.perf_counter()
             # CHANGED (1.5.0): also says when the voice finishes each page.
             # CHANGED (1.5.0): speak_reply() also says when each word is spoken.
@@ -8515,7 +8529,7 @@ def chat():
     if page_ends and len(page_ends) == len(chatbox_plan):
         for i, page in enumerate(chatbox_plan):
             page["at"] = 0.0 if i == 0 else round(page_ends[i - 1], 3)
-    if credits_spent:
+    if credits_spent and not stream:   # CHANGED (1.5.0): a stream counts its own, once spoken
         record_usage(credits_spent)
 
     return jsonify(
@@ -8538,7 +8552,11 @@ def chat():
             "english": english,
             # Null rather than a dead path when nothing was synthesised, so
             # the page has something unambiguous to branch on.
-            "audio_url": f"/audio/{audio_filename}" if audio_filename else None,
+            "audio_url": (f"/audio/{audio_filename}" if audio_filename
+                          else f"/audio/stream/{stream.id}" if stream else None),
+            # NEW (1.5.0): streaming: where the timings and the saved file
+            # come from once the voice is finished.
+            "stream": {"id": stream.id, "timing_url": f"/api/speech-stream/{stream.id}"} if stream else None,
             "spoke": speak,
             "word_count": count_words(spoken, language),
             "char_count": len(spoken),
@@ -8594,6 +8612,249 @@ def reset():
     with SESSIONS_LOCK:
         SESSIONS.pop(key, None)
     return jsonify({"ok": True})
+
+
+# ---------------------------------------------------------------------------
+# NEW (1.5.0): streaming ElevenLabs replies ("Start speaking sooner").
+#
+# Frivo used to ask ElevenLabs for the whole clip and play it once it was
+# all there. With streaming on (Settings > Voices), the reply's audio is
+# relayed to the page as ElevenLabs makes it, so the voice starts after the
+# first fraction of a second. Same request, same credits; it's ElevenLabs'
+# /stream/with-timestamps endpoint, which sends each piece of audio with its
+# character timings.
+#
+#   GET /audio/stream/<id>        the audio, as it arrives (then from disk)
+#   GET /api/speech-stream/<id>   whether it's finished, the saved file, and
+#                                 the timings (word highlight, chatbox pages)
+#
+# A refusal before any audio (a model, an extra) falls back to the usual
+# whole-clip request, with its step-down, so a reply is never lost. The
+# finished audio is saved like any other reply (Save, replay, the 7 days).
+# ---------------------------------------------------------------------------
+
+SPEECH_STREAMS = {}
+SPEECH_STREAMS_LOCK = threading.Lock()
+SPEECH_STREAM_KEEP = 15 * 60
+MP3_BYTES_PER_SECOND = 128000 / 8   # mp3_44100_128, ElevenLabs' default
+_STREAM_ID_RE = re.compile(r"^[0-9a-f]{32}$")
+
+
+def elevenlabs_streaming_on():
+    return CFG.get("elevenlabs_streaming", True) is not False
+
+
+class SpeechStream:
+    """One reply being spoken: its audio so far, and its timings once done."""
+
+    def __init__(self, spoken, voiced, pages, language, voice_id):
+        self.id = uuid.uuid4().hex
+        self.spoken = spoken
+        self.voiced = voiced
+        self.pages = pages
+        self.language = language
+        self.voice_id = voice_id
+        self.chunks = []
+        self.size = 0
+        self.cond = threading.Condition()
+        self.done = False
+        self.error = ""
+        self.notice = ""
+        self.fell_back = False
+        self.word_times = None
+        self.page_ends = None
+        self.duration = None
+        self.filename = f"{self.id}.mp3"
+        self.created = time.time()
+        self.first_audio = None
+        self.chars = []
+        self.starts = []
+        self.ends = []
+
+    def push(self, data):
+        if not data:
+            return
+        with self.cond:
+            if self.first_audio is None:
+                self.first_audio = time.time() - self.created
+            self.chunks.append(data)
+            self.size += len(data)
+            self.cond.notify_all()
+
+    def add_timings(self, alignment, offset):
+        """One piece's character timings. Some come relative to the piece,
+        some to the whole reply; relative ones are moved along."""
+        if not isinstance(alignment, dict):
+            return
+        chars = alignment.get("characters") or []
+        starts = alignment.get("character_start_times_seconds") or []
+        ends = alignment.get("character_end_times_seconds") or []
+        if not chars or len(chars) != len(starts) or len(chars) != len(ends):
+            return
+        shift = 0.0
+        if self.ends and starts and float(starts[0]) + 0.05 < self.ends[-1]:
+            shift = max(offset, self.ends[-1])   # the audio so far, or at least the last timing
+        self.chars.extend(str(c) for c in chars)
+        self.starts.extend(float(s) + shift for s in starts)
+        self.ends.extend(float(e) + shift for e in ends)
+
+    def finish(self, error=""):
+        with self.cond:
+            self.done = True
+            self.error = error
+            self.cond.notify_all()
+
+    def timing(self):
+        return {
+            "done": self.done,
+            "error": self.error,
+            "notice": self.notice,
+            "audio_url": f"/audio/{self.filename}" if self.done and not self.error and self.size else None,
+            "word_times": self.word_times,
+            "page_ends": self.page_ends,
+            "duration": self.duration,
+            "fell_back": self.fell_back,
+            "first_audio_seconds": round(self.first_audio, 2) if self.first_audio is not None else None,
+        }
+
+
+def _stream_speech(job, payload, carried):
+    """Runs in its own thread: ElevenLabs' stream, relayed and saved."""
+    import base64
+    with app.test_request_context():
+        for key, value in carried.items():
+            setattr(g, key, value)
+        url = f"https://api.elevenlabs.io/v1/text-to-speech/{job.voice_id}/stream/with-timestamps"
+        headers = {"xi-api-key": CFG["elevenlabs_api_key"], "Content-Type": "application/json",
+                   "Accept": "application/json"}
+        try:
+            resp = requests.post(url, headers=headers, json=payload, stream=True, timeout=(10, 60))
+            if resp.status_code != 200:
+                reason = _refusal_message(resp)
+                resp.close()
+                raise TimedSpeechUnavailable(f"ElevenLabs stream {resp.status_code}: {reason}")
+            for line in resp.iter_lines():
+                if not line:
+                    continue
+                try:
+                    piece = json.loads(line)
+                except ValueError:
+                    continue
+                offset = job.size / MP3_BYTES_PER_SECOND
+                audio = piece.get("audio_base64")
+                if audio:
+                    job.push(base64.b64decode(audio))
+                job.add_timings(piece.get("alignment"), offset)
+            if not job.size:
+                raise TimedSpeechUnavailable("ElevenLabs' stream had no audio")
+            if is_expressive_model(payload.get("model_id")):
+                remember_speech(resp, payload["text"])
+            with open(os.path.join(AUDIO_DIR, job.filename), "wb") as f:
+                f.write(b"".join(job.chunks))
+            alignment = {"characters": job.chars, "character_start_times_seconds": job.starts,
+                         "character_end_times_seconds": job.ends}
+            fixed = alignment_without_tags(job.voiced, job.spoken, alignment) if job.chars else None
+            if fixed:
+                job.word_times = word_times_from_alignment(job.spoken, fixed)
+                ends = page_ends_from_alignment([_CHATBOX_COUNTER_RE.sub("", p["text"]) for p in job.pages], fixed) \
+                    if len(job.pages) > 1 else None
+                job.page_ends = ends
+            job.duration = round(job.ends[-1], 3) if job.ends else round(job.size / MP3_BYTES_PER_SECOND, 3)
+            record_usage(len(payload.get("text") or ""))
+            job.notice = getattr(g, "voice_notice", "") or ""
+            job.finish()
+        except Exception as e:
+            if job.size:
+                # Cut off partway: what was heard is kept.
+                try:
+                    with open(os.path.join(AUDIO_DIR, job.filename), "wb") as f:
+                        f.write(b"".join(job.chunks))
+                except OSError:
+                    pass
+                log_server_event(f"Streaming: cut off after {job.size} bytes: {e!r}")
+                job.finish(error="The voice was cut off partway.")
+                return
+            # Nothing was heard yet: the usual whole-clip request, with its
+            # step-down through the models. Its audio goes out the same way.
+            log_server_event(f"Streaming: falling back to the whole-clip request: {e}")
+            job.fell_back = True
+            try:
+                filename, ends, words = speak_reply(job.spoken, job.voice_id, job.language, job.pages, voiced=job.voiced)
+                path = os.path.join(AUDIO_DIR, filename)
+                with open(path, "rb") as f:
+                    data = f.read()
+                if filename != job.filename:
+                    job.filename = filename
+                job.word_times = words
+                job.page_ends = ends
+                job.push(data)
+                record_usage(len(job.voiced))
+                job.notice = getattr(g, "voice_notice", "") or ""
+                job.finish()
+            except Exception as e2:
+                job.finish(error=str(e2) or "ElevenLabs couldn't speak this reply.")
+
+
+def start_speech_stream(spoken, voiced, voice_id, language, pages):
+    """Starts speaking a reply and returns its SpeechStream at once."""
+    job = SpeechStream(spoken, voiced, pages, language, voice_id)
+    payload = _elevenlabs_payload(voiced)   # with this request's voice settings
+    carried = {key: getattr(g, key) for key in ("voice_style", "speech_thread", "speech_voice")
+               if hasattr(g, key)}
+    with SPEECH_STREAMS_LOCK:
+        now = time.time()
+        for old in [k for k, s in SPEECH_STREAMS.items() if s.done and now - s.created > SPEECH_STREAM_KEEP]:
+            SPEECH_STREAMS.pop(old, None)
+        SPEECH_STREAMS[job.id] = job
+    threading.Thread(target=_stream_speech, args=(job, payload, carried), daemon=True,
+                     name=f"speech-stream-{job.id[:8]}").start()
+    return job
+
+
+@app.route("/audio/stream/<stream_id>")
+def audio_stream(stream_id):
+    if not _STREAM_ID_RE.match(stream_id or ""):
+        return jsonify({"error": "Not a reply."}), 404
+    with SPEECH_STREAMS_LOCK:
+        job = SPEECH_STREAMS.get(stream_id)
+    if job is None:
+        # Finished long ago (or Frivo restarted): the saved file, if kept.
+        for ext in ("mp3", "wav"):
+            if os.path.isfile(os.path.join(AUDIO_DIR, f"{stream_id}.{ext}")):
+                return send_from_directory(AUDIO_DIR, f"{stream_id}.{ext}")
+        return jsonify({"error": "That reply's audio has been cleaned up."}), 404
+
+    def relay():
+        sent = 0
+        while True:
+            with job.cond:
+                while sent >= len(job.chunks) and not job.done:
+                    job.cond.wait(timeout=30)
+                    if sent >= len(job.chunks) and not job.done and time.time() - job.created > 120:
+                        return
+                pending = job.chunks[sent:]
+                sent = len(job.chunks)
+                finished = job.done
+            for piece in pending:
+                yield piece
+            if finished and sent >= len(job.chunks):
+                return
+
+    return Response(relay(), mimetype="audio/mpeg",
+                    headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})
+
+
+@app.route("/api/speech-stream/<stream_id>")
+def speech_stream_timing(stream_id):
+    with SPEECH_STREAMS_LOCK:
+        job = SPEECH_STREAMS.get(stream_id or "")
+    if job is None:
+        return jsonify({"error": "Not found."}), 404
+    wait = min(float(request.args.get("wait") or 0), 10.0)
+    if wait and not job.done:
+        with job.cond:
+            job.cond.wait_for(lambda: job.done, timeout=wait)
+    return jsonify(job.timing())
 
 
 @app.route("/audio/<filename>")
@@ -8692,6 +8953,12 @@ def saved_list():
 def saved_add():
     data = request.get_json(force=True) or {}
     audio_url = str(data.get("audio_url") or "")
+    # NEW (1.5.0): a streamed reply is saved from its finished file.
+    if audio_url.startswith("/audio/stream/"):
+        stem = audio_url.rsplit("/", 1)[-1]
+        with SPEECH_STREAMS_LOCK:
+            job = SPEECH_STREAMS.get(stem)
+        audio_url = f"/audio/{job.filename}" if job and job.done else f"/audio/{stem}.mp3"
     source = audio_url.rsplit("/", 1)[-1]
     text = str(data.get("text") or "").strip()
     if not audio_url.startswith("/audio/") or not _AUDIO_REPLY_RE.match(source):
