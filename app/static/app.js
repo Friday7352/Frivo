@@ -4336,7 +4336,7 @@ function scheduleAutoSend(delayMs = AUTO_SEND_DELAY_MS) {
     // CHANGED (dictation speed): actually checked now. Mid-sentence again
     // means the sentence is not finished; its own end reschedules this.
     if (liveLocal && liveLocal.speaking) return;
-    send();
+    send({ auto: true });   // CHANGED (1.5.0): sent hands-free, so no tag check
   }, Math.max(0, delayMs));
 }
 
@@ -6258,9 +6258,17 @@ if (listenThreshold) {
 
 // ---------- Chat ----------
 
-async function send() {
+// CHANGED (1.5.0): opts.reviewed (the tags were checked: send as it is,
+// without Auto tags), opts.auto (auto-send: never stop to check).
+async function send(opts = {}) {
   const message = messageInput.value.trim();
   if (!message) return;
+  // NEW (1.5.0): "Check auto tags first": the tags are shown before sending.
+  if (!opts.reviewed && !opts.auto && typeof shouldCheckTags === "function" && shouldCheckTags()) {
+    startTagCheck(message);
+    return;
+  }
+  if (typeof closeTagCheck === "function") closeTagCheck();
 
   // Browser audio must be initialized during a direct user gesture.
   if (speakEnabled()) ensureAudioContext();
@@ -6301,7 +6309,8 @@ async function send() {
         max_words: parseInt(lengthSlider.value, 10),
         language: currentLanguage,
         speak: speakEnabled(),
-        auto_tags: typeof autoTagsOn === "function" ? autoTagsOn() : false,   // NEW (1.5.0)
+        // NEW (1.5.0). CHANGED (1.5.0): not again for a message whose tags you checked.
+        auto_tags: !opts.reviewed && typeof autoTagsOn === "function" ? autoTagsOn() : false,
       }),
     });
     const data = await res.json();
@@ -6413,9 +6422,14 @@ async function send() {
   }
 }
 
-sendBtn.addEventListener("click", send);
+sendBtn.addEventListener("click", () => send());
+// CHANGED (1.5.0): the box is several lines now. Enter sends, Shift+Enter
+// starts a new line, and Enter while picking an accented letter (an IME)
+// is left to the IME.
 messageInput.addEventListener("keydown", (e) => {
-  if (e.key === "Enter") send();
+  if (e.key !== "Enter" || e.shiftKey || e.isComposing) return;
+  e.preventDefault();
+  send();
 });
 
 // ---------- Init ----------
@@ -10268,14 +10282,51 @@ function textWidthIn(input, str) {
   tagMeasureCtx.letterSpacing = cs.letterSpacing === "normal" ? "0px" : cs.letterSpacing;
   return tagMeasureCtx.measureText(str).width;
 }
-function textBoxIn(input, start, end) {
+// CHANGED (1.5.0): the box wraps onto several lines now, so a copy of it
+// (laid out the same, out of sight) says where each word is drawn: x across
+// the composer, y down from the top of the box's text. A word scrolled out
+// of the box is "left" (above) or "right" (below).
+var tagMirror = null;
+var MIRROR_PROPS = ["fontFamily", "fontSize", "fontWeight", "fontStyle", "letterSpacing", "lineHeight",
+  "textTransform", "wordSpacing", "textIndent", "tabSize", "paddingTop", "paddingRight", "paddingBottom",
+  "paddingLeft", "whiteSpace", "overflowWrap", "wordBreak"];
+function textBoxIn(input, start, end, width) {   // width: measure as if this wide
+  if (!tagMirror) {
+    tagMirror = document.createElement("div");
+    tagMirror.setAttribute("aria-hidden", "true");
+    tagMirror.style.cssText = "position:absolute;left:-9999px;top:0;visibility:hidden;overflow:hidden;"
+      + "border:0;box-sizing:border-box;";
+    document.body.appendChild(tagMirror);
+  }
   const cs = getComputedStyle(input);
-  const left = input.offsetLeft + parseFloat(cs.borderLeftWidth || 0) + parseFloat(cs.paddingLeft || 0);
-  const right = input.offsetLeft + input.offsetWidth - parseFloat(cs.borderRightWidth || 0) - parseFloat(cs.paddingRight || 0);
-  const x = left + textWidthIn(input, input.value.slice(0, start)) - input.scrollLeft;
-  const w = Math.max(6, textWidthIn(input, input.value.slice(start, end)));
-  const side = x + w <= left + 2 ? "left" : x >= right - 2 ? "right" : "";
-  return { x, w, visible: !side, side, left, right, rawX: x + input.scrollLeft };
+  MIRROR_PROPS.forEach((p) => { tagMirror.style[p] = cs[p]; });
+  if (input.tagName === "TEXTAREA") {
+    tagMirror.style.whiteSpace = "pre-wrap";
+    tagMirror.style.overflowWrap = "break-word";
+  } else {
+    tagMirror.style.whiteSpace = "pre";
+  }
+  tagMirror.style.width = `${width || input.clientWidth}px`;
+  const v = input.value;
+  const mark = document.createElement("span");
+  mark.textContent = v.slice(start, end) || "\u200b";
+  tagMirror.replaceChildren(document.createTextNode(v.slice(0, start)), mark, document.createTextNode(v.slice(end) || " "));
+  const padTop = parseFloat(cs.paddingTop || 0);
+  const padBottom = parseFloat(cs.paddingBottom || 0);
+  const left = input.offsetLeft + input.clientLeft;
+  const x = left + mark.offsetLeft - input.scrollLeft;
+  const w = Math.max(6, mark.offsetWidth);
+  const h = mark.offsetHeight || parseFloat(cs.lineHeight) || 22;
+  const y = mark.offsetTop - input.scrollTop;   // from the top of the box's padding
+  let side = "";
+  if (input.tagName === "TEXTAREA") {
+    if (y + h <= padTop + 2) side = "left";
+    else if (y >= input.clientHeight - padBottom - 2) side = "right";
+  } else {
+    const right = left + input.clientWidth;
+    side = x + w <= left + 2 ? "left" : x >= right - 2 ? "right" : "";
+  }
+  return { x, w, y, h, visible: !side, side, left, rawX: x + input.scrollLeft, rawY: mark.offsetTop };
 }
 
 function fadeOut(el) {
@@ -10352,6 +10403,15 @@ function renderTagIdeas({ now = false } = {}) {
             want.edge === "left" ? b.box.rawX - a.box.rawX : a.box.rawX - b.box.rawX)[0];
           if (!target) return;
           const cs = getComputedStyle(input);
+          if (input.tagName === "TEXTAREA") {   // CHANGED (1.5.0): up or down
+            const near = node.list.slice().sort((a, b) =>
+              want.edge === "left" ? b.box.rawY - a.box.rawY : a.box.rawY - b.box.rawY)[0];
+            input.scrollTop = want.edge === "left"
+              ? Math.max(0, near.box.rawY - parseFloat(cs.paddingTop || 0) - 4)
+              : near.box.rawY + near.box.h - input.clientHeight + parseFloat(cs.paddingBottom || 0) + 4;
+            renderTagIdeas();
+            return;
+          }
           const pad = parseFloat(cs.paddingLeft || 0) + 24;
           input.scrollLeft = want.edge === "left"
             ? Math.max(0, target.box.rawX - (input.offsetLeft + pad))
@@ -10363,7 +10423,8 @@ function renderTagIdeas({ now = false } = {}) {
       }
       node.list = want.list;
       const n = want.list.length;
-      node.pill.textContent = want.edge === "left" ? `‹ ${n}` : `${n} ›`;
+      const tall = input.tagName === "TEXTAREA";   // CHANGED (1.5.0)
+      node.pill.textContent = want.edge === "left" ? `${tall ? "↑" : "‹"} ${n}` : `${n} ${tall ? "↓" : "›"}`;
       node.pill.title = `${n} idea${n === 1 ? "" : "s"} for words scrolled out of view. Click to see.`;
       edges[want.edge] = node.pill;
       return;
@@ -10385,7 +10446,6 @@ function renderTagIdeas({ now = false } = {}) {
       if (word) {
         node.mark = document.createElement("span");
         node.mark.className = "tag-mark";
-        node.mark.style.top = "calc(50% - 12px)";
         marks.append(node.mark);
       }
       st.nodes.set(key, node);
@@ -10395,6 +10455,9 @@ function renderTagIdeas({ now = false } = {}) {
     if (node.mark) {
       node.mark.style.left = `${box.x - 3}px`;
       node.mark.style.width = `${box.w + 6}px`;
+      // CHANGED (1.5.0): on the word's own line.
+      node.mark.style.top = `${input.clientTop + box.y - 1}px`;
+      node.mark.style.height = `${box.h + 2}px`;
     }
     placed.push({ pill: node.pill, center: box.x + (word ? box.w / 2 : 0) });
   });
@@ -10578,6 +10641,10 @@ function showAutoTagsState() {
     if (tagIdeasState.nodes.size) renderTagIdeas();
   }));
   window.addEventListener("resize", () => { if (tagIdeasState.nodes.size) renderTagIdeas(); });
+  // NEW (1.5.0): and when the box grows or shrinks a line.
+  if (typeof ResizeObserver === "function") {
+    new ResizeObserver(() => { if (tagIdeasState.nodes.size) renderTagIdeas(); }).observe(input);
+  }
   input.addEventListener("input", messageBoxChanged);
 })();
 
@@ -11101,3 +11168,493 @@ async function retakeTurn({ turn, who, text, opts, at }, mode, btn) {
     fresh: voiced ? "Said again, with different tags." : "Said again. The AI found no other tags that fit." }[mode]),
   Boolean(data.voice_notice));
 }
+
+
+// ---------------------------------------------------------------------------
+// NEW (1.5.0): the message box grows, [ for tags, and checking Auto tags.
+//
+//   * The box grows upwards with the message (up to a limit, then it
+//     scrolls), so every word and every tag idea is in view. Browsers that
+//     can't size a box to its text get the same from here.
+//   * Typing [ opens a short tag list at the cursor: what matches what you
+//     type after it, the tags you use most first. Enter or Tab puts it in,
+//     the arrows choose, Esc leaves a plain bracket. ElevenLabs voices only;
+//     "Type [ for tags" in the ✦ menu turns it off.
+//   * "Check auto tags first" (✦ menu): with Auto tags on and a Clean up or
+//     Word for word profile, Enter shows your message with the AI's tags.
+//     Click a tag to swap or remove it; Enter (or Say it) sends it as shown,
+//     Without tags sends it plain, Edit puts it in the box, Esc goes back.
+//     Auto-send never stops to ask.
+// ---------------------------------------------------------------------------
+var BRACKET_KEY = "frivo_tag_bracket";
+var TAG_CHECK_KEY = "frivo_tag_check";
+
+(function growingBox() {
+  const input = $("messageInput");
+  if (!input || input.tagName !== "TEXTAREA") return;
+  const native = typeof CSS !== "undefined" && CSS.supports && CSS.supports("field-sizing", "content");
+  const composer = input.closest(".composer");
+  // Past one line, the box takes the whole width and the buttons move under
+  // it. Whether it's past one line is judged at the one-line width, so the
+  // box doesn't flip back and forth as it widens.
+  let narrow = 0;
+  const tall = () => {
+    if (!composer) return;
+    if (!composer.classList.contains("is-tall")) narrow = input.clientWidth || narrow;
+    let want = false;
+    if (input.value.includes("\n")) want = true;
+    else if (input.value && narrow) {
+      const end = textBoxIn(input, input.value.length, input.value.length, narrow);
+      const lineH = parseFloat(getComputedStyle(input).lineHeight) || 22;
+      want = end.rawY > lineH * 0.6;
+    }
+    if (composer.classList.contains("is-tall") !== want) composer.classList.toggle("is-tall", want);
+  };
+  const fit = () => {
+    tall();
+    if (native) return;
+    input.style.height = "auto";
+    const max = parseFloat(getComputedStyle(input).maxHeight) || 240;
+    input.style.height = `${Math.min(input.scrollHeight, max)}px`;
+  };
+  // Every way the text changes (typing, dictation, Suggest, sending) goes
+  // through .value or an input event.
+  const desc = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value");
+  if (desc && desc.set) {
+    Object.defineProperty(input, "value", {
+      configurable: true,
+      get() { return desc.get.call(this); },
+      set(v) { desc.set.call(this, v); fit(); },
+    });
+  }
+  input.addEventListener("input", fit);
+  window.addEventListener("resize", fit);
+  fit();
+})();
+
+function elevenVoiceNow() {
+  const wrap = $("voiceTagWrap");
+  return Boolean(wrap && !wrap.classList.contains("is-hidden"));
+}
+
+function bracketOn() {
+  try { return localStorage.getItem(BRACKET_KEY) !== "off"; } catch (e) { return true; }
+}
+
+function tagCheckOn() {
+  try { return localStorage.getItem(TAG_CHECK_KEY) === "on"; } catch (e) { return false; }
+}
+
+// Where the composer's own popups go: just above a point in the text.
+function composerPoint(input, offset) {
+  const box = textBoxIn(input, offset, Math.min(offset + 1, input.value.length) || offset);
+  const composer = input.closest(".composer");
+  const top = input.offsetTop + input.clientTop + box.y;
+  return { x: box.x, bottom: composer ? composer.clientHeight - top + 6 : 0, visible: box.visible };
+}
+
+// ---- [ for tags ----
+var bracketState = { open: false, start: -1, items: [], pick: 0, dismissed: -1, likes: [] };
+
+function bracketQuery(input) {
+  if (input.selectionStart !== input.selectionEnd) return null;
+  const caret = input.selectionStart;
+  const m = input.value.slice(0, caret).match(/\[([A-Za-z' \-]{0,24})$/);
+  if (!m) return null;
+  return { start: caret - m[0].length, caret, q: m[1].toLowerCase() };
+}
+
+function bracketChoices(q) {
+  const yours = typeof yourTags === "function" ? yourTags() : [];
+  const favourites = Array.from(new Set([...(bracketState.likes || []), ...yours]));
+  const known = [];
+  (audioTagGroups || []).forEach((g) => g.tags.forEach((t) => known.push({ tag: t, kind: g.name })));
+  const all = new Map();
+  favourites.forEach((t) => all.set(t, { tag: t, kind: yours.includes(t) ? "Yours" : "You use it", fav: true }));
+  known.forEach((k) => { if (!all.has(k.tag)) all.set(k.tag, { tag: k.tag, kind: k.kind, fav: false }); });
+  const list = Array.from(all.values());
+  if (!q) return list.filter((c) => c.fav).concat(list.filter((c) => !c.fav)).slice(0, 7);
+  const starts = list.filter((c) => c.tag.startsWith(q));
+  const inside = list.filter((c) => !c.tag.startsWith(q) && c.tag.includes(q));
+  const ranked = [...starts.filter((c) => c.fav), ...starts.filter((c) => !c.fav), ...inside].slice(0, 6);
+  // Whatever you've typed can be a tag of its own, too.
+  // (only when nothing starts with it, so "lau" doesn't offer [lau]).
+  if (q.trim().length > 1 && !starts.length && !ranked.some((c) => c.tag === q.trim())) {
+    ranked.push({ tag: q.trim(), kind: "As typed", fav: false });
+  }
+  return ranked;
+}
+
+function closeBracket() {
+  const pop = $("tagBracket");
+  bracketState.open = false;
+  if (pop) pop.classList.add("is-hidden");
+}
+
+function renderBracket() {
+  const input = $("messageInput");
+  const pop = $("tagBracket");
+  if (!input || !pop) return;
+  const query = bracketOn() && elevenVoiceNow() && document.activeElement === input ? bracketQuery(input) : null;
+  if (!query || query.start === bracketState.dismissed) { closeBracket(); return; }
+  const items = bracketChoices(query.q);
+  if (!items.length) { closeBracket(); return; }
+  if (!bracketState.open || bracketState.start !== query.start) bracketState.pick = 0;
+  bracketState.open = true;
+  bracketState.start = query.start;
+  bracketState.items = items;
+  bracketState.pick = Math.min(bracketState.pick, items.length - 1);
+  pop.replaceChildren();
+  const head = document.createElement("div");
+  head.className = "tag-bracket-head";
+  head.textContent = query.q ? `Tags for “${query.q}”` : "Voice tags";
+  pop.append(head);
+  items.forEach((item, i) => {
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = "tag-bracket-item" + (i === bracketState.pick ? " is-picked" : "");
+    row.setAttribute("role", "option");
+    row.setAttribute("aria-selected", i === bracketState.pick ? "true" : "false");
+    const name = document.createElement("span");
+    name.className = "tag-bracket-name";
+    const at = query.q ? item.tag.indexOf(query.q) : -1;
+    if (at >= 0) {
+      const hit = document.createElement("b");
+      hit.textContent = item.tag.slice(at, at + query.q.length);
+      name.append(item.tag.slice(0, at), hit, item.tag.slice(at + query.q.length));
+    } else {
+      name.textContent = item.tag;
+    }
+    const kind = document.createElement("span");
+    kind.className = "tag-bracket-kind";
+    kind.textContent = item.kind;
+    row.append(name, kind);
+    if (item.fav) row.classList.add("is-fav");
+    row.addEventListener("mousedown", (e) => e.preventDefault());   // keep the cursor in the box
+    row.addEventListener("click", () => putBracketTag(item.tag));
+    pop.append(row);
+  });
+  const foot = document.createElement("div");
+  foot.className = "tag-bracket-foot";
+  foot.innerHTML = "<span><kbd>↵</kbd> put it in</span><span><kbd>↑↓</kbd> choose</span><span><kbd>Esc</kbd> just a bracket</span>";
+  pop.append(foot);
+  pop.classList.remove("is-hidden");
+  const point = composerPoint(input, query.start);
+  const composer = input.closest(".composer");
+  const width = pop.offsetWidth || 280;
+  const maxLeft = (composer ? composer.clientWidth : 600) - width - 8;
+  pop.style.left = `${Math.max(8, Math.min(point.x - 14, maxLeft))}px`;
+  pop.style.bottom = `${point.bottom}px`;
+}
+
+function putBracketTag(tag) {
+  const input = $("messageInput");
+  const query = input ? bracketQuery(input) : null;
+  if (!input || !query) { closeBracket(); return; }
+  const v = input.value;
+  let after = v.slice(query.caret);
+  if (after.startsWith("]")) after = after.slice(1);
+  const insert = `[${tag}]` + (after.startsWith(" ") || !after ? "" : " ");
+  input.value = v.slice(0, query.start) + insert + (after ? after : " ");
+  const caret = query.start + insert.length + (after ? 0 : 1);
+  try { input.setSelectionRange(caret, caret); } catch (e) { /* fine */ }
+  closeBracket();
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  input.focus();
+}
+
+(function wireBracket() {
+  const input = $("messageInput");
+  const composer = input ? input.closest(".composer") : null;
+  const toggle = $("tagBracketToggle");
+  if (toggle) {
+    toggle.checked = bracketOn();
+    toggle.addEventListener("change", () => {
+      try { localStorage.setItem(BRACKET_KEY, toggle.checked ? "on" : "off"); } catch (e) { /* not kept */ }
+      if (!toggle.checked) closeBracket();
+    });
+  }
+  if (!input || !composer) return;
+  input.addEventListener("input", () => {
+    const q = bracketQuery(input);
+    if (!q || q.start !== bracketState.dismissed) bracketState.dismissed = q ? bracketState.dismissed : -1;
+    renderBracket();
+  });
+  input.addEventListener("click", renderBracket);
+  input.addEventListener("blur", () => setTimeout(() => { if (document.activeElement !== input) closeBracket(); }, 120));
+  // Before the box's own Enter (send), so Enter picks a tag while the list is open.
+  composer.addEventListener("keydown", (e) => {
+    if (!bracketState.open || e.target !== input) return;
+    const n = bracketState.items.length;
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      bracketState.pick = (bracketState.pick + (e.key === "ArrowDown" ? 1 : n - 1)) % n;
+      renderBracket();
+    } else if ((e.key === "Enter" && !e.shiftKey && !e.isComposing) || e.key === "Tab") {
+      putBracketTag(bracketState.items[bracketState.pick].tag);
+    } else if (e.key === "Escape") {
+      bracketState.dismissed = bracketState.start;
+      closeBracket();
+    } else {
+      return;
+    }
+    e.preventDefault();
+    e.stopImmediatePropagation();
+  }, true);
+  // The tags you use most, from your taste.
+  fetch("/api/voice-tags/taste").then((r) => r.json()).then((d) => { bracketState.likes = d.liked || []; }).catch(() => {});
+})();
+
+// ---- Check auto tags first ----
+var tagCheck = { open: false, original: "", text: "", offered: [], busy: false, menu: -1 };
+
+function activeVoiceStyle() {
+  const profile = (typeof allProfiles !== "undefined" ? allProfiles : []).find((p) => p.id === currentProfileId);
+  if (profile) return { style: profile.response_style || "echo", shaping: profile.tag_shaping === true };
+  return {
+    style: typeof responseStyleRadios !== "undefined" ? getRadioValue(responseStyleRadios, "echo") : "echo",
+    shaping: $("tagShapingToggle") ? $("tagShapingToggle").checked : false,
+  };
+}
+
+function shouldCheckTags() {
+  if (!tagCheckOn() || !(typeof autoTagsOn === "function" && autoTagsOn())) return false;
+  if (!speakEnabled() || !elevenVoiceNow()) return false;
+  const v = activeVoiceStyle();
+  // A Reply profile's tags are in its answer (Retake is for those), and
+  // Shape words for tags does its own tagging.
+  return v.style !== "reply" && !v.shaping;
+}
+
+function closeTagCheck() {
+  const card = $("tagReview");
+  tagCheck.open = false;
+  tagCheck.menu = -1;
+  if (card) card.classList.add("is-hidden");
+  const composer = card ? card.closest(".composer") : null;
+  if (composer) composer.classList.remove("is-checking");
+}
+
+async function startTagCheck(message) {
+  const card = $("tagReview");
+  if (!card || tagCheck.busy) return;
+  tagCheck.busy = true;
+  tagCheck.open = true;
+  tagCheck.original = message;
+  tagCheck.text = "";
+  card.closest(".composer").classList.add("is-checking");
+  card.replaceChildren();
+  const wait = document.createElement("div");
+  wait.className = "tag-review-wait";
+  wait.textContent = "Finding tags…";
+  card.append(wait);
+  card.classList.remove("is-hidden");
+  setStatus("Finding tags for your message…");
+  let data = null;
+  try {
+    const res = await fetch("/api/voice-tags/suggest", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: message, profile_id: currentProfileId || null, session_id: sessionId }),
+    });
+    data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Couldn't find tags.");
+  } catch (err) {
+    tagCheck.busy = false;
+    closeTagCheck();
+    setStatus(`${err.message} Sent without checking.`, true);
+    send({ reviewed: false, auto: true });
+    return;
+  }
+  tagCheck.busy = false;
+  if (!tagCheck.open) return;   // Esc while it was looking
+  if (messageInput.value.trim() !== message) { closeTagCheck(); return; }   // you kept typing
+  if (!data.added) {
+    closeTagCheck();
+    setStatus("No tags fit this one. Sent as it is.");
+    send({ reviewed: true });
+    return;
+  }
+  tagCheck.text = data.text;
+  tagCheck.offered = tagsIn(data.text).filter((t) => !tagsIn(message).includes(t));
+  renderTagCheck();
+  setStatus("Check the tags, then press Enter to say it.");
+}
+
+function tagSwaps(tag) {
+  const group = (audioTagGroups || []).find((g) => g.tags.includes(tag)) || (audioTagGroups || [])[0];
+  const pool = [...(bracketState.likes || []), ...(group ? group.tags : [])];
+  return Array.from(new Set(pool)).filter((t) => t !== tag).slice(0, 5);
+}
+
+function renderTagCheck() {
+  const card = $("tagReview");
+  if (!card) return;
+  const n = tagsIn(tagCheck.text).length;
+  const active = (typeof allProfiles !== "undefined" ? allProfiles : []).find((p) => p.id === currentProfileId);
+  const speaker = active ? active.name : "the voice";
+  card.replaceChildren();
+  const head = document.createElement("div");
+  head.className = "tag-review-head";
+  head.textContent = n ? `Auto tags added ${n}. Check them before ${speaker} says it.` : "No tags left. Say it plain?";
+  const body = document.createElement("p");
+  body.className = "tag-review-text";
+  const re = /\[([A-Za-z][A-Za-z' \-]{0,38})\]/g;
+  let last = 0;
+  let m;
+  let index = 0;
+  while ((m = re.exec(tagCheck.text))) {
+    if (m.index > last) body.append(tagCheck.text.slice(last, m.index));
+    const i = index;
+    const tag = m[1].toLowerCase();
+    const wrap = document.createElement("span");
+    wrap.className = "tag-review-tagwrap";
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "tag-review-tag" + (tagCheck.menu === i ? " is-open" : "");
+    btn.textContent = tag;
+    btn.title = "Swap or remove this tag";
+    btn.setAttribute("aria-haspopup", "menu");
+    btn.setAttribute("aria-expanded", tagCheck.menu === i ? "true" : "false");
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      tagCheck.menu = tagCheck.menu === i ? -1 : i;
+      renderTagCheck();
+    });
+    wrap.append(btn);
+    if (tagCheck.menu === i) {
+      const menu = document.createElement("span");
+      menu.className = "tag-review-menu";
+      menu.setAttribute("role", "menu");
+      const label = document.createElement("span");
+      label.className = "tag-review-menu-label";
+      label.textContent = "Swap for";
+      menu.append(label);
+      tagSwaps(tag).forEach((t) => {
+        const opt = document.createElement("button");
+        opt.type = "button";
+        opt.setAttribute("role", "menuitem");
+        opt.textContent = t;
+        opt.addEventListener("click", (e) => { e.stopPropagation(); replaceCheckTag(i, t); });
+        menu.append(opt);
+      });
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "is-remove";
+      remove.setAttribute("role", "menuitem");
+      remove.textContent = "Remove this tag";
+      remove.addEventListener("click", (e) => { e.stopPropagation(); replaceCheckTag(i, null); });
+      menu.append(remove);
+      wrap.append(menu);
+    }
+    body.append(wrap);
+    last = m.index + m[0].length;
+    index += 1;
+  }
+  if (last < tagCheck.text.length) body.append(tagCheck.text.slice(last));
+  const foot = document.createElement("div");
+  foot.className = "tag-review-foot";
+  const always = document.createElement("label");
+  always.className = "tag-review-always";
+  const box = document.createElement("input");
+  box.type = "checkbox";
+  box.checked = tagCheckOn();
+  box.addEventListener("change", () => {
+    try { localStorage.setItem(TAG_CHECK_KEY, box.checked ? "on" : "off"); } catch (e) { /* not kept */ }
+    const t = $("tagReviewToggle");
+    if (t) t.checked = box.checked;
+  });
+  always.append(box, " Always check first");
+  const edit = document.createElement("button");
+  edit.type = "button";
+  edit.className = "link-btn";
+  edit.textContent = "Edit";
+  edit.title = "Put it in the box with these tags, to change it yourself";
+  edit.addEventListener("click", () => {
+    noteTagOffers(tagCheck.offered);
+    messageInput.value = tagCheck.text;
+    closeTagCheck();
+    tagCheck.skipNext = tagCheck.text;
+    messageInput.dispatchEvent(new Event("input", { bubbles: true }));
+    messageInput.focus();
+  });
+  const plain = document.createElement("button");
+  plain.type = "button";
+  plain.className = "btn-ghost btn-sm tag-review-plain";
+  plain.textContent = "Without tags";
+  plain.addEventListener("click", () => finishTagCheck(false));
+  const say = document.createElement("button");
+  say.type = "button";
+  say.className = "btn btn-sm tag-review-say";
+  say.innerHTML = "Say it <kbd>↵</kbd>";
+  say.addEventListener("click", () => finishTagCheck(true));
+  foot.append(always, edit, plain, say);
+  card.append(head, body, foot);
+}
+
+function replaceCheckTag(index, tag) {
+  let i = -1;
+  tagCheck.text = tagCheck.text.replace(/\[([A-Za-z][A-Za-z' \-]{0,38})\]\s?/g, (whole, t) => {
+    i += 1;
+    if (i !== index) return whole;
+    return tag ? `[${tag}]` + (whole.endsWith(" ") ? " " : "") : "";
+  }).replace(/\s{2,}/g, " ").trim();
+  tagCheck.menu = -1;
+  renderTagCheck();
+}
+
+function finishTagCheck(withTags) {
+  if (!tagCheck.open || !tagCheck.text) return;
+  const text = withTags ? tagCheck.text : tagCheck.original.replace(/\[[^\]\n]*\]\s?/g, "").trim() || tagCheck.original;
+  noteTagOffers(tagCheck.offered);   // your taste: kept, swapped out or removed
+  closeTagCheck();
+  messageInput.value = text;
+  send({ reviewed: true });
+}
+
+(function wireTagCheck() {
+  const toggle = $("tagReviewToggle");
+  if (toggle) {
+    toggle.checked = tagCheckOn();
+    toggle.addEventListener("change", () => {
+      try { localStorage.setItem(TAG_CHECK_KEY, toggle.checked ? "on" : "off"); } catch (e) { /* not kept */ }
+    });
+  }
+  const input = $("messageInput");
+  const composer = input ? input.closest(".composer") : null;
+  if (!input || !composer) return;
+  // On the page, not just the box: clicking a tag in the card moves the focus.
+  document.addEventListener("keydown", (e) => {
+    const where = document.activeElement;
+    const ours = !where || where === document.body || where === input || (where.closest && where.closest("#tagReview"));
+    if (tagCheck.open && !ours) return;
+    if (!tagCheck.open && e.target !== input) return;
+    if (!tagCheck.open) {
+      // A message you put in the box from the check goes as it is.
+      if (e.target === input && e.key === "Enter" && !e.shiftKey && !e.isComposing
+          && tagCheck.skipNext && input.value.trim() === tagCheck.skipNext.trim()) {
+        tagCheck.skipNext = "";
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        send({ reviewed: true });
+      }
+      return;
+    }
+    if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      if (!tagCheck.busy) finishTagCheck(true);
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      if (tagCheck.menu >= 0) { tagCheck.menu = -1; renderTagCheck(); } else closeTagCheck();
+    }
+  }, true);
+  // Changing the message means the check was for something else.
+  input.addEventListener("input", () => { if (tagCheck.open && !tagCheck.busy) closeTagCheck(); });
+  document.addEventListener("click", (e) => {
+    if (tagCheck.open && tagCheck.menu >= 0 && !e.target.closest(".tag-review-tagwrap")) {
+      tagCheck.menu = -1;
+      renderTagCheck();
+    }
+  });
+})();

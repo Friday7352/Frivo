@@ -4161,3 +4161,219 @@ html.motion-ready .stage { transition: transform var(--dur-smooth) var(--spring-
 .taste-chip.is-liked { color: #3fb27f; border-color: rgba(63, 178, 127, 0.4); background: rgba(63, 178, 127, 0.08); }
 .taste-chip.is-avoided { color: #e06c6c; border-color: rgba(224, 108, 108, 0.4); background: rgba(224, 108, 108, 0.08); text-decoration: line-through; text-decoration-color: rgba(224, 108, 108, 0.5); }
 #tagTasteReset { margin-top: 6px; align-self: flex-start; }
+
+
+/* =========================================================================
+   NEW (1.5.0): the message box grows upwards; [ for tags; checking Auto tags
+   ========================================================================= */
+/* The buttons stay on the bottom line while the box grows above them. */
+.composer { align-items: flex-end; }
+.composer textarea#messageInput {
+  flex: 1;
+  align-self: stretch;
+  width: auto;
+  min-width: 0;
+  min-height: 40px;
+  max-height: min(42vh, 288px);
+  margin: 0;
+  padding: 8px 4px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: var(--text-body);
+  line-height: 1.5;
+  resize: none;
+  overflow-y: auto;
+  field-sizing: content;
+  scrollbar-width: thin;
+}
+.composer textarea#messageInput:focus { border: 0; box-shadow: none; outline: none; }
+.composer.is-checking textarea#messageInput { opacity: 0.55; }
+
+/* [ for tags: a small list just above the cursor. */
+.tag-bracket {
+  position: absolute;
+  z-index: 40;
+  width: 280px;
+  padding: 4px;
+  border: 1px solid var(--rule);
+  border-radius: 12px;
+  background: var(--surface-2);
+  box-shadow: var(--shadow-lg);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  animation: picker-in 140ms var(--ease);
+}
+.tag-bracket.is-hidden { display: none; }
+.tag-bracket-head {
+  padding: 6px 8px 4px;
+  font-size: var(--text-caption2);
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+.tag-bracket-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--text-subhead);
+  text-align: left;
+  cursor: pointer;
+}
+.tag-bracket-item:hover { background: var(--fill); }
+.tag-bracket-item.is-picked { background: var(--accent-soft); }
+.tag-bracket-name { font-family: var(--font-mono); font-size: 13px; }
+.tag-bracket-name b { font-weight: 500; color: var(--accent); }
+.tag-bracket-kind { margin-left: auto; font-size: var(--text-caption); color: var(--ink-dim); }
+.tag-bracket-item.is-fav .tag-bracket-kind { color: var(--accent); }
+.tag-bracket-foot {
+  display: flex;
+  gap: 12px;
+  margin: 3px -4px -4px;
+  padding: 7px 12px;
+  border-top: 1px solid var(--rule-soft);
+  border-radius: 0 0 12px 12px;
+  background: var(--surface);
+  font-size: var(--text-caption);
+  color: var(--ink-dim);
+}
+.tag-bracket-foot kbd, .tag-review-say kbd {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink);
+}
+.tag-review-say kbd { color: inherit; opacity: 0.8; margin-left: 2px; }
+
+/* Check auto tags first: a card over the box. */
+.tag-review {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 10px);
+  z-index: 35;
+  border: 1px solid var(--rule);
+  border-radius: 16px;
+  background: var(--surface-2);
+  box-shadow: var(--shadow-lg);
+  animation: picker-in 160ms var(--ease);
+}
+.tag-review.is-hidden { display: none; }
+.tag-review-wait { padding: 14px 16px; font-size: var(--text-subhead); color: var(--ink-dim); }
+.tag-review-wait::before {
+  content: "";
+  display: inline-block;
+  width: 10px; height: 10px; margin-right: 8px;
+  border-radius: 999px;
+  background: var(--accent);
+  animation: pm-breathe 1.1s ease-in-out infinite;
+}
+.tag-review-head { padding: 14px 16px 4px; font-size: var(--text-subhead); font-weight: 600; color: var(--ink); }
+.tag-review-text {
+  margin: 0;
+  padding: 6px 16px 14px;
+  font-size: var(--text-body);
+  line-height: 1.9;
+  color: var(--ink);
+  max-height: 40vh;
+  overflow-y: auto;
+}
+.tag-review-tagwrap { position: relative; display: inline-block; }
+.tag-review-tag {
+  margin: 0 2px;
+  padding: 1px 8px;
+  border: 1px solid var(--accent-line);
+  border-radius: 6px;
+  background: var(--accent-soft);
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-style: italic;
+  line-height: 1.6;
+  cursor: pointer;
+}
+.tag-review-tag::after { content: " ▾"; font-style: normal; color: var(--accent); font-size: 10px; }
+.tag-review-tag:hover, .tag-review-tag.is-open { border-color: var(--accent); }
+.tag-review-menu {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 4px);
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  min-width: 180px;
+  padding: 4px;
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  background: var(--surface-3);
+  box-shadow: var(--shadow-md);
+  line-height: 1.3;
+}
+.tag-review-menu-label {
+  padding: 4px 8px;
+  font-size: var(--text-caption2);
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+.tag-review-menu button {
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--ink);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.tag-review-menu button:hover, .tag-review-menu button:focus-visible { background: var(--accent-soft); outline: none; }
+.tag-review-menu button.is-remove {
+  margin-top: 2px;
+  border-top: 1px solid var(--rule-soft);
+  border-radius: 0 0 6px 6px;
+  font-family: var(--font-body);
+  color: var(--ink-dim);
+}
+.tag-review-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px 10px 16px;
+  border-top: 1px solid var(--rule-soft);
+  border-radius: 0 0 16px 16px;
+  background: var(--surface);
+}
+.tag-review-always {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-right: auto;
+  font-size: var(--text-caption);
+  color: var(--ink-dim);
+  cursor: pointer;
+}
+.tag-review-always input { width: 15px; height: 15px; margin: 0; accent-color: var(--accent); }
+@media (prefers-reduced-motion: reduce) {
+  .tag-bracket, .tag-review { animation: none; }
+  .tag-review-wait::before { animation: none; }
+}
+
+/* Past one line, the message takes the whole width; the buttons sit under it. */
+.composer { flex-wrap: wrap; }
+.composer.is-tall textarea#messageInput { flex: 1 0 100%; order: -1; }
+.composer.is-tall #voiceTagWrap { margin-left: auto; }
+.composer.is-tall #voiceTagWrap.is-hidden + * { margin-left: auto; }
+/* The swap list must not be cut off by the card. */
+.tag-review-text { max-height: none; overflow: visible; }

@@ -504,9 +504,18 @@
               </div>
             </div>
 
-            <!-- The message box: one row. -->
+            <!-- The message box. CHANGED (1.5.0): it grows upwards as you
+                 type, so the whole message (and every tag idea) is in view.
+                 Enter sends; Shift+Enter starts a new line. -->
             <div class="composer">
-              <input type="text" id="messageInput" placeholder="Say something…" autocomplete="off">
+              <textarea id="messageInput" rows="1" placeholder="Say something…" autocomplete="off"
+                        aria-label="Message"></textarea>
+
+              <!-- NEW (1.5.0): type [ for a tag. A short list at the cursor. -->
+              <div class="tag-bracket is-hidden" id="tagBracket" role="listbox" aria-label="Voice tags"></div>
+
+              <!-- NEW (1.5.0): Auto tags, checked before they're spoken. -->
+              <div class="tag-review is-hidden" id="tagReview" role="dialog" aria-label="Check the voice tags"></div>
 
               <!-- NEW (1.5.0): voice-tag ideas for what you're typing, from
                    the AI a moment after you pause (ElevenLabs voices). Each
@@ -570,12 +579,28 @@
                       </span>
                       <span class="switch"><input type="checkbox" id="autoTagsToggle"><span class="switch-track" aria-hidden="true"></span></span>
                     </label>
+                    <!-- NEW (1.5.0) -->
+                    <label class="voice-tag-option" id="tagReviewOption">
+                      <span class="voice-tag-option-text">
+                        <span class="voice-tag-option-label">Check auto tags first</span>
+                        <span class="voice-tag-option-hint">Enter shows the tags; Enter again says it. For Clean up and Word for word.</span>
+                      </span>
+                      <span class="switch"><input type="checkbox" id="tagReviewToggle"><span class="switch-track" aria-hidden="true"></span></span>
+                    </label>
                     <label class="voice-tag-option">
                       <span class="voice-tag-option-text">
                         <span class="voice-tag-option-label">Ideas as I type</span>
                         <span class="voice-tag-option-hint">After a pause, above the words they'd go before.</span>
                       </span>
                       <span class="switch"><input type="checkbox" id="tagIdeasToggle" checked><span class="switch-track" aria-hidden="true"></span></span>
+                    </label>
+                    <!-- NEW (1.5.0) -->
+                    <label class="voice-tag-option">
+                      <span class="voice-tag-option-text">
+                        <span class="voice-tag-option-label">Type [ for tags</span>
+                        <span class="voice-tag-option-hint">A tag list pops up at the cursor. Esc leaves a plain bracket.</span>
+                      </span>
+                      <span class="switch"><input type="checkbox" id="tagBracketToggle" checked><span class="switch-track" aria-hidden="true"></span></span>
                     </label>
                   </div>
                   <p class="voice-tag-note" id="voiceTagNote"></p>
