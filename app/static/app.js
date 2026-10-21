@@ -263,6 +263,30 @@ function buildRadioGroup(containerEl, items, groupName, selectedId, onChange) {
     if (item.description) pill.title = item.description;
 
     pill.append(input, label);
+    // NEW (1.6.0): a choice that says what it is and what it runs on is a
+    // card (Chat replies), not a pill.
+    if (item.summary) {
+      containerEl.classList.add("radio-row--cards");
+      const add = (cls, text, lead) => {
+        if (!text) return;
+        const line = document.createElement("span");
+        line.className = cls;
+        if (lead) {
+          const b = document.createElement("span");
+          b.className = "radio-card-lead";
+          b.textContent = lead;
+          line.append(b, " ", text);
+        } else {
+          line.textContent = text;
+        }
+        pill.appendChild(line);
+      };
+      pill.dataset.id = item.id;
+      if (item.compact) pill.classList.add("is-compact");
+      add("radio-card-summary", item.summary);
+      add("radio-card-meta", item.runs_on, "Runs on");
+      add("radio-card-meta radio-card-uses", item.uses, "Uses");
+    }
 
     input.addEventListener("change", () => {
       containerEl.querySelectorAll(".radio-pill").forEach((p) => p.classList.remove("is-checked"));
@@ -285,12 +309,16 @@ const LOCAL_STATUS_POLL_MS = 30000;
 let localStatusTimer = null;
 
 function serviceChipTitle(service) {
-  const lines = [`${service.name} at ${service.url}`, service.message];
+  const lines = [`${service.name}: ${service.url}`, service.message].filter(Boolean);   // CHANGED (1.6.0)
   // FrivOSC has nothing to fall back to — if it is down, VRChat just gets
   // nothing. Only the providers with an OpenAI path behind them get the
   // warning about paying for it.
-  if (!service.ok && service.fallback !== false) {
+  // CHANGED (1.6.0): only when it really falls back (the switch is on and
+  // there's an OpenAI key); otherwise what happens meanwhile, if anything.
+  if (!service.ok && service.fallback === true) {
     lines.push("Falling back to OpenAI, which costs credits.");
+  } else if (!service.ok && service.fallback_note) {
+    lines.push(service.fallback_note + ".");
   }
   return lines.join("\n");
 }
@@ -304,6 +332,9 @@ let renderedServiceIds = "";
 const SERVICE_SETTINGS_TARGET = {
   whisper: { section: "providers" },
   ollama: { section: "providers" },
+  builtin: { section: "providers" },   // NEW (1.6.0)
+  openai: { section: "providers" },    // NEW (1.6.0)
+  none: { section: "providers" },      // NEW (1.6.0)
   frivosc: { section: "vrchat" },
 };
 
@@ -340,10 +371,12 @@ function paintServiceBlock(block, service) {
   chip.className = "service-status " + (service.ok ? "is-ok" : "is-down");
   chip.title = serviceChipTitle(service);
   block.querySelector(".service-status-name").textContent = service.name;
-  block.querySelector(".service-status-state").textContent = service.ok ? "· connected" : "· unreachable";
+  // CHANGED (1.6.0): "not downloaded", "for replies", "no key", say.
+  block.querySelector(".service-status-state").textContent = `· ${service.state || (service.ok ? "connected" : "unreachable")}`;
   const detail = block.querySelector(".service-status-detail");
   detail.textContent = service.ok ? (service.url || "") : (service.message || "");
-  if (!service.ok && service.fallback !== false) detail.textContent += " · falling back to OpenAI";
+  if (!service.ok && service.fallback === true) detail.textContent += " · falling back to OpenAI";
+  else if (!service.ok && service.fallback_note) detail.textContent += ` · ${service.fallback_note}`;
 }
 
 // What the pill says when something is down: the first service that is.
@@ -353,7 +386,7 @@ function paintStatusPill(services) {
   const down = services.filter((s) => !s.ok);
   pill.classList.toggle("is-down", down.length > 0);
   const text = $("statusPillText");
-  if (text && down.length) text.textContent = `${down[0].name} offline`;
+  if (text && down.length) text.textContent = `${down[0].name} ${down[0].state || "offline"}`;   // CHANGED (1.6.0)
   else if (text && readyLamp.classList.contains("is-lit")) text.textContent = "Ready";
 }
 
@@ -497,6 +530,8 @@ function buildProviderPickers(settings) {
     });
     if (group.noteEl) {
       group.noteEl.textContent = providerNoteFor(group.list, group.selected);
+      // NEW (1.6.0): the cards say it themselves.
+      group.noteEl.classList.toggle("is-hidden", group.list.some((p) => p.summary));
     }
   });
 
@@ -505,6 +540,7 @@ function buildProviderPickers(settings) {
   if (ollamaModelBalanced) ollamaModelBalanced.value = settings.ollama_model_balanced || "";   // NEW (1.5.0)
   if (ollamaModelBest) ollamaModelBest.value = settings.ollama_model_best || "";               // NEW (1.5.0)
   if (ollamaIdleUnload) ollamaIdleUnload.value = settings.ollama_idle_unload || "1h";        // NEW (1.5.0)
+  if ($("builtinIdle")) $("builtinIdle").value = settings.builtin_ai_idle || "1h";            // NEW (1.6.0)
   if ($("evoraIdleListen")) $("evoraIdleListen").value = settings.evora_idle_listen || "5m";   // NEW (1.5.0)
   if ($("evoraIdleSpeech")) $("evoraIdleSpeech").value = settings.evora_idle_speech || "1h";   // NEW (1.5.0)
   if (typeof setAiChipTier === "function") setAiChipTier(settings.ollama_tier || "fast");     // NEW (1.5.0)
@@ -513,8 +549,11 @@ function buildProviderPickers(settings) {
   }
   if (whisperUrl) whisperUrl.value = settings.whisper_url || "";
   if (allowFallbackToggle) allowFallbackToggle.checked = Boolean(settings.allow_openai_fallback);
+  // NEW (1.6.0): only offered with an OpenAI key to fall back on.
+  if ($("allowFallbackRow")) $("allowFallbackRow").classList.toggle("is-hidden", !settings.openai_key_set);
 
   syncProviderVisibility();
+  if (typeof omCardUses === "function") omCardUses();   // NEW (1.6.0): your models' sizes, once known
 
   // Populate the model dropdown straight away when local Whisper is the
   // selected provider. Previously this only happened after clicking Test,
@@ -1782,6 +1821,15 @@ function addTurn(who, text, opts = {}) {
     flag.className = "turn-flag";
     flag.textContent = "Trimmed to last full sentence";
     stack.appendChild(flag);
+  } else if (opts.ruleCleanup) {
+    // NEW (1.6.0): no AI to ask, so Frivo's rules cleaned it up.
+    const flag = document.createElement("span");
+    flag.className = "turn-flag";
+    flag.textContent = "Cleaned up without AI";
+    flag.title = "Spelling, capitals and punctuation fixed by Frivo's rules"
+      + (opts.ruleCleanupReason ? ` (${opts.ruleCleanupReason})` : "")
+      + ". The AI does the rest: misheard words and garbled sentences.";
+    stack.appendChild(flag);
   } else if (opts.keptExact) {
     // NEW (1.5.0): Echo tried to reword it, so your own words were used.
     const flag = document.createElement("span");
@@ -2109,6 +2157,7 @@ async function saveAllSettings({ close = false, quiet = false } = {}) {
     ollama_model_balanced: ollamaModelBalanced ? ollamaModelBalanced.value.trim() : "",   // NEW (1.5.0)
     ollama_model_best: ollamaModelBest ? ollamaModelBest.value.trim() : "",               // NEW (1.5.0)
     ollama_idle_unload: ollamaIdleUnload ? ollamaIdleUnload.value : "1h",                  // NEW (1.5.0)
+    builtin_ai_idle: $("builtinIdle") ? $("builtinIdle").value : "1h",                       // NEW (1.6.0)
     evora_idle_listen: $("evoraIdleListen") ? $("evoraIdleListen").value : "5m",           // NEW (1.5.0)
     evora_idle_speech: $("evoraIdleSpeech") ? $("evoraIdleSpeech").value : "1h",           // NEW (1.5.0)
     ollama_translation_model: ollamaTranslationModel
@@ -6507,6 +6556,8 @@ async function send(opts = {}) {
       condensed: data.condensed,
       repaired: data.repaired,
       keptExact: data.kept_exact,  // NEW (1.5.0)
+      ruleCleanup: data.rule_cleanup,  // NEW (1.6.0): no AI, Frivo's rules
+      ruleCleanupReason: data.rule_cleanup_reason || "",
       voiceEngineName: data.voice_engine_name,  // NEW (1.5.0)
       textEngineName: data.text_engine_name || (data.text_seconds ? "" : "No AI"),  // NEW (1.5.0)
       voiceEngine: data.voice_engine,  // NEW (1.5.0)
@@ -11962,6 +12013,7 @@ function omPollIfPulling() {
 }
 
 function omRender() {
+  omCardUses();   // NEW (1.6.0)
   omRenderDrive();
   omRenderInstalled();
   omRenderSuggestions();
@@ -13665,3 +13717,225 @@ async function checkElevenKey(force) {
   langSel.addEventListener("change", () => { store.set(LANG_KEY, langSel.value); list.scrollTop = 0; render(); });
   qualSel.addEventListener("change", () => { store.set(QUAL_KEY, qualSel.value); list.scrollTop = 0; render(); });
 })();
+
+
+// ---------------------------------------------------------------------------
+// NEW (1.6.0): the built-in AI (Settings > Providers > Built-in AI).
+// One button: downloads the engine and the model, checks them, and switches
+// Chat replies to Built-in. Then Test, the idle timer, and Remove.
+// ---------------------------------------------------------------------------
+(function initBuiltinAI() {
+  const card = $("builtinCard");
+  if (!card) return;
+  const modelsEl = $("builtinModels");
+  const getBtn = $("builtinGetBtn");
+  const cancelBtn = $("builtinCancelBtn");
+  const testBtn = $("builtinTestBtn");
+  const statusEl = $("builtinStatus");
+  const progress = $("builtinProgress");
+  let info = null;
+  let chosen = "small";
+  let poll = null;
+  let lastJobState = "";
+  let pickedHere = false;   // a model picked on this page wins over what the server last said
+  const gb = (n) => `${(n / 1e9).toFixed(1)} GB`;
+  const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+  function say(text, kind) {
+    statusEl.textContent = text || "";
+    statusEl.classList.toggle("is-error", kind === "error");
+    statusEl.classList.toggle("is-ok", kind === "ok");
+  }
+
+  function renderModels() {
+    modelsEl.innerHTML = (info.models || []).map((m) => {
+      const fits = info.memory_gb ? info.memory_gb >= m.memory_gb + 2 : true;
+      const badge = m.downloaded ? '<span class="om-badge is-fits">Downloaded</span>'
+        : fits ? "" : `<span class="om-badge is-tight" title="The PC Frivo runs on has ${info.memory_gb} GB of memory">Tight on memory</span>`;
+      return `<label class="bai-model${m.id === chosen ? " is-checked" : ""}">`
+        + `<input type="radio" name="builtin_ai_model" value="${esc(m.id)}"${m.id === chosen ? " checked" : ""}>`
+        + `<span class="bai-model-top"><span class="bai-model-name">${esc(m.name)}</span>${badge}</span>`
+        + `<span class="bai-model-sub">${esc(m.model)} · ${gb(m.size)} download · about ${m.memory_gb} GB of memory</span>`
+        + `<span class="bai-model-note">${esc(m.note)}</span>`
+        + (m.downloaded ? `<button type="button" class="bai-model-remove" data-remove="${esc(m.id)}">Remove</button>` : "")
+        + "</label>";
+    }).join("");
+  }
+
+  function render() {
+    if (!info) return;
+    const value = $("builtinValue");
+    const model = (info.models || []).find((m) => m.id === chosen) || {};
+    const ready = info.engine && model.downloaded;
+    const active = (info.models || []).find((m) => m.id === info.active_model) || {};
+    const job = info.job || {};
+    const busy = ["checking", "engine", "model"].includes(job.state);
+    renderModels();
+    $("builtinModelNote").textContent = info.memory_gb
+      ? `The PC Frivo runs on has ${info.memory_gb} GB of memory. The AI uses ${info.threads} of its processor threads while it writes.`
+      : "";
+    value.textContent = !info.supported ? "Not available" : info.in_use && ready ? "In use"
+      : ready ? "Downloaded" : busy ? "Downloading" : "Not downloaded";
+    progress.classList.toggle("is-hidden", !busy);
+    cancelBtn.classList.toggle("is-hidden", !busy);
+    testBtn.classList.toggle("is-hidden", !ready || busy);
+    getBtn.classList.toggle("is-hidden", busy || (ready && info.in_use));
+    getBtn.textContent = ready ? "Use the built-in AI" : `Download and use (${gb(model.size || 0)})`;
+    getBtn.disabled = !info.supported;
+    $("builtinRemoveRow").classList.toggle("is-hidden", !info.engine && !(info.models || []).some((m) => m.downloaded));
+    $("builtinFolder").textContent = info.folder ? `Kept in ${info.folder}` : "";
+    if (busy) {
+      const pct = job.total ? Math.min(100, Math.round((job.done / job.total) * 100)) : 0;
+      $("builtinProgressText").textContent = job.state === "engine" ? "Downloading the engine…"
+        : job.state === "model" ? `Downloading ${model.model || "the model"}…` : "Getting ready…";
+      $("builtinProgressPct").textContent = job.total ? `${gb(job.done)} of ${gb(job.total)} · ${pct}%` : "";
+      $("builtinProgressBar").style.width = `${pct}%`;
+    }
+    if (!info.supported) say(info.problem, "error");
+    else if (job.state === "error" && lastJobState !== "shown-error") say(job.error, "error");
+    else if (!busy && ready && info.in_use && !statusEl.textContent) {
+      say(info.running ? `${model.model} is running.` : `${model.model} starts with the next reply (a few seconds).`, "ok");
+    } else if (!busy && !ready && info.in_use && active.downloaded && !statusEl.textContent) {
+      say(`Replies use ${active.model} until ${model.model} is downloaded.`);
+    }
+  }
+
+  async function refresh() {
+    try {
+      const res = await fetch("/api/builtin-ai");
+      info = await res.json();
+      if (!poll && !pickedHere && info.model) chosen = info.model;
+      const job = info.job || {};
+      const busy = ["checking", "engine", "model"].includes(job.state);
+      if (lastJobState && ["checking", "engine", "model"].includes(lastJobState) && job.state === "done") {
+        say(`Ready. Chat replies now use the built-in AI (${(info.models.find((m) => m.id === chosen) || {}).model}).`, "ok");
+        if (typeof loadSettings === "function") loadSettings();   // the provider changed on the server
+      } else if (lastJobState && ["checking", "engine", "model"].includes(lastJobState) && job.state === "cancelled") {
+        say("Cancelled. Nothing was kept.");
+      }
+      render();
+      if (job.state === "error") lastJobState = "shown-error"; else lastJobState = job.state || "";
+      clearTimeout(poll);
+      poll = busy ? setTimeout(refresh, 800) : null;
+    } catch (_) { /* tried again when the card is shown */ }
+  }
+
+  modelsEl.addEventListener("change", (e) => {
+    if (e.target.name !== "builtin_ai_model") return;
+    chosen = e.target.value;
+    pickedHere = true;
+    say("");
+    render();
+    // Saved like any setting, so a downloaded model is used straight away.
+    fetch("/api/settings", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ builtin_ai_model: chosen }) }).catch(() => {});
+  });
+  modelsEl.addEventListener("click", async (e) => {
+    const btn = e.target.closest("[data-remove]");
+    if (!btn) return;
+    e.preventDefault();
+    if (btn.dataset.armed !== "1") {
+      btn.dataset.armed = "1";
+      btn.textContent = "Remove? Click again";
+      setTimeout(() => { btn.dataset.armed = ""; btn.textContent = "Remove"; }, 3000);
+      return;
+    }
+    await fetch(`/api/builtin-ai/${encodeURIComponent(btn.dataset.remove)}`, { method: "DELETE" }).catch(() => {});
+    say("Removed.");
+    if (typeof loadSettings === "function") loadSettings();
+    refresh();
+  });
+  getBtn.addEventListener("click", async () => {
+    say("");
+    getBtn.disabled = true;
+    try {
+      const res = await fetch("/api/builtin-ai/download", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model: chosen, use: true }) });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `Frivo said ${res.status}`);
+      if (data.ready) {
+        say("Chat replies now use the built-in AI.", "ok");
+        if (typeof loadSettings === "function") loadSettings();
+      }
+      lastJobState = "checking";
+    } catch (err) {
+      say(err.message || String(err), "error");
+    } finally {
+      getBtn.disabled = false;
+    }
+    refresh();
+  });
+  cancelBtn.addEventListener("click", () => fetch("/api/builtin-ai/cancel", { method: "POST" }).then(refresh));
+  testBtn.addEventListener("click", async () => {
+    testBtn.disabled = true;
+    say("Starting it and asking for a line…");
+    try {
+      const res = await fetch("/api/builtin-ai/test", { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `Frivo said ${res.status}`);
+      say(`"${data.text}" in ${data.seconds} s` + (data.start_seconds > 1 ? ` (${data.start_seconds} s of that was starting up)` : "") + ".", "ok");
+    } catch (err) {
+      say(err.message || String(err), "error");
+    } finally {
+      testBtn.disabled = false;
+      refresh();
+    }
+  });
+  $("builtinRemoveBtn").addEventListener("click", async (e) => {
+    const btn = e.currentTarget;
+    if (btn.dataset.armed !== "1") {
+      btn.dataset.armed = "1";
+      btn.textContent = "Remove everything?";
+      setTimeout(() => { btn.dataset.armed = ""; btn.textContent = "Remove"; }, 3000);
+      return;
+    }
+    btn.dataset.armed = "";
+    btn.textContent = "Remove";
+    await fetch("/api/builtin-ai", { method: "DELETE" }).catch(() => {});
+    say("Removed. Clean up in English still works without AI.");
+    if (typeof loadSettings === "function") loadSettings();
+    refresh();
+  });
+
+  // Fetched when Providers is opened, and once at the start.
+  document.addEventListener("click", (e) => {
+    // CHANGED (1.6.0): only the Providers button in the list on the left.
+    // (Matching the whole section re-drew the card on every click inside it,
+    // which undid Remove's "click again" and put the model choice back.)
+    if (e.target.closest && e.target.closest('.settings-nav-btn[data-settings-section="providers"]')) {
+      setTimeout(refresh, 50);
+      // So the Ollama card can say what your own models use.
+      if (typeof omLoad === "function" && !(omState && omState.data)) setTimeout(omLoad, 80);
+    }
+  });
+  refresh();
+})();
+
+
+// NEW (1.6.0): the Ollama card under Chat replies says what *your* three
+// models use, once Ollama has said how big they are. (Until then, or if
+// Ollama can't be reached, it gives the usual range.)
+function omCardUses() {
+  const line = document.querySelector('#chatProviderRadios .radio-pill[data-id="ollama"] .radio-card-uses');
+  const data = omState.data;
+  if (!line || !data || !data.reachable) return;
+  const installed = data.installed || [];
+  const sizeOf = (name) => {
+    name = (name || "").trim();
+    if (!name) return null;
+    const full = name.includes(":") ? name : `${name}:latest`;
+    const m = installed.find((x) => x.name === name || x.name === full);
+    return m ? m.size : null;
+  };
+  const tiers = [["Fast", ollamaModel], ["Balanced", ollamaModelBalanced], ["Best", ollamaModelBest]]
+    .map(([label, el]) => [label, sizeOf(el && el.value)])
+    .filter(([, size]) => size);
+  if (!tiers.length) return;
+  // Loaded, a model takes about its file size plus room for the conversation.
+  const gb = (bytes) => (bytes * 1.1 / 1e9 + 0.4).toFixed(1);
+  const parts = tiers.map(([label, size]) => `${gb(size)} GB (${label})`);
+  const lead = line.querySelector(".radio-card-lead");
+  line.textContent = "";
+  if (lead) line.append(lead, " ");
+  line.append(`About ${parts.join(", ")} of graphics memory with your models; only one is loaded at a time. Free.`);
+}

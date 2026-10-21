@@ -348,3 +348,69 @@ Above the personality box, in the profile editor and in Settings > Replies. It u
 - **Tag amount** (Settings > Voices, and each profile): Subtle, Normal or Dramatic.
 - **Your tag taste.** Frivo notices which suggested tags you keep, delete or add yourself, and which replies you retake without tags. The AI leans towards the ones you keep; one you always remove stops being added. Settings > Voices shows what it has learned, with Forget my taste.
 - **Retake** on a spoken ElevenLabs reply: Say it again, Without tags, or Different tags. The words stay the same, the new take replaces the old one, and the AI's memory of the conversation keeps the version you heard.
+
+### Fixed: tags stepping down to v2
+
+- A message that was only tags and emoji (or bracketed words) reached ElevenLabs with nothing to say, and its refusal ("Input at position 0 has empty text") was taken as v4 and v3 not working. Frivo gave up on them for an hour and every line went out on v2. Now a line always has something spoken in it, and a refusal about the text itself never counts against a model.
+- Suggestions no longer turn your own words into tags (`[i was thinking]`). Anything bracketed that's really part of your message is put back as plain words.
+
+## Typing tags, made easy
+
+- **The message box grows upwards** as you type, so a long message and all its tags stay in view without scrolling.
+- **Type `[` for tags.** A list pops up at the cursor: tags matching what you type, your favourites and the ones you use most. Enter puts it in, the arrows choose, and Esc leaves a plain bracket. Turn it off in the ✦ menu.
+- **Check auto tags first.** With Auto tags on, Enter shows the message with its tags before anything is said. Click a tag to swap or remove it, then Enter again to say it, or **Without tags**. For Clean up and Word for word.
+
+## Tags you can see and move
+
+The message box shows tags as small pills instead of bracketed text.
+
+- **Pills.** A tag is one piece: Backspace removes the whole tag, and clicking it opens a menu to swap it for a similar tag or remove it.
+- **Drag a pill** to move it. It follows your pointer smoothly, snaps between words, and the spot it'll land in is softly magnified, like iOS.
+- **Ideas show in place.** The AI's suggestions appear as faded pills where they'd go; **Tab** takes the next one.
+- **Instant tags.** Your Tag words (lol, haha, ugh, im dead…) and emoji like 😂 turn into their tag as you type. Backspace straight after puts the word back. **Turn lol into tags** in the ✦ menu switches it off.
+- **No more `[neutral]`.** Empty tags like neutral and normal, which do nothing, are never suggested.
+
+## Every line on the Tags model
+
+**Use it for every line** (Settings > Voices, on by default): lines without tags are spoken with the Tags model too, so a voice sounds the same on every line instead of switching to v2 between tagged ones. Off goes back to v2 for untagged lines.
+
+## Start speaking sooner
+
+**Start speaking sooner** (Settings > Voices, on by default) plays an ElevenLabs reply while it's still being made, so the voice starts sooner. It costs the same credits, and the chatbox pages and the word glow keep their exact timing. Off waits for the whole clip, as before. If streaming fails, the reply is made the usual way.
+
+## Manage local AI models from Frivo
+
+**Settings > Providers > Models on the Ollama PC**:
+
+- See every model installed on the Ollama PC with its size, and remove the ones you don't use.
+- **Download** a model by name with a progress bar, or pick from **Suggestions** sorted by what fits your graphics card (with room left for Evora). Each one says whether it fits, is tight, or is too big.
+- **Drive space** on the Ollama PC (models' share and what's free), from the latest Evora. Downloads go wherever Ollama keeps its models, including another drive set with `OLLAMA_MODELS`.
+- Put any installed model in Fast, Balanced or Best in one click.
+- A model name typed without its owner or tag is matched to the installed one automatically, and a wrong name suggests the closest ones.
+
+## ElevenLabs key, explained
+
+- **Accounts & keys > ElevenLabs** has a **Get a key** link and step-by-step instructions for making a key, including the permissions it needs.
+- The key is now actually tried: Frivo shows how many voices it can see and your plan's credits, or says exactly what's wrong. A key that isn't accepted, or one without permission to read voices (the cause of "connected, but no voices"), names the missing permission. The voice list says why it's empty instead of showing nothing.
+
+## Other PCs can reach Frivo
+
+Setup's "allow other computers" firewall rule only allowed the local subnet, so a PC on another part of the home network (or another VLAN) timed out. It now allows every private network range: `10.x`, `172.16–31.x` and `192.168.x`. Run setup again (Repair) to update an existing rule.
+
+## Back up and restore
+
+**Settings > Updates > Back up & restore**:
+
+- **Download a backup**: one zip with your settings, profiles, saved replies and their audio, tag taste, accent anchors, and what the browser keeps (favourite voices, your tags, recent voices). API keys and voices you added are left out unless you switch them on.
+- **Restore from a file** adds to what's there and deletes nothing. A profile that's already here is updated from the backup, saved replies already there aren't doubled, and this PC's own Ollama and Evora addresses are kept. A key is only filled in if this PC doesn't have one.
+- It also restores a zipped data folder from an older Frivo (the folder with `config.json`, `profiles.json` and `saved`) and the **Export all** zip from Saved replies, for moving to a new PC.
+
+## The free voice library
+
+**Browse free voices** at the bottom of the voice list opens every voice in the Piper voice library: free voices in dozens of languages.
+
+- **Play** any voice to hear its sample. Its licence shows too, because some are for personal use only.
+- **Download** with a progress bar and Cancel. The files are checked against the library's checksums, then converted and tried out like **Add a voice**. They're listed under **Free · added by you**, and the button becomes **Use**.
+- Filter by language and quality. **Medium** matches Frivo's own voices, and **high** is clearer but uses about twice the CPU. Like every free voice, they run on the processor, never the graphics card.
+- The window shows the drive's free space and refuses a download that won't fit. Voices you already have show as **Added** or **Included**.
+- Frivo fetches the samples and files itself, so only the PC Frivo runs on needs to reach Hugging Face.
