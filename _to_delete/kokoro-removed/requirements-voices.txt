@@ -1,8 +1,0 @@
-# NEW (1.5.0): the free voices that run on this PC (Kokoro).
-#
-# Optional. Setup installs these after requirements.txt, and a failure here
-# never fails setup: Frivo still runs, and ElevenLabs and the voices built
-# into Windows still work. Kokoro supports Python 3.10-3.13, so on any other
-# version this installs nothing and Frivo says why in Settings.
-
-kokoro-onnx>=0.6,<0.7; python_version >= "3.10" and python_version < "3.14"

@@ -1,10 +1,20 @@
 # Private Frivo data — never publish these files.
+# When Frivo runs from this folder, it keeps its data next to app.py.
 config.json
 profiles.json
 usage.json
 launcher.json
 server.log
 *.log
+# CHANGED (1.5.0): the rest of Frivo's data, anywhere in the repo
+voice_anchors.json
+tag_taste.json
+app/audio_cache/
+app/saved/
+app/anchors/
+app/voice_library/
+# Backups made from Settings > Updates hold your settings and replies.
+Frivo backup*.zip
 
 # Environment variables and credentials.
 .env
@@ -21,21 +31,32 @@ ca.key
 # hand, and committing it would put a second copy of the version in the repo.
 build/Version.generated.cs
 .venv/
+venv/
 __pycache__/
 *.py[cod]
+.pytest_cache/
 dist/
 build/FrivoHost.exe
+
 # Written by tests/test-update-ui.py for looking at, not for keeping.
 tests/screenshots/
+# NEW (1.5.0): output of tests/check-windows-voices.bat
+tests/windows-voice-check/
+
+# NEW (1.5.0): voices. Setup downloads Frivo's own (app/voice_pack.py), and
+# voices you add or download from the library live here too. Never committed.
+app/voices/
+*.onnx
+*.onnx.json
+*.tar.bz2
+
+# NEW (1.5.0): files set aside for deleting by hand; never committed
+_to_delete/
 
 # Editor and operating-system files.
 .vscode/
 .vs/
+.idea/
 Thumbs.db
 Desktop.ini
-# NEW (1.5.0): output of tests/check-windows-voices.bat
-tests/windows-voice-check/
-# NEW (1.5.0): the free voices; setup downloads them (app/voice_pack.py)
-app/voices/
-# NEW (1.5.0): files set aside for deleting by hand; never committed
-_to_delete/
+.DS_Store
