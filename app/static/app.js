@@ -1947,6 +1947,7 @@ async function saveAllSettings({ close = false, quiet = false } = {}) {
     hold_accent: $("holdAccentRadios") ? getRadioValue($("holdAccentRadios"), "anchor") : "anchor",   // NEW (1.5.0)
     voice_accent: $("voiceAccentSelect") ? $("voiceAccentSelect").value : "auto",   // NEW (1.5.0)
     expressive_model: $("expressiveModelRadios") ? getRadioValue($("expressiveModelRadios"), "eleven_v4") : "eleven_v4",   // NEW (1.5.0)
+    expressive_every_line: $("expressiveEveryLine") ? $("expressiveEveryLine").checked : true,   // NEW (1.5.0)
     voice_delivery: $("voiceDeliveryRadios") ? getRadioValue($("voiceDeliveryRadios"), "natural") : "natural",
     temperature: temperatureSlider ? parseInt(temperatureSlider.value, 10) / 100 : 0.7,
     max_tokens: readMaxTokensSetting(),
@@ -9450,6 +9451,8 @@ function applyVoiceStyleSettings(data) {
     buildRadioGroup(hold, data.hold_accent_modes, "holdAccentSettings", pick, (id) => { describe(id); showAnchorRows(); });
     describe(pick);
   }
+  const everyLine = $("expressiveEveryLine");   // NEW (1.5.0)
+  if (everyLine) everyLine.checked = data.expressive_every_line !== false;
   const models = $("expressiveModelRadios");
   const modelNote = $("expressiveModelNote");
   if (models && Array.isArray(data.expressive_models) && data.expressive_models.length) {
@@ -10544,7 +10547,7 @@ async function askTagIdeas() {
     const res = await fetch("/api/voice-tags/suggest", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text: input.value, profile_id: currentProfileId || null, session_id: sessionId }),   // CHANGED (1.5.0)
+      body: JSON.stringify({ text: input.value, profile_id: currentProfileId || null, session_id: sessionId, light: true }),   // CHANGED (1.5.0): a shorter ask, often
     });
     const data = await res.json();
     if (!st.paused && input.value.trim()) {

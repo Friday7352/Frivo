@@ -928,6 +928,14 @@
                     </span>
                     <div class="radio-row" id="expressiveModelRadios" role="radiogroup" aria-label="Tags model"></div>
                   </div>
+                  <!-- NEW (1.5.0) -->
+                  <label class="srow">
+                    <span class="srow-main srow-main--flex">
+                      <span class="srow-label">Use it for every line</span>
+                      <span class="srow-sub">On: lines without tags use the Tags model too, so the voice always sounds the same. Off: they use the standard model (v2).</span>
+                    </span>
+                    <span class="switch"><input type="checkbox" id="expressiveEveryLine" checked><span class="switch-track" aria-hidden="true"></span></span>
+                  </label>
                   <!-- NEW (1.5.0): continuity between v3 lines. -->
                   <div class="srow">
                     <span class="srow-main srow-main--flex">
@@ -1266,28 +1274,28 @@
                   <div class="srow">
                     <label class="srow-main srow-main--flex" for="evoraIdleListen">
                       <span class="srow-label">Free the listening models</span>
-                      <span class="srow-sub">After listening stops. They take the most memory; starting listening again reloads them in a few seconds.</span>
+                      <span class="srow-sub">After listening stops. Leave on Never if Ollama shares the graphics card: freed memory goes to Ollama, and listening can't get it back.</span>
                     </label>
                     <span class="srow-control">
                       <select id="evoraIdleListen" aria-label="Free the listening models after">
-                        <option value="5m" selected>After 5 minutes</option>
+                        <option value="5m">After 5 minutes</option>
                         <option value="15m">After 15 minutes</option>
                         <option value="1h">After 1 hour</option>
-                        <option value="never">Never</option>
+                        <option value="never" selected>Never</option>
                       </select>
                     </span>
                   </div>
                   <div class="srow">
                     <label class="srow-main srow-main--flex" for="evoraIdleSpeech">
                       <span class="srow-label">Free speech-to-text</span>
-                      <span class="srow-sub">After no dictation or listening for this long. The next clip waits a few seconds while it loads.</span>
+                      <span class="srow-sub">After no dictation or listening for this long. Same advice: Never on a shared card.</span>
                     </label>
                     <span class="srow-control">
                       <select id="evoraIdleSpeech" aria-label="Free speech-to-text after">
                         <option value="15m">After 15 minutes</option>
-                        <option value="1h" selected>After 1 hour</option>
+                        <option value="1h">After 1 hour</option>
                         <option value="4h">After 4 hours</option>
-                        <option value="never">Never</option>
+                        <option value="never" selected>Never</option>
                       </select>
                     </span>
                   </div>

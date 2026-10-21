@@ -56,6 +56,12 @@ check("a suggestion keeps every word", mod.strip_audio_tags(got) == "I can't bel
 check("... and its tags", got.count("[") == 2, got)
 
 print("--- what ElevenLabs is sent ---")
+# CHANGED (1.5.0): these checks are for "Use it for every line" off (the
+# Tags model only for lines with tags). On, the default, is checked in
+# test-tag-rules.py.
+check("every line uses the Tags model by default", mod.CFG.get("expressive_every_line") is True
+      and mod._elevenlabs_payload("Hello there.")["model_id"] == "eleven_v4")
+mod.CFG["expressive_every_line"] = False
 mod.CFG.update(speaking_speed=1.0, voice_delivery="natural", expressive_voice=False)
 plain = mod._elevenlabs_payload("Hello there.")
 check("Natural, no tags: exactly as before",

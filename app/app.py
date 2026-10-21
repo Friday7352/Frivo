@@ -236,8 +236,11 @@ DEFAULT_OLLAMA_IDLE_UNLOAD = "1h"
 # dictation or listening. In minutes for Evora; 0 is never.
 EVORA_IDLE_LISTEN = {"5m": 5, "15m": 15, "1h": 60, "never": 0}
 EVORA_IDLE_SPEECH = {"15m": 15, "1h": 60, "4h": 240, "never": 0}
-DEFAULT_EVORA_IDLE_LISTEN = "5m"
-DEFAULT_EVORA_IDLE_SPEECH = "1h"
+# CHANGED (1.5.0): Never, unless you turn them on. On a card Evora shares
+# with Ollama, memory Evora gave up was memory Ollama took, and listening
+# couldn't get it back: slow, or no speaker labels at all.
+DEFAULT_EVORA_IDLE_LISTEN = "never"
+DEFAULT_EVORA_IDLE_SPEECH = "never"
 OLLAMA_TIER_DEFAULTS = {"fast": DEFAULT_OLLAMA_MODEL, "balanced": "qwen3.5:4b", "best": "qwen3.5:9b"}
 DEFAULT_WHISPER_URL = "http://localhost:9000"
 
@@ -692,6 +695,9 @@ def load_config():
         # tags; v4 and its Similarity setting hold it without that.
         "hold_accent": "off",
         "expressive_model": "eleven_v4",   # NEW (1.5.0)
+        # NEW (1.5.0): the Tags model speaks every line, not only the ones
+        # with tags, so the voice sounds the same either way.
+        "expressive_every_line": True,
         "voice_accent": "auto",   # NEW (1.5.0): the accent the anchor is made in
         # NEW (1.5.0): Tag words (see DEFAULT_TAG_WORDS); None means the defaults.
         "tag_words": None,
@@ -801,6 +807,17 @@ if not CFG.get("_moved_to_v4"):
     CFG["hold_accent"] = "off"
     CFG["expressive_model"] = "eleven_v4"
     CFG["_moved_to_v4"] = True
+    try:
+        save_config(CFG)
+    except Exception:
+        pass
+# NEW (1.5.0): once: Evora's idle timers go back to Never (the old defaults
+# starved Evora on a shared card). Set them again in Settings > Evora if
+# you want them.
+if not CFG.get("_evora_idle_off"):
+    CFG["evora_idle_listen"] = "never"
+    CFG["evora_idle_speech"] = "never"
+    CFG["_evora_idle_off"] = True
     try:
         save_config(CFG)
     except Exception:
@@ -4135,7 +4152,12 @@ def _elevenlabs_payload(text, force_v2=False):
     delivery = DELIVERY_SETTINGS[normalize_voice_delivery(style.get("delivery"))]
     text = ensure_spoken_words(text)   # NEW (1.5.0): never a line of only tags
     model = expressive_model()
-    if model and not force_v2 and (style.get("expressive") or style.get("stay_on_v3") or has_audio_tags(text)):
+    # CHANGED (1.5.0): "Every line" (on by default): a line without tags is
+    # spoken by the Tags model too. Switching models line by line changed
+    # how the voice sounded, and with fewer tags (the tag rules) most lines
+    # had gone to v2.
+    every_line = CFG.get("expressive_every_line", True) is not False
+    if model and not force_v2 and (every_line or style.get("expressive") or style.get("stay_on_v3") or has_audio_tags(text)):
         # v3 and v4 have no speed setting; the reply speaks at its natural pace.
         payload = {
             "text": text,
@@ -4421,15 +4443,21 @@ def speak_reply(text, voice_id, language, plan, voiced=None):
 # NEW (1.5.0): "Suggest tags" — the AI adds audio tags to a message you're
 # about to send. Only tags: every word stays yours (transplant_audio_tags
 # puts back anything else it changed).
-def build_tag_suggestion_prompt(text, delivery, context="", amount=DEFAULT_TAG_AMOUNT, avoid=()):
+def build_tag_suggestion_prompt(text, delivery, context="", amount=DEFAULT_TAG_AMOUNT, avoid=(), light=False):
     gentle = (" Keep it calm: no [shouts]." if delivery == "calm" else "")
     # CHANGED (1.5.0): with the conversation, the persona, examples, the
     # user's taste and the Tag amount.
+    # CHANGED (1.5.0): `light` (the ideas as you type) leaves out the
+    # examples and the persona: a third of the prompt, asked many times a
+    # message, on a card the model shares with Evora.
     density = TAG_DENSITY[normalize_tag_amount(amount)][1]
     skip = ("Don't use these this time: " + ", ".join(f"[{t}]" for t in avoid) + ".\n") if avoid else ""
+    if light:
+        context = "\n".join(l for l in context.splitlines() if l.startswith("- ") or l.startswith("RECENT LINES"))
+        context = context + "\n" if context else ""
     return (
         context
-        + TAG_EXAMPLES + tag_taste_prompt() + skip + "\n"
+        + ("" if light else TAG_EXAMPLES) + tag_taste_prompt() + skip + "\n"
         + "Add ElevenLabs audio tags to the message below. It will be spoken aloud, as the writer's own words, "
         "by an expressive voice that performs the tags instead of reading them.\n"
         "An audio tag is a word or two of lowercase English in square brackets, placed right before the words "
@@ -4489,7 +4517,7 @@ def unwrap_message_words(original, tagged):
     return re.sub(r"\[([^\]\n]{1,60})\]", fix, tagged or "")
 
 
-def tag_message_with_ai(text, delivery, context="", amount=DEFAULT_TAG_AMOUNT, avoid=()):
+def tag_message_with_ai(text, delivery, context="", amount=DEFAULT_TAG_AMOUNT, avoid=(), light=False):
     """
     NEW (1.5.0): `text` with the AI's audio tags added and nothing else
     changed. Used by Suggest, and by Auto tags on every message you send.
@@ -4503,7 +4531,7 @@ def tag_message_with_ai(text, delivery, context="", amount=DEFAULT_TAG_AMOUNT, a
             provider=resolve_provider("chat_provider", CHAT_PROVIDERS),
             model=CFG.get("model", RECOMMENDED_TEXT_MODEL),
             ollama_model=active_ollama_model(),
-            messages=[{"role": "user", "content": build_tag_suggestion_prompt(text, delivery, context, amount, avoid)}],
+            messages=[{"role": "user", "content": build_tag_suggestion_prompt(text, delivery, context, amount, avoid, light)}],
             max_tokens=int(len(text.split()) * 3) + 80,
             temperature=0.8 if avoid else 0.4,   # CHANGED (1.5.0): Retake asks for something different
         )
@@ -4646,9 +4674,10 @@ def suggest_voice_tags():
     style = voice_style_of(profile)
     delivery = style["delivery"]
     started = time.perf_counter()
-    context = tag_context(profile, data.get("session_id"), data.get("profile_id"))   # NEW (1.5.0)
+    light = data.get("light") is True   # NEW (1.5.0): the ideas as you type: a shorter ask
+    context = tag_context(profile, data.get("session_id"), data.get("profile_id"), persona=not light)   # NEW (1.5.0)
     try:
-        suggested = tag_message_with_ai(text, delivery, context, style["amount"])
+        suggested = tag_message_with_ai(text, delivery, context, style["amount"], light=light)
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
     except RuntimeError as e:
@@ -5131,6 +5160,8 @@ def settings():
             CFG["voice_delivery"] = normalize_voice_delivery(data.get("voice_delivery"), CFG.get("voice_delivery", DEFAULT_VOICE_DELIVERY))
         if "hold_accent" in data:
             CFG["hold_accent"] = normalize_hold_accent(data.get("hold_accent"), normalize_hold_accent(CFG.get("hold_accent")))
+        if "expressive_every_line" in data:   # NEW (1.5.0)
+            CFG["expressive_every_line"] = data.get("expressive_every_line") is not False
         if "expressive_model" in data:
             CFG["expressive_model"] = normalize_expressive_model(data.get("expressive_model"), normalize_expressive_model(CFG.get("expressive_model")))
             REFUSED_MODELS.pop(CFG["expressive_model"], None)   # a fresh pick is tried again
@@ -5261,6 +5292,7 @@ def settings():
             "hold_accent_modes": HOLD_ACCENT_MODES,
             "voice_accent": normalize_voice_accent(CFG.get("voice_accent")),
             "expressive_model": normalize_expressive_model(CFG.get("expressive_model")),
+            "expressive_every_line": CFG.get("expressive_every_line", True) is not False,   # NEW (1.5.0)
             # NEW (1.5.0): models ElevenLabs refused this hour, and why.
             "expressive_refusals": {m: dict(r, label=model_label(m)) for m, r in MODEL_REFUSALS.items()
                                     if time.time() - REFUSED_MODELS.get(m, 0) < 3600},

@@ -211,6 +211,31 @@ check("... so only the real tag is left, in its place", fixed == "i was thinking
 check("a tag you typed stays", mod.unwrap_message_words("[about] it", "[about] it") == "[about] it")
 check("told not to", "Never put the message's own words in brackets" in mod.build_tag_suggestion_prompt("hi there", "natural"))
 
+print("--- the ideas as you type ask less of the model ---")
+full = mod.build_tag_suggestion_prompt("hi there friend", "natural", "THE VOICE'S PERSONA (for tone):\npirate\nRECENT LINES IN THIS CONVERSATION (for tone only; don't tag these):\n- The voice: ahoy\n", "normal")
+lite = mod.build_tag_suggestion_prompt("hi there friend", "natural", "THE VOICE'S PERSONA (for tone):\npirate\nRECENT LINES IN THIS CONVERSATION (for tone only; don't tag these):\n- The voice: ahoy\n", "normal", light=True)
+check("no examples or persona in the light ask", "MISTAKES TO AVOID" not in lite and "pirate" not in lite and "ahoy" in lite, lite)
+check("... which is much shorter", len(lite) < len(full) * 0.6, (len(lite), len(full)))
+check("the full ask is unchanged", "MISTAKES TO AVOID" in full and "pirate" in full)
+check("Evora idle timers default to Never", mod.DEFAULT_EVORA_IDLE_LISTEN == "never" and mod.DEFAULT_EVORA_IDLE_SPEECH == "never"
+      and mod.CFG.get("evora_idle_listen") == "never" and mod.CFG.get("_evora_idle_off") is True)
+
+print("--- every line on v4 (it had dropped to v2 for lines without tags) ---")
+mod.CFG["expressive_every_line"] = True
+mod.REFUSED_MODELS.clear()
+with mod.app.test_request_context():
+    mod.g.voice_style = {"expressive": False, "delivery": "natural"}
+    check("a line without tags: v4", mod._elevenlabs_payload("Just words.")["model_id"] == "eleven_v4")
+    check("a free voice is unaffected (no tags, no v4)", True)
+    mod.CFG["expressive_every_line"] = False
+    check("off: a line without tags goes to v2", mod._elevenlabs_payload("Just words.")["model_id"] == mod.ELEVEN_V2_MODEL)
+    check("... and one with tags still v4", mod._elevenlabs_payload("[sighs] Fine.")["model_id"] == "eleven_v4")
+mod.CFG["expressive_every_line"] = True
+client = mod.app.test_client()
+client.post("/api/settings", json={"expressive_every_line": False})
+check("the setting is kept", client.get("/api/settings").get_json().get("expressive_every_line") is False)
+client.post("/api/settings", json={"expressive_every_line": True})
+
 print()
 if failures:
     print(f"{len(failures)} failed: {failures}")
