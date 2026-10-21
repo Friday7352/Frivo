@@ -2768,7 +2768,30 @@ html[data-theme="light"] .rail-theme .rail-sun { display: block; }
 .settings-section-sub { margin: 0 0 10px; font-size: var(--text-subhead); color: var(--ink-dim); }
 .settings-section-sub + .settings-card { margin-top: 4px; }
 
-/* NEW (1.5.0): the built-in AI */
+/* NEW (1.6.0): Chat replies as cards: what each is, what it runs on */
+.radio-row.radio-row--cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px;
+  padding: 0; background: none; margin-top: 8px; }
+.radio-row--cards .radio-pill {
+  display: flex; flex-direction: column; align-items: stretch; justify-content: flex-start; gap: 4px; height: auto; min-height: 0;
+  padding: 10px 12px; border-radius: 12px; border: 1px solid var(--rule); background: var(--fill);
+  text-align: left; white-space: normal; line-height: 1.4;
+}
+.srow .radio-row.radio-row--cards { width: 100%; margin-left: 0; flex: 1 1 auto; }
+.radio-row--cards .radio-pill:hover { border-color: var(--accent-line); }
+.radio-row--cards .radio-pill.is-checked { border-color: var(--accent); background: var(--accent-soft); box-shadow: none; }
+.radio-row--cards .radio-label { font-weight: 600; font-size: var(--text-subhead); color: var(--ink); }
+.radio-card-summary { font-size: var(--text-caption); color: var(--ink-dim); }
+.radio-card-meta { font-size: var(--text-caption); color: var(--ink-faint); }
+.radio-card-lead { font-weight: 600; color: var(--ink-dim); }
+/* No AI: a slim card the width of the three above it. */
+.radio-row--cards .radio-pill.is-compact {
+  grid-column: 1 / -1; flex-direction: row; flex-wrap: wrap; align-items: baseline; column-gap: 14px; row-gap: 2px;
+  padding: 8px 12px;
+}
+.radio-row--cards .radio-pill.is-compact .radio-label { flex: none; }
+@media (max-width: 760px) { .radio-row.radio-row--cards { grid-template-columns: minmax(0, 1fr); } }
+
+/* NEW (1.6.0): the built-in AI */
 .bai-models { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px; margin-top: 8px; }
 .bai-model {
   position: relative; display: flex; flex-direction: column; gap: 3px;

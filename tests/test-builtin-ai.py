@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""NEW (1.5.0): the built-in AI, and Clean up without AI.
+"""NEW (1.6.0): the built-in AI, and Clean up without AI.
 
 GitHub and Hugging Face are stood in for, so this runs offline. With a
 real llama-server and a model, it also starts the engine and gets an
@@ -168,6 +168,24 @@ check("Word for word still works", res.status_code == 200 and res.get_json()["re
 res = c.post("/api/chat", json={"message": "hola", "speak": False, "language": "Spanish"})
 check("other languages say they need an AI", res.status_code == 400, res.status_code)
 
+# No AI, chosen on purpose.
+mod.CFG["chat_provider"] = "none"
+mod.CFG["openai_api_key"] = "sk-test"
+mod.CFG["response_style"] = "echo"
+res = c.post("/api/chat", json={"message": "thats teh one", "speak": False, "language": "English"})
+data = res.get_json()
+check("No AI: Clean up by the rules, even with a key", res.status_code == 200 and data["reply"] == "That's the one."
+      and data.get("rule_cleanup") and "No AI" in data.get("rule_cleanup_reason", ""), data)
+mod.CFG["response_style"] = "reply"
+res = c.post("/api/chat", json={"message": "hello", "speak": False, "language": "English"})
+check("No AI: Reply says No AI is picked", res.status_code == 400 and "No AI" in res.get_json()["error"], res.get_json())
+check("No AI listed, last", [p["id"] for p in mod.CHAT_PROVIDERS] == ["openai", "ollama", "builtin", "none"],
+      [p["id"] for p in mod.CHAT_PROVIDERS])
+res = c.post("/api/settings", json={"chat_provider": "none"})
+check("No AI can be saved", mod.CFG["chat_provider"] == "none", mod.CFG["chat_provider"])
+mod.CFG["openai_api_key"] = ""
+mod.CFG["chat_provider"] = "openai"
+
 # AI chosen but unreachable: Clean up falls back to the rules.
 mod.CFG["response_style"] = "echo"
 mod.CFG["chat_provider"] = "ollama"
@@ -220,6 +238,12 @@ check("no problem left", mod.builtin_ai_problem() == "", mod.builtin_ai_problem(
 
 res = c.post("/api/builtin-ai/download", json={"model": "small"})
 check("already downloaded: used straight away", res.get_json().get("ready") is True, res.get_json())
+
+# Picking Better before it's downloaded: kept as your pick, Small answers meanwhile.
+c.post("/api/settings", json={"builtin_ai_model": "better"})
+st = c.get("/api/builtin-ai").get_json()
+check("your pick is kept even before it's downloaded", st["model"] == "better" and st["active_model"] == "small", st)
+c.post("/api/settings", json={"builtin_ai_model": "small"})
 
 # ---------------------------------------------------- replies through it
 if real:

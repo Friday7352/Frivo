@@ -54,7 +54,7 @@ MinVersion=10.0
 ; and its per-user data remain afterwards.
 ; CHANGED (1.5.0): voices\ is excluded. Setup downloads Frivo's voices (voice_pack.py), so a
 ; copy made for testing in app\voices never ends up inside FrivoSetup.exe.
-; CHANGED (1.5.0): and nothing of yours from running Frivo in this folder: saved replies,
+; CHANGED (1.6.0): and nothing of yours from running Frivo in this folder: saved replies,
 ; reply audio, anchors, tag taste, the voice library cache, the built-in AI and certificates.
 Source: "..\app\*";       DestDir: "{tmp}\FrivoSetupPayload\app";       Flags: ignoreversion recursesubdirs createallsubdirs deleteafterinstall; Excludes: "config.json,profiles.json,usage.json,launcher.json,*.log,__pycache__\*,*.pyc,\voices\*,\audio_cache\*,\saved\*,\anchors\*,\voice_library\*,\builtin_ai\*,voice_anchors.json,tag_taste.json,*.pem,ca.crt"
 Source: "..\installer\*"; DestDir: "{tmp}\FrivoSetupPayload\installer"; Flags: ignoreversion recursesubdirs createallsubdirs deleteafterinstall

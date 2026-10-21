@@ -1,5 +1,5 @@
 """
-NEW (1.5.0): Clean up without AI.
+NEW (1.6.0): Clean up without AI.
 
 When no AI can be reached (no OpenAI key, Ollama off, nothing built in),
 Clean up still tidies an English message with plain rules, on the CPU, in

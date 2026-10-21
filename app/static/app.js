@@ -263,6 +263,30 @@ function buildRadioGroup(containerEl, items, groupName, selectedId, onChange) {
     if (item.description) pill.title = item.description;
 
     pill.append(input, label);
+    // NEW (1.6.0): a choice that says what it is and what it runs on is a
+    // card (Chat replies), not a pill.
+    if (item.summary) {
+      containerEl.classList.add("radio-row--cards");
+      const add = (cls, text, lead) => {
+        if (!text) return;
+        const line = document.createElement("span");
+        line.className = cls;
+        if (lead) {
+          const b = document.createElement("span");
+          b.className = "radio-card-lead";
+          b.textContent = lead;
+          line.append(b, " ", text);
+        } else {
+          line.textContent = text;
+        }
+        pill.appendChild(line);
+      };
+      pill.dataset.id = item.id;
+      if (item.compact) pill.classList.add("is-compact");
+      add("radio-card-summary", item.summary);
+      add("radio-card-meta", item.runs_on, "Runs on");
+      add("radio-card-meta radio-card-uses", item.uses, "Uses");
+    }
 
     input.addEventListener("change", () => {
       containerEl.querySelectorAll(".radio-pill").forEach((p) => p.classList.remove("is-checked"));
@@ -304,7 +328,7 @@ let renderedServiceIds = "";
 const SERVICE_SETTINGS_TARGET = {
   whisper: { section: "providers" },
   ollama: { section: "providers" },
-  builtin: { section: "providers" },   // NEW (1.5.0)
+  builtin: { section: "providers" },   // NEW (1.6.0)
   frivosc: { section: "vrchat" },
 };
 
@@ -498,6 +522,8 @@ function buildProviderPickers(settings) {
     });
     if (group.noteEl) {
       group.noteEl.textContent = providerNoteFor(group.list, group.selected);
+      // NEW (1.6.0): the cards say it themselves.
+      group.noteEl.classList.toggle("is-hidden", group.list.some((p) => p.summary));
     }
   });
 
@@ -506,7 +532,7 @@ function buildProviderPickers(settings) {
   if (ollamaModelBalanced) ollamaModelBalanced.value = settings.ollama_model_balanced || "";   // NEW (1.5.0)
   if (ollamaModelBest) ollamaModelBest.value = settings.ollama_model_best || "";               // NEW (1.5.0)
   if (ollamaIdleUnload) ollamaIdleUnload.value = settings.ollama_idle_unload || "1h";        // NEW (1.5.0)
-  if ($("builtinIdle")) $("builtinIdle").value = settings.builtin_ai_idle || "1h";            // NEW (1.5.0)
+  if ($("builtinIdle")) $("builtinIdle").value = settings.builtin_ai_idle || "1h";            // NEW (1.6.0)
   if ($("evoraIdleListen")) $("evoraIdleListen").value = settings.evora_idle_listen || "5m";   // NEW (1.5.0)
   if ($("evoraIdleSpeech")) $("evoraIdleSpeech").value = settings.evora_idle_speech || "1h";   // NEW (1.5.0)
   if (typeof setAiChipTier === "function") setAiChipTier(settings.ollama_tier || "fast");     // NEW (1.5.0)
@@ -517,6 +543,7 @@ function buildProviderPickers(settings) {
   if (allowFallbackToggle) allowFallbackToggle.checked = Boolean(settings.allow_openai_fallback);
 
   syncProviderVisibility();
+  if (typeof omCardUses === "function") omCardUses();   // NEW (1.6.0): your models' sizes, once known
 
   // Populate the model dropdown straight away when local Whisper is the
   // selected provider. Previously this only happened after clicking Test,
@@ -1785,7 +1812,7 @@ function addTurn(who, text, opts = {}) {
     flag.textContent = "Trimmed to last full sentence";
     stack.appendChild(flag);
   } else if (opts.ruleCleanup) {
-    // NEW (1.5.0): no AI to ask, so Frivo's rules cleaned it up.
+    // NEW (1.6.0): no AI to ask, so Frivo's rules cleaned it up.
     const flag = document.createElement("span");
     flag.className = "turn-flag";
     flag.textContent = "Cleaned up without AI";
@@ -2120,7 +2147,7 @@ async function saveAllSettings({ close = false, quiet = false } = {}) {
     ollama_model_balanced: ollamaModelBalanced ? ollamaModelBalanced.value.trim() : "",   // NEW (1.5.0)
     ollama_model_best: ollamaModelBest ? ollamaModelBest.value.trim() : "",               // NEW (1.5.0)
     ollama_idle_unload: ollamaIdleUnload ? ollamaIdleUnload.value : "1h",                  // NEW (1.5.0)
-    builtin_ai_idle: $("builtinIdle") ? $("builtinIdle").value : "1h",                       // NEW (1.5.0)
+    builtin_ai_idle: $("builtinIdle") ? $("builtinIdle").value : "1h",                       // NEW (1.6.0)
     evora_idle_listen: $("evoraIdleListen") ? $("evoraIdleListen").value : "5m",           // NEW (1.5.0)
     evora_idle_speech: $("evoraIdleSpeech") ? $("evoraIdleSpeech").value : "1h",           // NEW (1.5.0)
     ollama_translation_model: ollamaTranslationModel
@@ -6519,7 +6546,7 @@ async function send(opts = {}) {
       condensed: data.condensed,
       repaired: data.repaired,
       keptExact: data.kept_exact,  // NEW (1.5.0)
-      ruleCleanup: data.rule_cleanup,  // NEW (1.5.0): no AI, Frivo's rules
+      ruleCleanup: data.rule_cleanup,  // NEW (1.6.0): no AI, Frivo's rules
       ruleCleanupReason: data.rule_cleanup_reason || "",
       voiceEngineName: data.voice_engine_name,  // NEW (1.5.0)
       textEngineName: data.text_engine_name || (data.text_seconds ? "" : "No AI"),  // NEW (1.5.0)
@@ -11976,6 +12003,7 @@ function omPollIfPulling() {
 }
 
 function omRender() {
+  omCardUses();   // NEW (1.6.0)
   omRenderDrive();
   omRenderInstalled();
   omRenderSuggestions();
@@ -13682,7 +13710,7 @@ async function checkElevenKey(force) {
 
 
 // ---------------------------------------------------------------------------
-// NEW (1.5.0): the built-in AI (Settings > Providers > Built-in AI).
+// NEW (1.6.0): the built-in AI (Settings > Providers > Built-in AI).
 // One button: downloads the engine and the model, checks them, and switches
 // Chat replies to Built-in. Then Test, the idle timer, and Remove.
 // ---------------------------------------------------------------------------
@@ -13699,6 +13727,7 @@ async function checkElevenKey(force) {
   let chosen = "small";
   let poll = null;
   let lastJobState = "";
+  let pickedHere = false;   // a model picked on this page wins over what the server last said
   const gb = (n) => `${(n / 1e9).toFixed(1)} GB`;
   const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
@@ -13712,7 +13741,7 @@ async function checkElevenKey(force) {
     modelsEl.innerHTML = (info.models || []).map((m) => {
       const fits = info.memory_gb ? info.memory_gb >= m.memory_gb + 2 : true;
       const badge = m.downloaded ? '<span class="om-badge is-fits">Downloaded</span>'
-        : fits ? "" : `<span class="om-badge is-tight" title="This PC has ${info.memory_gb} GB of memory">Tight on memory</span>`;
+        : fits ? "" : `<span class="om-badge is-tight" title="The PC Frivo runs on has ${info.memory_gb} GB of memory">Tight on memory</span>`;
       return `<label class="bai-model${m.id === chosen ? " is-checked" : ""}">`
         + `<input type="radio" name="builtin_ai_model" value="${esc(m.id)}"${m.id === chosen ? " checked" : ""}>`
         + `<span class="bai-model-top"><span class="bai-model-name">${esc(m.name)}</span>${badge}</span>`
@@ -13728,11 +13757,12 @@ async function checkElevenKey(force) {
     const value = $("builtinValue");
     const model = (info.models || []).find((m) => m.id === chosen) || {};
     const ready = info.engine && model.downloaded;
+    const active = (info.models || []).find((m) => m.id === info.active_model) || {};
     const job = info.job || {};
     const busy = ["checking", "engine", "model"].includes(job.state);
     renderModels();
     $("builtinModelNote").textContent = info.memory_gb
-      ? `This PC has ${info.memory_gb} GB of memory. It uses ${info.threads} of the processor's threads while it writes.`
+      ? `The PC Frivo runs on has ${info.memory_gb} GB of memory. The AI uses ${info.threads} of its processor threads while it writes.`
       : "";
     value.textContent = !info.supported ? "Not available" : info.in_use && ready ? "In use"
       : ready ? "Downloaded" : busy ? "Downloading" : "Not downloaded";
@@ -13755,6 +13785,8 @@ async function checkElevenKey(force) {
     else if (job.state === "error" && lastJobState !== "shown-error") say(job.error, "error");
     else if (!busy && ready && info.in_use && !statusEl.textContent) {
       say(info.running ? `${model.model} is running.` : `${model.model} starts with the next reply (a few seconds).`, "ok");
+    } else if (!busy && !ready && info.in_use && active.downloaded && !statusEl.textContent) {
+      say(`Replies use ${active.model} until ${model.model} is downloaded.`);
     }
   }
 
@@ -13762,7 +13794,7 @@ async function checkElevenKey(force) {
     try {
       const res = await fetch("/api/builtin-ai");
       info = await res.json();
-      if (!poll && info.model) chosen = info.model;
+      if (!poll && !pickedHere && info.model) chosen = info.model;
       const job = info.job || {};
       const busy = ["checking", "engine", "model"].includes(job.state);
       if (lastJobState && ["checking", "engine", "model"].includes(lastJobState) && job.state === "done") {
@@ -13781,6 +13813,7 @@ async function checkElevenKey(force) {
   modelsEl.addEventListener("change", (e) => {
     if (e.target.name !== "builtin_ai_model") return;
     chosen = e.target.value;
+    pickedHere = true;
     say("");
     render();
     // Saved like any setting, so a downloaded model is used straight away.
@@ -13856,7 +13889,43 @@ async function checkElevenKey(force) {
 
   // Fetched when Providers is opened, and once at the start.
   document.addEventListener("click", (e) => {
-    if (e.target.closest && e.target.closest('[data-settings-section="providers"]')) setTimeout(refresh, 50);
+    // CHANGED (1.6.0): only the Providers button in the list on the left.
+    // (Matching the whole section re-drew the card on every click inside it,
+    // which undid Remove's "click again" and put the model choice back.)
+    if (e.target.closest && e.target.closest('.settings-nav-btn[data-settings-section="providers"]')) {
+      setTimeout(refresh, 50);
+      // So the Ollama card can say what your own models use.
+      if (typeof omLoad === "function" && !(omState && omState.data)) setTimeout(omLoad, 80);
+    }
   });
   refresh();
 })();
+
+
+// NEW (1.6.0): the Ollama card under Chat replies says what *your* three
+// models use, once Ollama has said how big they are. (Until then, or if
+// Ollama can't be reached, it gives the usual range.)
+function omCardUses() {
+  const line = document.querySelector('#chatProviderRadios .radio-pill[data-id="ollama"] .radio-card-uses');
+  const data = omState.data;
+  if (!line || !data || !data.reachable) return;
+  const installed = data.installed || [];
+  const sizeOf = (name) => {
+    name = (name || "").trim();
+    if (!name) return null;
+    const full = name.includes(":") ? name : `${name}:latest`;
+    const m = installed.find((x) => x.name === name || x.name === full);
+    return m ? m.size : null;
+  };
+  const tiers = [["Fast", ollamaModel], ["Balanced", ollamaModelBalanced], ["Best", ollamaModelBest]]
+    .map(([label, el]) => [label, sizeOf(el && el.value)])
+    .filter(([, size]) => size);
+  if (!tiers.length) return;
+  // Loaded, a model takes about its file size plus room for the conversation.
+  const gb = (bytes) => (bytes * 1.1 / 1e9 + 0.4).toFixed(1);
+  const parts = tiers.map(([label, size]) => `${gb(size)} GB (${label})`);
+  const lead = line.querySelector(".radio-card-lead");
+  line.textContent = "";
+  if (lead) line.append(lead, " ");
+  line.append(`About ${parts.join(", ")} of graphics memory with your models; only one is loaded at a time. Free.`);
+}

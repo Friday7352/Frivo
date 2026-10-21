@@ -1,5 +1,5 @@
 """
-NEW (1.5.0): the built-in AI.
+NEW (1.6.0): the built-in AI.
 
 For anyone without OpenAI or Ollama: one button in Settings > Providers
 downloads a small AI and Frivo runs it itself, on the processor. No
@@ -182,7 +182,10 @@ class BuiltinAI:
             "engine": bool(self.engine_path()),
             "engine_version": ENGINE_TAG,
             "models": models,
-            "model": self.chosen_model(),
+            # The model you picked (it may not be downloaded yet), and the
+            # one that answers now.
+            "model": (self.settings() or {}).get("model") or "small",
+            "active_model": self.chosen_model(),
             "running": running and self._model_id == self.chosen_model(),
             "loaded_model": self._model_id if running else "",
             "problem": self.problem(),

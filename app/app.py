@@ -368,7 +368,7 @@ RESPONSE_STYLES = [
     },
 ]
 RESPONSE_STYLE_IDS = {s["id"] for s in RESPONSE_STYLES}
-RESPONSE_STYLE_LABELS = {s["id"]: s["name"] for s in RESPONSE_STYLES}   # NEW (1.5.0)
+RESPONSE_STYLE_LABELS = {s["id"]: s["name"] for s in RESPONSE_STYLES}   # NEW (1.6.0)
 DEFAULT_RESPONSE_STYLE = "echo"
 # NEW (1.5.0): styles that no longer exist, and what they read as now.
 # (Names on screen are Reply / Clean up / Word for word; the ids are older.)
@@ -725,7 +725,7 @@ def load_config():
         "ollama_model_best": OLLAMA_TIER_DEFAULTS["best"],
         "ollama_tier": "fast",
         "ollama_idle_unload": DEFAULT_OLLAMA_IDLE_UNLOAD,   # NEW (1.5.0)
-        # NEW (1.5.0): the built-in AI (builtin_ai.py): which model, when to
+        # NEW (1.6.0): the built-in AI (builtin_ai.py): which model, when to
         # free its memory, and how many processor threads (0: automatic).
         "builtin_ai_model": "small",
         "builtin_ai_idle": "1h",
@@ -1708,21 +1708,44 @@ def summarize_to_length(text, max_words, language="English"):
 # ---------------------------------------------------------------------------
 
 CHAT_PROVIDERS = [
+    # CHANGED (1.6.0): each says what it is, what it runs on, and roughly
+    # what it uses, shown as a card in Settings > Providers.
     {
         "id": "openai",
         "name": "OpenAI",
         "note": "Best at holding a personality consistently across turns. Costs pennies.",
+        "summary": "The best replies and personas. Needs an OpenAI key.",
+        "runs_on": "OpenAI's servers (internet)",
+        "uses": "Nothing on your PCs. Charged to your OpenAI account per use, at their price for the model you pick.",
     },
     {
         "id": "ollama",
         "name": "Ollama (local)",
         "note": "Free and private, runs on your own GPU. Smaller models hold a persona less consistently.",
+        "summary": "Free and private, on a PC you run Ollama on. Quality depends on the model.",
+        "runs_on": "The Ollama PC's graphics card",
+        # The page replaces this with the sizes of your own Fast/Balanced/Best
+        # models once it has asked Ollama.
+        "uses": "Typically 3–9 GB of graphics memory, depending on the models you pick; more CPU if one doesn't fit. Free.",
     },
-    # NEW (1.5.0)
+    # NEW (1.6.0)
     {
         "id": "builtin",
-        "name": "Built-in",
-        "note": "Free and private, runs inside Frivo on this PC's processor. One download, nothing to set up. Simpler replies than OpenAI or a big Ollama model.",
+        "name": "Built-in AI",
+        "note": "Free and private, runs inside Frivo on the processor of the PC Frivo runs on. One download, nothing to set up. Simpler replies than OpenAI or a big Ollama model.",
+        "summary": "Free and private, inside Frivo. One download, nothing to set up. Simpler replies.",
+        "runs_on": "The PC Frivo runs on: its processor and memory (no graphics card)",
+        "uses": "2.5 GB (Small) or 4.5 GB (Better) of memory while loaded; half the processor for a few seconds per reply. Free.",
+    },
+    # NEW (1.6.0): no AI at all, on purpose.
+    {
+        "id": "none",
+        "name": "No AI",
+        "note": "Nothing is sent anywhere. Clean up fixes spelling and punctuation by itself and Word for word works, in English. Reply and translation need an AI.",
+        "summary": "Clean up fixes spelling and punctuation by rules; Word for word works. English only; no Reply.",
+        "runs_on": "The PC Frivo runs on (processor)",
+        "compact": True,   # a slim card under the three AIs
+        "uses": "A few milliseconds per message and about 120 MB of memory for the word list. Free.",
     },
 ]
 
@@ -1737,11 +1760,11 @@ TRANSLATION_PROVIDERS = [
         "name": "Ollama (local)",
         "note": "Free. Good on major languages, weaker on the less common ones.",
     },
-    # NEW (1.5.0)
+    # NEW (1.6.0)
     {
         "id": "builtin",
         "name": "Built-in",
-        "note": "Free, on this PC's processor. Fine for major languages.",
+        "note": "Free, on the processor of the PC Frivo runs on. Fine for major languages.",
     },
 ]
 
@@ -2074,7 +2097,11 @@ def create_chat_completion(client, *, max_tokens, provider="openai", temperature
     the request, and records why in server.log. A local GPU being unavailable
     should degrade to "slightly more expensive", not "the app is broken".
     """
-    if provider == "builtin":   # NEW (1.5.0): the built-in AI (builtin_ai.py)
+    if provider == "none":   # NEW (1.6.0): No AI, chosen on purpose
+        raise RuntimeError("No AI is selected (Settings > Providers > Chat replies). "
+                           "Pick OpenAI, Ollama or the built-in AI to use this.")
+
+    if provider == "builtin":   # NEW (1.6.0): the built-in AI (builtin_ai.py)
         try:
             if BUILTIN_AI is None:
                 raise RuntimeError("The built-in AI is missing a file (builtin_ai.py). Run Frivo's setup again (Repair).")
@@ -2565,7 +2592,7 @@ VOICE_PACK = _load_voice_pack()
 
 
 # ---------------------------------------------------------------------------
-# NEW (1.5.0): Clean up without AI (cleanup_rules.py)
+# NEW (1.6.0): Clean up without AI (cleanup_rules.py)
 #
 # With no AI to ask (no OpenAI key, Ollama off, the built-in AI not
 # downloaded), Clean up in English still tidies your message with plain
@@ -2608,9 +2635,11 @@ def rule_clean_up(message):
 
 
 def chat_ai_missing():
-    """NEW (1.5.0): why replies have no AI to ask right now, or "" when
+    """NEW (1.6.0): why replies have no AI to ask right now, or "" when
     there is one (it may still turn out to be unreachable)."""
     provider = resolve_provider("chat_provider", CHAT_PROVIDERS)
+    if provider == "none":   # NEW (1.6.0)
+        return "No AI is selected"
     if provider == "openai" and not CFG.get("openai_api_key"):
         return "no OpenAI key"
     if provider == "builtin" and "builtin_ai_problem" in globals():
@@ -2619,7 +2648,7 @@ def chat_ai_missing():
 
 
 # ---------------------------------------------------------------------------
-# NEW (1.5.0): the built-in AI (builtin_ai.py)
+# NEW (1.6.0): the built-in AI (builtin_ai.py)
 #
 # For anyone without OpenAI or Ollama: Settings > Providers > Built-in AI
 # downloads llama.cpp's server and a small Qwen 3.5 model with one click,
@@ -5751,7 +5780,7 @@ def settings():
         ):
             if key in data:
                 CFG[key] = (data.get(key) or "").strip() or default
-        # NEW (1.5.0): the built-in AI
+        # NEW (1.6.0): the built-in AI
         if data.get("builtin_ai_model") in ("small", "better"):
             if CFG.get("builtin_ai_model") != data["builtin_ai_model"] and BUILTIN_AI is not None:
                 BUILTIN_AI.stop()   # the other model is loaded next time it's needed
@@ -5817,8 +5846,8 @@ def settings():
             "ollama_model_best": tier_model("best"),           # NEW (1.5.0)
             "ollama_tier": ollama_tier(),                      # NEW (1.5.0)
             "ollama_idle_unload": CFG.get("ollama_idle_unload") or DEFAULT_OLLAMA_IDLE_UNLOAD,   # NEW (1.5.0)
-            "builtin_ai_model": CFG.get("builtin_ai_model") or "small",   # NEW (1.5.0)
-            "builtin_ai_idle": CFG.get("builtin_ai_idle") or "1h",        # NEW (1.5.0)
+            "builtin_ai_model": CFG.get("builtin_ai_model") or "small",   # NEW (1.6.0)
+            "builtin_ai_idle": CFG.get("builtin_ai_idle") or "1h",        # NEW (1.6.0)
             "evora_idle_listen": CFG.get("evora_idle_listen") or DEFAULT_EVORA_IDLE_LISTEN,      # NEW (1.5.0)
             "evora_idle_speech": CFG.get("evora_idle_speech") or DEFAULT_EVORA_IDLE_SPEECH,      # NEW (1.5.0)
             "ollama_translation_model": CFG.get("ollama_translation_model", ""),
@@ -5909,7 +5938,7 @@ def local_status():
             "fallback": True,
         })
 
-    # NEW (1.5.0): the built-in AI. Nothing to probe over the network: it's
+    # NEW (1.6.0): the built-in AI. Nothing to probe over the network: it's
     # ready when it's downloaded, and started when a reply needs it.
     if "builtin" in (chat, translation):
         problem = builtin_ai_problem()
@@ -5920,7 +5949,7 @@ def local_status():
             "ok": not problem,
             "message": (problem[:1].upper() + problem[1:] + ". Download it in Settings > Providers.") if problem
             else (f"{builtin_ai_model_name()}, " + ("running" if running else "starts with the next reply")),
-            "url": f"this PC · {builtin_ai_model_name()}",
+            "url": f"the PC Frivo runs on · {builtin_ai_model_name()}",
             "used_for": [label for label, provider in (("chat", chat), ("translation", translation))
                          if provider == "builtin"],
             "fallback": True,
@@ -8915,13 +8944,17 @@ def chat():
     # that never calls the model doesn't need an OpenAI key.
     # CHANGED (1.5.0): only when OpenAI writes the reply. With Ollama chosen
     # for Chat replies, every step of a reply goes to Ollama.
-    # CHANGED (1.5.0): Clean up in English works without any AI (Frivo's
+    # CHANGED (1.6.0): Clean up in English works without any AI (Frivo's
     # rules); everything else that needs one says how to get one.
     no_ai = "" if verbatim else chat_ai_missing()
     rules_only = bool(no_ai) and response_style == "echo" and language == "English"
     if no_ai and not rules_only:
         what = ("Reply" if response_style == "reply"
                 else f"{RESPONSE_STYLE_LABELS.get(response_style, 'This style')} in {language}")
+        if no_ai == "No AI is selected":
+            return jsonify({"error": f"{what} needs an AI, and Chat replies is set to No AI. Pick OpenAI, Ollama "
+                                     "or the built-in AI in Settings > Providers, or use Clean up or Word for word "
+                                     "in English."}), 400
         return jsonify({"error": f"{what} needs an AI, and there isn't one set up ({no_ai}). "
                                  "Download the built-in AI in Settings > Providers (one click), "
                                  "add an OpenAI key, or use Clean up or Word for word in English."}), 400
@@ -9036,8 +9069,8 @@ def chat():
         english = ""
         # NEW (1.5.0): set when Echo reworded something and was put back.
         kept_exact = False
-        rule_cleaned = False   # NEW (1.5.0): Frivo's rules did the clean-up, no AI
-        ai_problem = ""        # NEW (1.5.0): why, when the AI couldn't be reached
+        rule_cleaned = False   # NEW (1.6.0): Frivo's rules did the clean-up, no AI
+        ai_problem = ""        # NEW (1.6.0): why, when the AI couldn't be reached
 
         if response_style == "reply":
             history.append({"role": "user", "content": source_message})
@@ -9065,7 +9098,7 @@ def chat():
                         temperature=0.0 if response_style == "mimic" else None,
                     )
                 except Exception as e:
-                    # NEW (1.5.0): Clean up in English goes on without the AI.
+                    # NEW (1.6.0): Clean up in English goes on without the AI.
                     if response_style != "echo" or language != "English":
                         raise
                     log_server_event(f"Clean up: the AI couldn't be reached ({e}); used the rules.")
@@ -9089,7 +9122,7 @@ def chat():
                 text_seconds += retry_seconds
                 spoken = retry.strip()
                 if not stays(strip_audio_tags(message), strip_audio_tags(spoken)):
-                    # CHANGED (1.5.0): your words, tidied by the rules.
+                    # CHANGED (1.6.0): your words, tidied by the rules.
                     spoken, _ = rule_clean_up(message)
                     hit_ceiling = False
                     if shaping:
@@ -9250,7 +9283,7 @@ def chat():
             "repaired": was_repaired or hit_ceiling,
             # NEW (1.5.0): Echo reworded it, so your words were used instead.
             "kept_exact": kept_exact,
-            # NEW (1.5.0): cleaned up by Frivo's rules, without AI, and why.
+            # NEW (1.6.0): cleaned up by Frivo's rules, without AI, and why.
             "rule_cleanup": rule_cleaned,
             "rule_cleanup_reason": (no_ai or ("the AI couldn't be reached: " + ai_problem[:160] if ai_problem else "")),
             "follow_length": follow_length,  # NEW (1.5.0)
