@@ -198,6 +198,18 @@ mod.CFG["ollama_tier"] = "fast"
 code, data = say("hey there", style="mimic")
 check("Word for word in English uses no AI", code == 200 and data.get("text_engine_name") == "", data.get("text_engine_name"))
 
+
+print("--- a community model typed without its owner ---")
+ollama["installed"] = ["gemma3:4b", "huihui_ai/qwen3.5-abliterated:9b", "huihui_ai/qwen3.5-abliterated:4b"]
+mod.CFG.update(ollama_model_balanced="huihui_ai", ollama_model_best="qwen3.5-abliterated:9b")
+st = mod.ollama_tier_status()
+best = next(t for t in st["tiers"] if t["id"] == "best")
+bal = next(t for t in st["tiers"] if t["id"] == "balanced")
+check("found under its full name, and saved so", best["installed"] and best["model"] == "huihui_ai/qwen3.5-abliterated:9b"
+      and mod.CFG["ollama_model_best"] == "huihui_ai/qwen3.5-abliterated:9b", best)
+check("just the owner: its models are offered", not bal["installed"] and "huihui_ai/qwen3.5-abliterated:4b" in bal.get("suggest", []), bal)
+check("an unknown name: nothing to offer", mod.match_installed_model("llama9:1b", ollama["installed"]) == (None, []))
+
 print()
 if failures:
     print(f"{len(failures)} failed: " + ", ".join(failures))

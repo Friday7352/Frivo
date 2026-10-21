@@ -4009,6 +4009,10 @@ function syncAiChip() {
 }
 
 function describeTier(t) {
+  // CHANGED (1.5.0): a name that's close to one that is installed says which.
+  if (!t.installed && t.suggest && t.suggest.length) {
+    return { text: `${t.model} · not found. Did you mean ${t.suggest.join(" or ")}? Put the full name in Settings > Ollama.`, warn: true };
+  }
   if (!t.installed) return { text: `${t.model} · not downloaded — on the Ollama PC run: ollama pull ${t.model}`, warn: true };
   if (t.loaded && t.gpu_percent != null && t.gpu_percent < 100) {
     return { text: `${t.model} · ${t.gpu_percent}% on the graphics card, the rest on the CPU (slower)`, warn: true };
@@ -8217,6 +8221,7 @@ window.addEventListener("pagehide", () => {
     "micSelect", "dictationLangSelect", "listenDeviceSelect", "listenThreshold", "listenSegmentSeconds",
     "listenLiveToggle", "listenSpeakerThreshold", "updateAutoToggle", "responseStyleRadios",
     "personalityPresetSelect", "whisperModelSelect", "settingsVolumeSlider", "settingsLengthSlider",
+    "omGetInput",   // NEW (1.5.0): the model manager saves nothing itself
   ]);
   let saveTimer = null;
   let savedTimer = null;
@@ -11660,4 +11665,501 @@ function finishTagCheck(withTags) {
       renderTagCheck();
     }
   });
+})();
+
+
+// ---------------------------------------------------------------------------
+// NEW (1.5.0): the models on the Ollama PC (Settings > AI providers).
+//
+//   * The drive: free space where Ollama keeps its models (from Evora, when
+//     it's on the same PC), with what the models take.
+//   * Installed: size, size class, which tier uses it, loaded or not, and
+//     whether it fits the graphics card. "Use as" puts it in Fast, Balanced
+//     or Best (and saves); Remove asks first, and says if a tier uses it.
+//   * Download any model by name: Check looks up its size first. Suggestions
+//     come with sizes, and say if they fit the card or the drive.
+//   * Downloads run on the Ollama PC and show their progress here; Stop
+//     ends one. They carry on if you close Settings.
+// ---------------------------------------------------------------------------
+var omState = { data: null, suggestions: null, card: null, pollTimer: null, confirming: "", lookup: null };
+
+function fmtGB(bytes) {
+  if (!bytes && bytes !== 0) return "";
+  const gb = bytes / 1024 ** 3;
+  if (gb >= 100) return `${Math.round(gb)} GB`;
+  if (gb >= 1) return `${gb.toFixed(1)} GB`;
+  return `${Math.max(1, Math.round(bytes / 1024 ** 2))} MB`;
+}
+
+function omFitText(fit, card) {
+  const withEvora = card && card.evora_mb > 0;
+  return {
+    fits: withEvora ? "Fits with Evora" : "Fits the card",
+    tight: "Fits only without Evora",
+    big: "Too big for the card (slower)",
+  }[fit] || "";
+}
+
+function omBadge(text, kind) {
+  const b = document.createElement("span");
+  b.className = `om-badge is-${kind}`;
+  b.textContent = text;
+  return b;
+}
+
+function omFreeBytes() {
+  const d = omState.data && omState.data.drive;
+  return d && d.ok ? d.free_bytes : null;
+}
+
+async function omLoad() {
+  let data;
+  try {
+    const res = await fetch("/api/ollama/models");
+    data = await res.json();
+  } catch (err) {
+    data = { reachable: false, error: "Frivo couldn't ask the Ollama PC.", pulls: {} };
+  }
+  omState.data = data;
+  if (data.card) omState.card = data.card;
+  omRender();
+  omPollIfPulling();
+}
+
+function omPollIfPulling() {
+  clearTimeout(omState.pollTimer);
+  const pulls = (omState.data && omState.data.pulls) || {};
+  if (Object.values(pulls).some((p) => p.state === "pulling")) {
+    omState.pollTimer = setTimeout(async () => {
+      try {
+        const res = await fetch("/api/ollama/pull");
+        const d = await res.json();
+        const before = Object.entries((omState.data && omState.data.pulls) || {}).filter(([, p]) => p.state === "pulling").map(([n]) => n);
+        omState.data.pulls = d.pulls || {};
+        const finished = before.some((n) => !omState.data.pulls[n] || omState.data.pulls[n].state !== "pulling");
+        if (finished) { omLoad(); omLoadSuggestions(); if (typeof refreshAiPop === "function") refreshAiPop(); return; }
+        omRenderPulls();
+        omRenderSuggestions();
+      } catch (err) { /* try again */ }
+      omPollIfPulling();
+    }, 1000);
+  }
+}
+
+function omRender() {
+  omRenderDrive();
+  omRenderInstalled();
+  omRenderSuggestions();
+}
+
+function omRenderDrive() {
+  const box = $("omDrive");
+  const data = omState.data;
+  if (!box) return;
+  box.replaceChildren();
+  if (!data || !data.reachable) {
+    const p = document.createElement("span");
+    p.className = "om-muted is-error";
+    p.textContent = (data && data.error) || "Ollama isn't reachable.";
+    box.append(p);
+    return;
+  }
+  const d = data.drive || {};
+  const line = document.createElement("div");
+  line.className = "om-drive-line";
+  const name = document.createElement("span");
+  name.className = "om-drive-name";
+  if (d.ok) {
+    name.textContent = `Drive ${d.drive || ""}`.trim();
+    const free = document.createElement("span");
+    free.className = "om-drive-free";
+    free.textContent = `${fmtGB(d.free_bytes)} free of ${fmtGB(d.total_bytes)}`;
+    const models = document.createElement("span");
+    models.className = "om-muted";
+    models.textContent = `Models use ${fmtGB(data.used_bytes)}`;
+    line.append(name, free, models);
+    const bar = document.createElement("div");
+    bar.className = "om-bar";
+    bar.setAttribute("role", "img");
+    bar.setAttribute("aria-label", `${fmtGB(d.free_bytes)} free of ${fmtGB(d.total_bytes)}; models use ${fmtGB(data.used_bytes)}`);
+    const other = Math.max(0, d.used_bytes - data.used_bytes);
+    const seg = (cls, bytes) => {
+      const s = document.createElement("span");
+      s.className = `om-bar-seg ${cls}`;
+      s.style.width = `${Math.max(0, Math.min(100, (bytes / d.total_bytes) * 100))}%`;
+      return s;
+    };
+    bar.append(seg("is-models", data.used_bytes), seg("is-other", other));
+    box.append(line, bar);
+    if (d.free_bytes < 10 * 1024 ** 3) {
+      const warn = document.createElement("span");
+      warn.className = "om-muted is-warn";
+      warn.textContent = "Under 10 GB left. Remove a model you don't use before downloading another.";
+      box.append(warn);
+    }
+    if (!d.found) {
+      const note = document.createElement("span");
+      note.className = "om-muted";
+      note.textContent = "Evora couldn't find Ollama's models folder, so this is the drive Evora is on.";
+      box.append(note);
+    }
+  } else {
+    name.textContent = `Models use ${fmtGB(data.used_bytes)}`;
+    const why = document.createElement("span");
+    why.className = "om-muted";
+    why.textContent = d.reason || "The drive's free space is unknown.";
+    line.append(name, why);
+    box.append(line);
+  }
+}
+
+function omRenderPulls() {
+  const list = $("omInstalled");
+  if (!list) return;
+  list.querySelectorAll(".om-row.is-pull").forEach((r) => r.remove());
+  const pulls = (omState.data && omState.data.pulls) || {};
+  Object.entries(pulls).forEach(([name, p]) => {
+    if (p.state === "done") return;
+    const row = document.createElement("div");
+    row.className = "om-row is-pull" + (p.state === "error" ? " is-error" : "");
+    const main = document.createElement("div");
+    main.className = "om-row-main";
+    const title = document.createElement("span");
+    title.className = "om-name";
+    title.textContent = name;
+    const meta = document.createElement("span");
+    meta.className = "om-meta";
+    const total = p.total || p.expected || 0;
+    const pct = total ? Math.min(100, Math.round((p.completed / total) * 100)) : 0;
+    if (p.state === "pulling") {
+      meta.textContent = total ? `Downloading · ${fmtGB(p.completed)} of ${fmtGB(total)} · ${pct}%` : (p.status || "Starting…");
+    } else if (p.state === "stopped") {
+      meta.textContent = "Stopped. Downloading it again carries on where it left off.";
+    } else {
+      meta.textContent = p.error || "The download failed.";
+    }
+    main.append(title, meta);
+    if (p.state === "pulling") {
+      const bar = document.createElement("div");
+      bar.className = "om-progress";
+      const fill = document.createElement("span");
+      fill.style.width = `${pct}%`;
+      bar.append(fill);
+      main.append(bar);
+    }
+    const actions = document.createElement("div");
+    actions.className = "om-actions";
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "btn-ghost btn-sm";
+    if (p.state === "pulling") {
+      btn.textContent = "Stop";
+      btn.addEventListener("click", async () => {
+        btn.disabled = true;
+        await fetch("/api/ollama/pull", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ model: name }) });
+        setTimeout(omLoad, 600);
+      });
+    } else {
+      btn.textContent = "Try again";
+      btn.addEventListener("click", () => omPull(name));
+    }
+    actions.append(btn);
+    row.append(main, actions);
+    list.prepend(row);
+  });
+}
+
+function omRenderInstalled() {
+  const list = $("omInstalled");
+  const data = omState.data;
+  if (!list) return;
+  list.replaceChildren();
+  if (!data || !data.reachable) return;
+  if (!data.installed.length) {
+    const empty = document.createElement("p");
+    empty.className = "om-muted om-empty";
+    empty.textContent = "No models on the Ollama PC yet. Pick one from the suggestions below.";
+    list.append(empty);
+  }
+  const tierName = { fast: "Fast", balanced: "Balanced", best: "Best" };
+  data.installed.forEach((m) => {
+    const row = document.createElement("div");
+    row.className = "om-row";
+    const main = document.createElement("div");
+    main.className = "om-row-main";
+    const top = document.createElement("div");
+    top.className = "om-row-top";
+    const title = document.createElement("span");
+    title.className = "om-name";
+    title.textContent = m.name;
+    top.append(title);
+    m.tiers.forEach((t) => top.append(omBadge(tierName[t], "tier")));
+    if (m.loaded) top.append(omBadge("Loaded", "loaded"));
+    const meta = document.createElement("span");
+    meta.className = "om-meta";
+    meta.textContent = [fmtGB(m.size), m.params, m.quant].filter(Boolean).join(" · ");
+    if (m.fit) {
+      const fit = omBadge(omFitText(m.fit, data.card), m.fit);
+      meta.append(" ", fit);
+    }
+    main.append(top, meta);
+
+    const actions = document.createElement("div");
+    actions.className = "om-actions";
+    if (omState.confirming === m.name) {
+      const ask = document.createElement("span");
+      ask.className = "om-confirm";
+      ask.textContent = m.tiers.length
+        ? `${m.tiers.map((t) => tierName[t]).join(" and ")} use${m.tiers.length === 1 ? "s" : ""} it. Remove ${fmtGB(m.size)}?`
+        : `Remove ${fmtGB(m.size)}?`;
+      const yes = document.createElement("button");
+      yes.type = "button";
+      yes.className = "btn btn-sm om-danger";
+      yes.textContent = "Remove";
+      yes.addEventListener("click", () => omRemove(m.name, yes));
+      const no = document.createElement("button");
+      no.type = "button";
+      no.className = "btn-ghost btn-sm";
+      no.textContent = "Keep";
+      no.addEventListener("click", () => { omState.confirming = ""; omRenderInstalled(); omRenderPulls(); });
+      actions.append(ask, no, yes);
+    } else {
+      const use = document.createElement("select");
+      use.className = "om-use";
+      use.setAttribute("aria-label", `Use ${m.name} as`);
+      [["", "Use as…"], ["fast", "Fast"], ["balanced", "Balanced"], ["best", "Best"]].forEach(([v, label]) => {
+        const o = document.createElement("option");
+        o.value = v;
+        o.textContent = v && m.tiers.includes(v) ? `${label} ✓` : label;
+        use.append(o);
+      });
+      use.addEventListener("change", () => {
+        const t = use.value;
+        use.value = "";
+        if (!t) return;
+        omUseAs(m.name, t);
+      });
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "btn-ghost btn-sm";
+      remove.textContent = "Remove";
+      remove.addEventListener("click", () => { omState.confirming = m.name; omRenderInstalled(); omRenderPulls(); });
+      actions.append(use, remove);
+    }
+    row.append(main, actions);
+    list.append(row);
+  });
+  omRenderPulls();
+}
+
+function omUseAs(name, tier) {
+  const ids = { fast: "ollamaModel", balanced: "ollamaModelBalanced", best: "ollamaModelBest" };
+  const input = $(ids[tier]);
+  if (!input) return;
+  input.value = name;
+  input.dispatchEvent(new Event("change", { bubbles: true }));   // Settings saves itself
+  setStatus(`${name} is now the ${tier === "best" ? "Best" : tier === "balanced" ? "Balanced" : "Fast"} model.`);
+  setTimeout(() => { omLoad(); if (typeof refreshAiPop === "function") refreshAiPop(); }, 900);
+}
+
+async function omRemove(name, btn) {
+  btn.disabled = true;
+  try {
+    const res = await fetch("/api/ollama/models", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model: name }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Couldn't remove it.");
+    omState.confirming = "";
+    omState.data = data;
+    omRender();
+    setStatus(`Removed ${name} from the Ollama PC.`);
+    omLoadSuggestions();
+  } catch (err) {
+    btn.disabled = false;
+    setStatus(err.message, true);
+  }
+}
+
+async function omPull(name) {
+  try {
+    const res = await fetch("/api/ollama/pull", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model: name }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Couldn't start the download.");
+    if (omState.data) omState.data.pulls = data.pulls || {};
+    omRenderPulls();
+    omRenderSuggestions();
+    omPollIfPulling();
+    setStatus(`Downloading ${name} on the Ollama PC. You can close Settings; it carries on.`);
+  } catch (err) {
+    setStatus(err.message, true);
+  }
+}
+
+function omDownloadButton(item) {
+  const pulls = (omState.data && omState.data.pulls) || {};
+  const pull = pulls[item.name];
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "btn btn-sm";
+  const free = omFreeBytes();
+  if (item.installed) {
+    btn.className = "btn-ghost btn-sm";
+    btn.textContent = "Installed";
+    btn.disabled = true;
+  } else if (pull && pull.state === "pulling") {
+    const total = pull.total || pull.expected || 0;
+    btn.className = "btn-ghost btn-sm";
+    btn.textContent = total ? `${Math.round((pull.completed / total) * 100)}%` : "Starting…";
+    btn.disabled = true;
+  } else if (free != null && item.size && item.size > free - 1024 ** 3) {
+    btn.className = "btn-ghost btn-sm";
+    btn.textContent = "No space";
+    btn.title = `Needs ${fmtGB(item.size)}; the drive has ${fmtGB(free)} free.`;
+    btn.disabled = true;
+  } else {
+    btn.textContent = "Download";
+    btn.addEventListener("click", () => { btn.disabled = true; omPull(item.name); });
+  }
+  return btn;
+}
+
+async function omLoadSuggestions() {
+  try {
+    const res = await fetch("/api/ollama/suggestions");
+    const data = await res.json();
+    omState.suggestions = data.suggestions || [];
+    if (data.card) omState.card = data.card;
+  } catch (err) {
+    omState.suggestions = [];
+  }
+  omRenderSuggestions();
+}
+
+function omRenderSuggestions() {
+  const box = $("omSuggest");
+  if (!box || !omState.suggestions) return;
+  const note = $("omCardNote");
+  const card = omState.card;
+  if (note) {
+    note.textContent = card
+      ? `Graphics card: ${(card.total_mb / 1024).toFixed(0)} GB${card.evora_mb ? `, Evora uses ${(card.evora_mb / 1024).toFixed(1)} GB` : ""}`
+      : "";
+  }
+  box.replaceChildren();
+  if (!omState.suggestions.length) {
+    box.append(Object.assign(document.createElement("span"), { className: "om-muted", textContent: "Couldn't reach Ollama's library for suggestions." }));
+    return;
+  }
+  const groups = [];
+  omState.suggestions.forEach((s) => {
+    let g = groups.find((x) => x.name === s.group);
+    if (!g) { g = { name: s.group, items: [] }; groups.push(g); }
+    g.items.push(s);
+  });
+  groups.forEach((g) => {
+    const head = document.createElement("div");
+    head.className = "om-group";
+    head.textContent = g.name;
+    box.append(head);
+    g.items.forEach((s) => {
+      const row = document.createElement("div");
+      row.className = "om-row is-suggest";
+      const main = document.createElement("div");
+      main.className = "om-row-main";
+      const title = document.createElement("span");
+      title.className = "om-name";
+      title.textContent = s.name;
+      const meta = document.createElement("span");
+      meta.className = "om-meta";
+      meta.textContent = [s.size ? fmtGB(s.size) : "", s.note].filter(Boolean).join(" · ");
+      if (s.fit) meta.append(" ", omBadge(omFitText(s.fit, card), s.fit));
+      main.append(title, meta);
+      const actions = document.createElement("div");
+      actions.className = "om-actions";
+      actions.append(omDownloadButton(s));
+      row.append(main, actions);
+      box.append(row);
+    });
+  });
+}
+
+async function omCheck(name) {
+  const out = $("omLookup");
+  if (!out) return;
+  out.classList.remove("is-hidden");
+  out.replaceChildren(Object.assign(document.createElement("span"), { className: "om-muted", textContent: `Looking up ${name}…` }));
+  let data;
+  try {
+    const res = await fetch(`/api/ollama/suggestions?lookup=${encodeURIComponent(name)}`);
+    data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Couldn't look it up.");
+  } catch (err) {
+    out.replaceChildren(Object.assign(document.createElement("span"), { className: "om-muted is-error", textContent: err.message }));
+    return;
+  }
+  const l = data.lookup;
+  out.replaceChildren();
+  if (!l) {
+    out.append(Object.assign(document.createElement("span"), { className: "om-muted is-error", textContent: "That isn't a model name Frivo can use." }));
+    return;
+  }
+  const row = document.createElement("div");
+  row.className = "om-row is-suggest";
+  const main = document.createElement("div");
+  main.className = "om-row-main";
+  main.append(Object.assign(document.createElement("span"), { className: "om-name", textContent: l.name }));
+  const meta = document.createElement("span");
+  meta.className = "om-meta";
+  if (!l.found) {
+    meta.classList.add("is-error");
+    meta.textContent = "Ollama's library doesn't have that. Check the spelling, and include the owner (like huihui_ai/…) for community models.";
+  } else {
+    meta.textContent = l.size ? fmtGB(l.size) : "Size unknown (not in Ollama's library)";
+    if (l.fit) meta.append(" ", omBadge(omFitText(l.fit, data.card), l.fit));
+  }
+  main.append(meta);
+  row.append(main);
+  if (l.found) {
+    const actions = document.createElement("div");
+    actions.className = "om-actions";
+    actions.append(omDownloadButton(l));
+    row.append(actions);
+  }
+  out.append(row);
+}
+
+(function wireOllamaModels() {
+  const card = $("ollamaModels");
+  if (!card) return;
+  const refresh = $("omRefresh");
+  if (refresh) refresh.addEventListener("click", () => { omLoad(); omLoadSuggestions(); });
+  const form = $("omGet");
+  const input = $("omGetInput");
+  if (form && input) {
+    form.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const name = input.value.trim();
+      if (name) omCheck(name);
+    });
+  }
+  // Asked when the card comes into view, not on every page load.
+  let asked = false;
+  const ask = () => {
+    if (asked) { omLoad(); return; }
+    asked = true;
+    omLoad();
+    omLoadSuggestions();
+  };
+  if (typeof IntersectionObserver === "function") {
+    new IntersectionObserver((entries) => { if (entries.some((x) => x.isIntersecting)) ask(); }).observe(card);
+  } else {
+    ask();
+  }
 })();

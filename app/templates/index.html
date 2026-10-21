@@ -1368,6 +1368,27 @@
                     </span>
                   </div>
                 </div>
+
+                <!-- NEW (1.5.0): the models on the Ollama PC: download, use, remove. -->
+                <h3 class="settings-section-title om-title">Models on the Ollama PC</h3>
+                <p class="settings-section-sub">Download models, put them in Fast, Balanced or Best, and remove the ones you don't use.</p>
+                <div class="settings-card om" id="ollamaModels">
+                  <div class="om-drive" id="omDrive"><span class="om-muted">Looking at the Ollama PC…</span></div>
+                  <div class="om-head">
+                    <span class="om-head-label">Installed</span>
+                    <button type="button" class="link-btn" id="omRefresh">Refresh</button>
+                  </div>
+                  <div class="om-list" id="omInstalled"></div>
+                  <form class="om-get" id="omGet" autocomplete="off">
+                    <input type="text" id="omGetInput" spellcheck="false"
+                           placeholder="Any model, e.g. qwen3.5:4b or huihui_ai/qwen3.5-abliterated:4b"
+                           aria-label="Model to download">
+                    <button type="submit" class="btn btn-sm" id="omGetBtn">Check</button>
+                  </form>
+                  <div class="om-lookup is-hidden" id="omLookup"></div>
+                  <div class="om-head"><span class="om-head-label">Suggestions</span><span class="om-muted" id="omCardNote"></span></div>
+                  <div class="om-suggest" id="omSuggest"><span class="om-muted">Loading suggestions…</span></div>
+                </div>
               </section>
 
               <!-- Updates & about -->

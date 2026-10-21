@@ -7462,6 +7462,49 @@ def _same_model(a, b):
     return norm(a or "") == norm(b or "")
 
 
+def match_installed_model(name, installed):
+    """
+    NEW (1.5.0): (full name, suggestions) for a model name typed in Settings.
+    A community model is "owner/model:tag" (huihui_ai/qwen3.5-abliterated:9b);
+    typed without its owner it's found anyway when only one installed model
+    fits. Typed as just the owner ("huihui_ai"), the owner's models are
+    offered instead.
+    """
+    name = (name or "").strip()
+    if not name:
+        return None, []
+    for m in installed:
+        if _same_model(name, m):
+            return m, []
+    short = [m for m in installed if "/" in m and _same_model(name, m.split("/", 1)[1])]
+    if len(short) == 1:
+        return short[0], []
+    owner = name.rstrip("/").lower()
+    by_owner = [m for m in installed if m.lower().startswith(owner + "/")]
+    base = name.split(":")[0].split("/")[-1].lower()
+    similar = [m for m in installed if base and base in m.lower()]
+    suggestions = list(dict.fromkeys(short + by_owner + similar))[:3]
+    return None, suggestions
+
+
+def fix_tier_model_names(installed):
+    """NEW (1.5.0): a name typed without its owner is saved in full, once found."""
+    changed = False
+    for tier, key in OLLAMA_TIER_KEYS.items():
+        typed = (CFG.get(key) or "").strip()
+        full, _ = match_installed_model(typed, installed)
+        if full and full != typed and not _same_model(full, typed):
+            CFG[key] = full
+            changed = True
+            log_server_event(f"Ollama: '{typed}' is installed as '{full}'; {tier.title()} now uses the full name")
+    if changed:
+        try:
+            save_config(CFG)
+        except Exception:
+            pass
+    return changed
+
+
 def ollama_tier_status():
     tiers = [{"id": t, "name": name, "model": tier_model(t)} for t, name in OLLAMA_TIERS]
     status = {"tier": ollama_tier(), "tiers": tiers, "reachable": False, "error": "",
@@ -7474,8 +7517,14 @@ def ollama_tier_status():
         status["error"] = f"Ollama isn't reachable at {ollama_base_url()}."
         log_server_event(f"Ollama status: {e!r}")
         return status
+    # NEW (1.5.0): "qwen3.5-abliterated:9b" typed for "huihui_ai/qwen3.5-abliterated:9b".
+    if fix_tier_model_names(installed):
+        for tier in tiers:
+            tier["model"] = tier_model(tier["id"])
     for tier in tiers:
         tier["installed"] = any(_same_model(tier["model"], m) for m in installed)
+        if not tier["installed"]:
+            tier["suggest"] = match_installed_model(tier["model"], installed)[1]   # NEW (1.5.0)
         running = next((m for m in loaded if _same_model(tier["model"], m.get("name"))), None)
         tier["loaded"] = bool(running)
         if running and running.get("size"):
@@ -7483,6 +7532,310 @@ def ollama_tier_status():
             # runs on the CPU, which is slower.
             tier["gpu_percent"] = round(100 * (running.get("size_vram") or 0) / running["size"])
     return status
+
+
+# ---------------------------------------------------------------------------
+# NEW (1.5.0): managing the models on the Ollama PC, from Settings > Ollama.
+#
+#   * What's installed (from Ollama), how big, which tier uses it, and
+#     whether it's loaded. Removing one asks Ollama to delete it.
+#   * Downloading: Ollama pulls it; Frivo follows the progress (and can stop
+#     it). Several can run at once.
+#   * Suggestions: a short list Frivo keeps (everyday, uncensored, small),
+#     with each one's real download size from Ollama's library, and whether
+#     it fits the graphics card (from Evora's card report) next to Evora.
+#   * The drive: Ollama doesn't say how much space is left. Evora can, when
+#     it runs on the same PC as Ollama (GET /disk).
+# ---------------------------------------------------------------------------
+
+OLLAMA_MODEL_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._\-/:]{0,159}$")
+OLLAMA_REGISTRY = "https://registry.ollama.ai/v2"
+OLLAMA_SUGGESTIONS = [
+    # (group, name, what it's like)
+    ("Everyday", "qwen3.5:4b", "Quick and capable. A good Balanced."),
+    ("Everyday", "qwen3.5:9b", "Better replies; needs most of an 8 GB card."),
+    ("Everyday", "gemma3:4b", "Quick and friendly. A good Fast."),
+    ("Everyday", "llama3.1:8b", "A solid all-rounder."),
+    ("Uncensored", "huihui_ai/qwen3.5-abliterated:4b", "Qwen 3.5 4B without the refusals."),
+    ("Uncensored", "huihui_ai/qwen3.5-abliterated:9b", "Qwen 3.5 9B without the refusals."),
+    ("Uncensored", "huihui_ai/gemma-4-abliterated:e4b", "Gemma 4 (small) without the refusals."),
+    ("Uncensored", "hermes3:8b", "Stays in character; follows the personality closely."),
+    ("Uncensored", "dolphin3:8b", "Follows the system prompt without moralising."),
+    ("Uncensored", "mannix/llama3.1-8b-abliterated", "Llama 3.1 8B without the refusals."),
+    ("Small and fast", "qwen3.5:2b", "Very quick; simple replies."),
+    ("Small and fast", "llama3.2:3b", "Quick, light on memory."),
+    ("Small and fast", "gemma3:1b", "The lightest; for the quickest tags and short replies."),
+]
+OLLAMA_SIZE_CACHE = {}          # name -> (when, bytes or None)
+OLLAMA_SIZE_TTL = 6 * 3600
+OLLAMA_PULLS = {}               # name -> progress
+OLLAMA_PULLS_LOCK = threading.Lock()
+
+
+def valid_model_name(name):
+    name = (name or "").strip()
+    return name if OLLAMA_MODEL_NAME_RE.match(name) and ".." not in name else ""
+
+
+def registry_size(name):
+    """
+    The download size of a model in Ollama's library, in bytes, or None
+    (not found, not in the library, or the library can't be reached).
+    """
+    name = valid_model_name(name)
+    if not name or name.startswith(("hf.co/", "huggingface.co/")):
+        return None
+    cached = OLLAMA_SIZE_CACHE.get(name)
+    if cached and time.time() - cached[0] < OLLAMA_SIZE_TTL:
+        return cached[1]
+    repo, _, tag = name.partition(":")
+    if "/" not in repo:
+        repo = "library/" + repo
+    size = None
+    try:
+        response = requests.get(f"{OLLAMA_REGISTRY}/{repo}/manifests/{tag or 'latest'}",
+                                headers={"Accept": "application/vnd.docker.distribution.manifest.v2+json"},
+                                timeout=(4, 8))
+        if response.status_code == 200:
+            data = response.json()
+            size = sum(int(layer.get("size") or 0) for layer in data.get("layers") or [])
+            size += int((data.get("config") or {}).get("size") or 0)
+        elif response.status_code != 404:
+            return None   # don't cache a passing problem
+    except Exception:
+        return None
+    OLLAMA_SIZE_CACHE[name] = (time.time(), size)
+    return size
+
+
+def ollama_card_room():
+    """
+    (card total MB, what Evora holds in MB) from the last GPU reading, when
+    Evora shares the card with Ollama; (None, None) when unknown.
+    """
+    latest = _gpu_state.get("latest") or {}
+    card = latest.get("card") or {}
+    if not card.get("total_mb"):
+        try:
+            sample = gpu_sample()
+            card = sample.get("card") or {}
+            latest = sample
+        except Exception:
+            return None, None
+    if not card.get("total_mb"):
+        return None, None
+    evora = int(((card.get("parts") or {}).get("evora_mb")) or 0) if latest.get("same_card") else 0
+    return int(card["total_mb"]), evora
+
+
+def model_fit(size_bytes, total_mb, evora_mb):
+    """'fits', 'tight' (fits only without Evora) or 'big' (part runs on the CPU)."""
+    if not size_bytes or not total_mb:
+        return ""
+    # Ollama needs room for the conversation as well as the model.
+    need = size_bytes / (1024 * 1024) * 1.05 + 500
+    if need <= total_mb - (evora_mb or 0):
+        return "fits"
+    if need <= total_mb:
+        return "tight"
+    return "big"
+
+
+def ollama_drive():
+    """Free space where Ollama keeps its models, from Evora, when it can say."""
+    if not same_gpu_host(whisper_base_url(), ollama_base_url()):
+        return {"ok": False, "reason": "Evora runs on a different PC from Ollama, so Frivo can't see that drive."}
+    try:
+        response = requests.get(f"{whisper_base_url()}/disk", timeout=(LOCAL_CONNECT_TIMEOUT, 4))
+    except Exception:
+        return {"ok": False, "reason": "Evora isn't reachable, so the drive's free space is unknown."}
+    if response.status_code == 404:
+        return {"ok": False, "reason": "Update Evora to see how much space is left on the Ollama PC's drive."}
+    try:
+        data = response.json()
+    except ValueError:
+        return {"ok": False, "reason": "Evora sent something Frivo couldn't read."}
+    data["ok"] = bool(data.get("total_bytes"))
+    return data
+
+
+def ollama_installed_models():
+    data = _ollama_get("/api/tags")
+    loaded = set()
+    try:
+        loaded = {m.get("name") for m in (_ollama_get("/api/ps").get("models") or [])}
+    except Exception:
+        pass
+    tiers = {t: tier_model(t) for t in OLLAMA_TIER_KEYS}
+    out = []
+    for m in data.get("models") or []:
+        name = m.get("name") or m.get("model") or ""
+        details = m.get("details") or {}
+        out.append({
+            "name": name,
+            "size": int(m.get("size") or 0),
+            "modified": m.get("modified_at") or "",
+            "params": details.get("parameter_size") or "",
+            "quant": details.get("quantization_level") or "",
+            "family": details.get("family") or "",
+            "tiers": [t for t, wanted in tiers.items() if _same_model(wanted, name)],
+            "loaded": any(_same_model(name, l) for l in loaded),
+        })
+    out.sort(key=lambda m: m["name"].lower())
+    return out
+
+
+def pulls_snapshot():
+    with OLLAMA_PULLS_LOCK:
+        now = time.time()
+        for name in [n for n, p in OLLAMA_PULLS.items() if p.get("finished") and now - p["finished"] > 600]:
+            OLLAMA_PULLS.pop(name, None)
+        return {name: {k: v for k, v in p.items() if not k.startswith("_")} for name, p in OLLAMA_PULLS.items()}
+
+
+def _run_pull(name):
+    progress = OLLAMA_PULLS[name]
+    layers = {}
+    try:
+        with requests.post(f"{ollama_base_url()}/api/pull", json={"model": name, "name": name, "stream": True},
+                           stream=True, timeout=(LOCAL_CONNECT_TIMEOUT, 120)) as response:
+            progress["_response"] = response
+            if response.status_code != 200:
+                try:
+                    message = response.json().get("error")
+                except Exception:
+                    message = response.text[:200]
+                raise RuntimeError(message or f"Ollama said {response.status_code}")
+            for line in response.iter_lines():
+                if progress.get("_cancel"):
+                    raise RuntimeError("Stopped.")
+                if not line:
+                    continue
+                try:
+                    event = json.loads(line)
+                except ValueError:
+                    continue
+                if event.get("error"):
+                    raise RuntimeError(event["error"])
+                status = event.get("status") or ""
+                if event.get("digest") and event.get("total"):
+                    layers[event["digest"]] = (int(event.get("completed") or 0), int(event["total"]))
+                done = sum(c for c, _ in layers.values())
+                total = sum(t for _, t in layers.values())
+                with OLLAMA_PULLS_LOCK:
+                    progress.update(status=status.split(" sha256")[0][:60], completed=done, total=total)
+                if status == "success":
+                    with OLLAMA_PULLS_LOCK:
+                        progress.update(state="done", finished=time.time(), status="Downloaded")
+                    log_server_event(f"Ollama: downloaded {name}")
+                    return
+        raise RuntimeError("Ollama stopped before the download finished.")
+    except Exception as e:
+        stopped = progress.get("_cancel")
+        with OLLAMA_PULLS_LOCK:
+            progress.update(state="stopped" if stopped else "error", finished=time.time(),
+                            error="" if stopped else (str(e) or "The download failed."))
+        if not stopped:
+            log_server_event(f"Ollama: couldn't download {name}: {e}")
+
+
+@app.route("/api/ollama/models", methods=["GET", "DELETE"])
+def ollama_models_route():
+    if request.method == "DELETE":
+        name = valid_model_name((request.get_json(silent=True) or {}).get("model"))
+        if not name:
+            return jsonify({"error": "Which model?"}), 400
+        try:
+            response = requests.delete(f"{ollama_base_url()}/api/delete", json={"model": name, "name": name},
+                                       timeout=(LOCAL_CONNECT_TIMEOUT, 60))
+        except Exception:
+            return jsonify({"error": f"Ollama isn't reachable at {ollama_base_url()}."}), 502
+        if response.status_code == 404:
+            return jsonify({"error": f"{name} isn't on the Ollama PC."}), 404
+        if response.status_code != 200:
+            try:
+                message = response.json().get("error")
+            except Exception:
+                message = ""
+            return jsonify({"error": message or f"Ollama couldn't remove {name}."}), 502
+        log_server_event(f"Ollama: removed {name}")
+    try:
+        installed = ollama_installed_models()
+    except Exception:
+        return jsonify({"reachable": False, "error": f"Ollama isn't reachable at {ollama_base_url()}.",
+                        "pulls": pulls_snapshot()})
+    total_mb, evora_mb = ollama_card_room()
+    for m in installed:
+        m["fit"] = model_fit(m["size"], total_mb, evora_mb)
+    return jsonify({
+        "reachable": True,
+        "installed": installed,
+        "used_bytes": sum(m["size"] for m in installed),
+        "drive": ollama_drive(),
+        "card": {"total_mb": total_mb, "evora_mb": evora_mb} if total_mb else None,
+        "pulls": pulls_snapshot(),
+    })
+
+
+@app.route("/api/ollama/pull", methods=["GET", "POST", "DELETE"])
+def ollama_pull_route():
+    if request.method == "GET":
+        return jsonify({"pulls": pulls_snapshot()})
+    data = request.get_json(silent=True) or {}
+    name = valid_model_name(data.get("model") or request.args.get("model"))
+    if not name:
+        return jsonify({"error": "Type a model name, like qwen3.5:4b or huihui_ai/qwen3.5-abliterated:4b."}), 400
+    with OLLAMA_PULLS_LOCK:
+        current = OLLAMA_PULLS.get(name)
+        if request.method == "DELETE":
+            if current and current.get("state") == "pulling":
+                current["_cancel"] = True
+                response = current.get("_response")
+                if response is not None:
+                    try:
+                        response.close()
+                    except Exception:
+                        pass
+            return jsonify({"ok": True})
+        if current and current.get("state") == "pulling":
+            return jsonify({"error": f"{name} is already downloading."}), 409
+        OLLAMA_PULLS[name] = {"state": "pulling", "status": "Starting…", "completed": 0, "total": 0,
+                              "started": time.time(), "expected": registry_size(name)}
+    threading.Thread(target=_run_pull, args=(name,), daemon=True, name=f"ollama-pull-{name}").start()
+    return jsonify({"ok": True, "pulls": pulls_snapshot()})
+
+
+@app.route("/api/ollama/suggestions")
+def ollama_suggestions_route():
+    """The suggestions, with sizes from Ollama's library (looked up together)."""
+    from concurrent.futures import ThreadPoolExecutor
+    names = [s[1] for s in OLLAMA_SUGGESTIONS]
+    extra = valid_model_name(request.args.get("lookup"))
+    if extra and extra not in names:
+        names.append(extra)
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        sizes = dict(zip(names, pool.map(registry_size, names)))
+    try:
+        installed = [m["name"] for m in ollama_installed_models()]
+    except Exception:
+        installed = []
+    total_mb, evora_mb = ollama_card_room()
+    items = []
+    for group, name, note in OLLAMA_SUGGESTIONS:
+        size = sizes.get(name)
+        if size is None and name in OLLAMA_SIZE_CACHE:
+            continue   # the library doesn't have it (any more)
+        items.append({"group": group, "name": name, "note": note, "size": size,
+                      "installed": any(_same_model(name, m) for m in installed),
+                      "fit": model_fit(size, total_mb, evora_mb)})
+    lookup = None
+    if extra:
+        size = sizes.get(extra)
+        lookup = {"name": extra, "size": size, "found": size is not None or extra.startswith("hf.co/"),
+                  "installed": any(_same_model(extra, m) for m in installed),
+                  "fit": model_fit(size, total_mb, evora_mb)}
+    return jsonify({"suggestions": items, "lookup": lookup,
+                    "card": {"total_mb": total_mb, "evora_mb": evora_mb} if total_mb else None})
 
 
 @app.route("/api/ollama/status")

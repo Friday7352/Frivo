@@ -4377,3 +4377,67 @@ html.motion-ready .stage { transition: transform var(--dur-smooth) var(--spring-
 .composer.is-tall #voiceTagWrap.is-hidden + * { margin-left: auto; }
 /* The swap list must not be cut off by the card. */
 .tag-review-text { max-height: none; overflow: visible; }
+
+
+/* =========================================================================
+   NEW (1.5.0): the models on the Ollama PC
+   ========================================================================= */
+.om { padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; }
+.om-muted { font-size: var(--text-caption); color: var(--ink-dim); }
+.om-muted.is-error, .om-meta.is-error { color: var(--alert); }
+.om-muted.is-warn { color: var(--warn); }
+.om-drive { display: flex; flex-direction: column; gap: 6px; padding-bottom: 6px; border-bottom: 1px solid var(--rule-soft); }
+.om-drive-line { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 12px; }
+.om-drive-name { font-weight: 600; font-size: var(--text-subhead); }
+.om-drive-free { font-size: var(--text-subhead); }
+.om-drive-line .om-muted { margin-left: auto; }
+.om-bar { display: flex; height: 8px; border-radius: 999px; background: var(--fill-strong); overflow: hidden; }
+.om-bar-seg.is-models { background: var(--accent); }
+.om-bar-seg.is-other { background: var(--ink-faint); opacity: 0.6; }
+.om-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-top: 4px; }
+.om-head-label { font-size: var(--text-caption2); font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-faint); }
+.om-list, .om-suggest { display: flex; flex-direction: column; }
+.om-row {
+  display: flex; align-items: center; gap: 12px;
+  padding: 9px 0;
+  border-top: 1px solid var(--rule-soft);
+}
+.om-list .om-row:first-child, .om-group + .om-row { border-top: 0; }
+.om-row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.om-row-top { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.om-name { font-family: var(--font-mono); font-size: 13px; color: var(--ink); overflow-wrap: anywhere; }
+.om-meta { font-size: var(--text-caption); color: var(--ink-dim); }
+.om-actions { flex: none; display: flex; align-items: center; gap: 6px; }
+.om-use {
+  width: auto; min-height: 30px; padding: 4px 26px 4px 10px;
+  font-size: var(--text-footnote);
+}
+.om-confirm { font-size: var(--text-caption); color: var(--ink); max-width: 220px; text-align: right; }
+.om-danger, .om-danger:hover { background: var(--alert); }
+.om-badge {
+  display: inline-block;
+  padding: 0 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  line-height: 18px;
+  border: 1px solid var(--rule);
+  color: var(--ink-dim);
+  white-space: nowrap;
+}
+.om-badge.is-tier { color: var(--accent); border-color: var(--accent-line); background: var(--accent-soft); }
+.om-badge.is-loaded { color: var(--signal); border-color: color-mix(in srgb, var(--signal) 40%, transparent); }
+.om-badge.is-fits { color: var(--signal); border-color: color-mix(in srgb, var(--signal) 40%, transparent); }
+.om-badge.is-tight { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, transparent); }
+.om-badge.is-big { color: var(--alert); border-color: color-mix(in srgb, var(--alert) 45%, transparent); }
+.om-progress { height: 4px; margin-top: 4px; border-radius: 999px; background: var(--fill-strong); overflow: hidden; }
+.om-progress span { display: block; height: 100%; background: var(--accent); transition: width 600ms var(--ease); }
+.om-row.is-error .om-meta { color: var(--alert); }
+.om-get { display: flex; gap: 8px; margin-top: 4px; }
+.om-get input { flex: 1; font-family: var(--font-mono); font-size: 13px; }
+.om-lookup.is-hidden { display: none; }
+.om-group { margin-top: 8px; font-size: var(--text-footnote); font-weight: 600; color: var(--ink); }
+.om-empty { margin: 4px 0; }
+@media (max-width: 560px) {
+  .om-row { flex-wrap: wrap; }
+  .om-actions { width: 100%; justify-content: flex-end; }
+}
