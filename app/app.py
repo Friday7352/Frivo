@@ -3035,6 +3035,327 @@ def custom_voice_change(key):
     return jsonify({"ok": True})
 
 
+# ---------------------------------------------------------------------------
+# NEW (1.5.0): the free voice library ("Browse free voices" in the voice list)
+#
+# Every Piper voice, listed from the Piper voice library on Hugging Face
+# (rhasspy/piper-voices): hundreds, free, in dozens of languages. Each can
+# be heard first (the library's own sample, fetched and kept by Frivo so the
+# browser doesn't need to reach Hugging Face) and downloaded with one click.
+# A download is the same .onnx and .onnx.json you could add by hand: it's
+# checked against the library's checksums, then goes through "Add a voice"
+# (converted, tried out, kept with your other added voices).
+#
+# Like every free voice they run on one CPU thread, never the graphics card.
+# x_low and low voices are the lightest; medium ones are like the voices
+# included with Frivo; high ones are clearer and take about twice the CPU.
+# ---------------------------------------------------------------------------
+
+VOICE_LIB_URL = "https://huggingface.co/rhasspy/piper-voices/resolve/main/"
+VOICE_LIB_DIR = os.path.join(DATA_DIR, "voice_library")
+VOICE_LIB_INDEX = os.path.join(VOICE_LIB_DIR, "voices.json")
+VOICE_LIB_TTL = 24 * 3600
+VOICE_LIB_LOCK = threading.Lock()
+VOICE_LIB_STATE = {"data": None, "at": 0.0}
+VOICE_LIB_JOBS = {}            # key -> {"state", "done", "total", "error", "voice_id", "cancel"}
+VOICE_LIB_JOBS_LOCK = threading.Lock()
+_VOICE_LIB_KEY_RE = re.compile(r"^[A-Za-z]{2,3}_[A-Za-z]{2,3}-[A-Za-z0-9_]{1,60}-(x_low|low|medium|high)$")
+VOICE_LIB_QUALITY_ORDER = {"x_low": 0, "low": 1, "medium": 2, "high": 3}
+
+
+def voice_library_catalog(refresh=False):
+    """The library's voices.json, as a dict. Kept for a day; the copy on disk
+    is used when Hugging Face can't be reached. Raises RuntimeError."""
+    with VOICE_LIB_LOCK:
+        if not refresh and VOICE_LIB_STATE["data"] and time.time() - VOICE_LIB_STATE["at"] < VOICE_LIB_TTL:
+            return VOICE_LIB_STATE["data"]
+    cached, cached_at = None, 0.0
+    try:
+        cached_at = os.path.getmtime(VOICE_LIB_INDEX)
+        with open(VOICE_LIB_INDEX, "r", encoding="utf-8") as f:
+            cached = json.load(f)
+    except (OSError, ValueError):
+        cached = None
+    if cached and not refresh and time.time() - cached_at < VOICE_LIB_TTL:
+        data = cached
+    else:
+        try:
+            resp = requests.get(VOICE_LIB_URL + "voices.json", timeout=25, headers={"User-Agent": "Frivo"})
+            resp.raise_for_status()
+            data = resp.json()
+            if not isinstance(data, dict) or not data:
+                raise ValueError("the list was empty")
+            os.makedirs(VOICE_LIB_DIR, exist_ok=True)
+            temp = VOICE_LIB_INDEX + ".tmp"
+            with open(temp, "w", encoding="utf-8") as f:
+                json.dump(data, f)
+            os.replace(temp, VOICE_LIB_INDEX)
+        except Exception as e:
+            if not cached:
+                raise RuntimeError(f"Couldn't get the voice library from Hugging Face ({e}). "
+                                   "Check that the PC Frivo runs on is online.")
+            log_server_event(f"Voice library: using the saved list ({e!r})")
+            data = cached
+    with VOICE_LIB_LOCK:
+        VOICE_LIB_STATE.update(data=data, at=time.time())
+    return data
+
+
+def _voice_lib_files(entry):
+    """(model path, config path, card path, {path: info}) inside the library."""
+    files = entry.get("files") or {}
+    model = next((p for p in files if p.endswith(".onnx")), "")
+    config = next((p for p in files if p.endswith(".onnx.json")), "")
+    card = next((p for p in files if p.endswith("MODEL_CARD")), "")
+    return model, config, card, files
+
+
+def _voice_lib_pretty(entry):
+    name = str(entry.get("name") or "voice").replace("_", " ").title()[:34]
+    quality = entry.get("quality") or ""
+    return name if quality == "medium" else f"{name} ({quality.replace('_', '-')})"
+
+
+def _voice_lib_lookup(key):
+    if not _VOICE_LIB_KEY_RE.match(key or ""):
+        return None
+    try:
+        entry = voice_library_catalog().get(key)
+    except RuntimeError:
+        return None
+    return entry if isinstance(entry, dict) else None
+
+
+def _folder_bytes(path):
+    total = 0
+    for root, _, files in os.walk(path):
+        for name in files:
+            try:
+                total += os.path.getsize(os.path.join(root, name))
+            except OSError:
+                pass
+    return total
+
+
+@app.route("/api/voices/library")
+def voice_library_list():
+    try:
+        data = voice_library_catalog(refresh=request.args.get("refresh") == "1")
+    except RuntimeError as e:
+        return jsonify({"error": str(e)}), 502
+    added = {}
+    for voice in load_custom_voices():
+        source = re.sub(r"\.onnx$", "", str(voice.get("source") or ""), flags=re.I)
+        for k in (voice.get("library_key"), source):
+            if k:
+                added[k] = PIPER_PREFIX + voice["key"]
+    included = {}
+    if VOICE_PACK is not None:
+        for voice in VOICE_PACK.VOICES:
+            included[re.sub(r"\.onnx$", "", voice.get("model", ""))] = PIPER_PREFIX + voice["key"]
+    out = []
+    for key, entry in data.items():
+        if not isinstance(entry, dict) or not _VOICE_LIB_KEY_RE.match(key):
+            continue
+        model, config, _, files = _voice_lib_files(entry)
+        if not model or not config:
+            continue
+        lang = entry.get("language") or {}
+        size = int((files.get(model) or {}).get("size_bytes") or 0) + int((files.get(config) or {}).get("size_bytes") or 0)
+        out.append({
+            "key": key,
+            "name": str(entry.get("name") or "").replace("_", " ").title(),
+            "quality": entry.get("quality") or "",
+            "speakers": int(entry.get("num_speakers") or 1),
+            "language_code": lang.get("code") or "",
+            "language": lang.get("name_english") or lang.get("family") or "",
+            "language_native": lang.get("name_native") or "",
+            "country": lang.get("country_english") or "",
+            "size": size,
+            "voice_id": included.get(key) or added.get(key) or "",
+            "included": key in included,
+        })
+    out.sort(key=lambda v: (v["language"], v["country"], v["name"], VOICE_LIB_QUALITY_ORDER.get(v["quality"], 9)))
+    disk = {}
+    try:
+        os.makedirs(CUSTOM_VOICES_DIR, exist_ok=True)
+        usage = shutil.disk_usage(CUSTOM_VOICES_DIR)
+        drive = os.path.splitdrive(os.path.abspath(CUSTOM_VOICES_DIR))[0] or "/"
+        disk = {"drive": drive, "free": usage.free, "total": usage.total,
+                "voices_bytes": _folder_bytes(CUSTOM_VOICES_DIR)}
+    except OSError:
+        pass
+    problem = piper_package_problem() if VOICE_PACK is not None else "Frivo's voices aren't set up. Run Frivo's setup again (Repair)."
+    return jsonify({"voices": out, "disk": disk, "problem": problem or ""})
+
+
+@app.route("/api/voices/library/sample/<key>")
+def voice_library_sample(key):
+    """The library's own recording of this voice, kept after the first play."""
+    entry = _voice_lib_lookup(key)
+    if not entry:
+        return jsonify({"error": "Not found."}), 404
+    model = _voice_lib_files(entry)[0]
+    speaker = max(0, min(int(entry.get("num_speakers") or 1) - 1, request.args.get("speaker", 0, type=int)))
+    folder = os.path.join(VOICE_LIB_DIR, "samples")
+    path = os.path.join(folder, f"{key}-{speaker}.mp3")
+    if not os.path.isfile(path):
+        url = VOICE_LIB_URL + os.path.dirname(model) + f"/samples/speaker_{speaker}.mp3"
+        try:
+            resp = requests.get(url, timeout=20, headers={"User-Agent": "Frivo"})
+        except requests.RequestException as e:
+            return jsonify({"error": f"Couldn't reach Hugging Face ({e})."}), 502
+        if resp.status_code == 404:
+            return jsonify({"error": "There's no sample of this voice. Download it to hear it."}), 404
+        if not resp.ok or len(resp.content) > 8 * 1024 * 1024:
+            return jsonify({"error": f"Hugging Face said {resp.status_code}."}), 502
+        os.makedirs(folder, exist_ok=True)
+        with open(path + ".tmp", "wb") as f:
+            f.write(resp.content)
+        os.replace(path + ".tmp", path)
+    return send_from_directory(folder, os.path.basename(path), mimetype="audio/mpeg", max_age=86400)
+
+
+@app.route("/api/voices/library/card/<key>")
+def voice_library_card(key):
+    """Who recorded the voice and its licence, from the voice's MODEL_CARD."""
+    entry = _voice_lib_lookup(key)
+    if not entry:
+        return jsonify({"error": "Not found."}), 404
+    card = _voice_lib_files(entry)[2]
+    path = os.path.join(VOICE_LIB_DIR, "cards", key + ".txt")
+    text = ""
+    if os.path.isfile(path):
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            text = f.read()
+    elif card:
+        try:
+            resp = requests.get(VOICE_LIB_URL + card, timeout=15, headers={"User-Agent": "Frivo"})
+            if resp.ok:
+                text = resp.text[:6000]
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write(text)
+        except requests.RequestException:
+            pass
+    licence = ""
+    for line in text.splitlines():
+        m = re.search(r"licen[sc]e\s*[:=]?\s*(.+)$", line, re.I)
+        if m and m.group(1).strip(" *-:"):
+            licence = m.group(1).strip(" *-:")[:160]
+            break
+    url = re.search(r"https?://\S+", text)
+    return jsonify({"license": licence, "dataset_url": url.group(0).rstrip(").,") if url else ""})
+
+
+def _voice_lib_job(key, **changes):
+    with VOICE_LIB_JOBS_LOCK:
+        job = VOICE_LIB_JOBS.setdefault(key, {})
+        job.update(changes)
+        return dict(job)
+
+
+def _voice_lib_download(key, entry):
+    import hashlib
+    model, config, _, files = _voice_lib_files(entry)
+    staging = tempfile.mkdtemp(prefix=".library-", dir=CUSTOM_VOICES_DIR)
+    try:
+        paths = []
+        for rel in (config, model):
+            info = files.get(rel) or {}
+            target = os.path.join(staging, os.path.basename(rel))
+            digest = hashlib.md5()
+            with requests.get(VOICE_LIB_URL + rel, stream=True, timeout=30, headers={"User-Agent": "Frivo"}) as resp:
+                resp.raise_for_status()
+                with open(target, "wb") as out:
+                    for chunk in resp.iter_content(1 << 16):
+                        with VOICE_LIB_JOBS_LOCK:
+                            job = VOICE_LIB_JOBS[key]
+                            if job.get("cancel"):
+                                job.update(state="cancelled")
+                                return
+                            job["done"] = job.get("done", 0) + len(chunk)
+                        out.write(chunk)
+                        digest.update(chunk)
+            want = (info.get("md5_digest") or "").lower()
+            if want and digest.hexdigest() != want:
+                raise ValueError(f"{os.path.basename(rel)} didn't download correctly (its checksum is wrong). Try again.")
+            paths.append(target)
+        _voice_lib_job(key, state="adding")
+        try:
+            voice = add_custom_voice(paths, _voice_lib_pretty(entry))
+        except ValueError as e:
+            twin = re.search(r"already added this voice", str(e))
+            if not twin:
+                raise
+            with CUSTOM_VOICES_LOCK:
+                fingerprint = VOICE_PACK._sha256(os.path.join(staging, os.path.basename(model)))
+                voice = next((v for v in load_custom_voices() if v.get("sha256") == fingerprint), None)
+            if not voice:
+                raise
+        with CUSTOM_VOICES_LOCK:
+            items = load_custom_voices()
+            for item in items:
+                if item["key"] == voice["key"]:
+                    item["library_key"] = key
+                    item["region"] = item.get("region") or ((entry.get("language") or {}).get("country_english") or "")
+            write_custom_voices(items)
+        _voice_lib_job(key, state="done", voice_id=PIPER_PREFIX + voice["key"], name=voice["name"])
+        log_server_event(f"Voice library: added {key}")
+    except Exception as e:
+        message = str(e) if isinstance(e, ValueError) else f"The download failed ({e})."
+        _voice_lib_job(key, state="error", error=message)
+        log_server_event(f"Voice library: {key} failed: {e!r}")
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
+
+
+@app.route("/api/voices/library/install", methods=["GET", "POST"])
+def voice_library_install():
+    if request.method == "GET":
+        with VOICE_LIB_JOBS_LOCK:
+            jobs = {k: {x: y for x, y in j.items() if x != "cancel"} for k, j in VOICE_LIB_JOBS.items()}
+        return jsonify({"jobs": jobs})
+    key = str((request.get_json(silent=True) or {}).get("key") or "")
+    entry = _voice_lib_lookup(key)
+    if not entry:
+        return jsonify({"error": "That voice isn't in the library."}), 404
+    if VOICE_PACK is None or piper_package_problem():
+        return jsonify({"error": piper_package_problem() or "Frivo's voices aren't set up. Run Frivo's setup again (Repair)."}), 400
+    model, config, _, files = _voice_lib_files(entry)
+    total = sum(int((files.get(p) or {}).get("size_bytes") or 0) for p in (model, config))
+    os.makedirs(CUSTOM_VOICES_DIR, exist_ok=True)
+    try:
+        free = shutil.disk_usage(CUSTOM_VOICES_DIR).free
+    except OSError:
+        free = None
+    # The download and the converted copy are both on the drive for a moment.
+    if free is not None and free < total * 2 + 200 * 1024 * 1024:
+        return jsonify({"error": f"There isn't room on the drive: it needs about {round(total * 2 / 1048576)} MB "
+                                 f"and {round(free / 1048576)} MB is free."}), 400
+    with VOICE_LIB_JOBS_LOCK:
+        job = VOICE_LIB_JOBS.get(key)
+        if job and job.get("state") in ("downloading", "adding"):
+            return jsonify({"ok": True, "job": {x: y for x, y in job.items() if x != "cancel"}})
+        VOICE_LIB_JOBS[key] = {"state": "downloading", "done": 0, "total": total, "error": "", "voice_id": "",
+                               "name": _voice_lib_pretty(entry), "cancel": False}
+    threading.Thread(target=_voice_lib_download, args=(key, entry), daemon=True).start()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/voices/library/install/<key>", methods=["DELETE"])
+def voice_library_cancel(key):
+    with VOICE_LIB_JOBS_LOCK:
+        job = VOICE_LIB_JOBS.get(key)
+        if not job:
+            return jsonify({"error": "Not found."}), 404
+        if job.get("state") == "downloading":
+            job["cancel"] = True
+        else:
+            VOICE_LIB_JOBS.pop(key, None)   # a finished or failed one: forget it
+    return jsonify({"ok": True})
+
+
 def piper_status():
     problem = piper_package_problem()
     total = len(VOICE_PACK.VOICES) if VOICE_PACK else 0

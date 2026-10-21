@@ -1759,6 +1759,11 @@
         <span class="voice-foot-actions">
           <button id="voiceHiddenNote" class="link-btn is-hidden" type="button"></button>
           <button id="voiceFilterClear" class="btn-ghost btn-sm is-hidden" type="button">Clear filters</button>
+          <!-- NEW (1.5.0): the free voice library: hear and download Piper voices -->
+          <button id="voiceLibBtn" class="btn-ghost btn-sm" type="button"
+                  title="Hear and download free voices, in dozens of languages">
+            <svg class="icon-14" aria-hidden="true"><use href="#i-download"/></svg>Browse free voices
+          </button>
           <!-- NEW (1.5.0): add a Piper voice of your own -->
           <button id="voiceAddBtn" class="btn-ghost btn-sm" type="button"
                   title="Add a Piper voice: its .onnx and .onnx.json files, or an archive with them in it">
@@ -1767,6 +1772,51 @@
           <input type="file" id="voiceAddInput" class="is-hidden" multiple
                  accept=".onnx,.json,.zip,.gz,.tgz,.bz2,.tbz2,.tar,application/zip,application/gzip,application/x-bzip2,application/json">
         </span>
+      </p>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       NEW (1.5.0): Free voice library
+       ============================================================
+       Every Piper voice: hear its sample, download it with one click.
+       Opens over the voice list. -->
+  <div id="voiceLibPop" class="overlay voice-overlay vlib-overlay is-hidden">
+    <div class="voice-dialog vlib-dialog" role="dialog" aria-modal="true" aria-labelledby="voiceLibTitle">
+      <header class="voice-dialog-head">
+        <div class="vlib-head-text">
+          <h2 class="voice-dialog-title" id="voiceLibTitle">Free voices</h2>
+          <p class="vlib-sub">Piper voices: free, and they run on the CPU of the PC Frivo runs on, never the graphics card. Press play to hear one, then download the ones you like.</p>
+        </div>
+        <button id="voiceLibCloseBtn" class="voice-close" type="button" aria-label="Close">
+          <svg class="icon-18"><use href="#i-close"/></svg>
+        </button>
+      </header>
+
+      <div class="voice-search-row vlib-search-row">
+        <span class="voice-search-field">
+          <span class="voice-search-icon" aria-hidden="true">
+            <svg class="icon-16"><use href="#i-search"/></svg>
+          </span>
+          <input type="text" id="voiceLibSearch" class="voice-search" autocomplete="off"
+                 placeholder="Search by name or language…" aria-label="Search free voices">
+        </span>
+        <select id="voiceLibLang" class="voice-sort" aria-label="Language"></select>
+        <select id="voiceLibQuality" class="voice-sort" aria-label="Quality">
+          <option value="">Any quality</option>
+          <option value="x_low">Lightest (x-low)</option>
+          <option value="low">Light (low)</option>
+          <option value="medium">Medium (like Frivo's own)</option>
+          <option value="high">High (clearest, 2× the CPU)</option>
+        </select>
+      </div>
+
+      <div class="vlib-drive" id="voiceLibDrive"></div>
+      <div class="vlib-list" id="voiceLibList" aria-live="polite"><p class="vlib-empty">Loading the voice library…</p></div>
+
+      <p class="vlib-foot">
+        <span>From the <a href="https://huggingface.co/rhasspy/piper-voices" target="_blank" rel="noopener noreferrer">Piper voice library</a>. Each voice has its own licence (shown when you play it); some are for personal use only.</span>
+        <span class="vlib-foot-count" id="voiceLibCount"></span>
       </p>
     </div>
   </div>

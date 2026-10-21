@@ -13377,3 +13377,291 @@ async function checkElevenKey(force) {
     }
   });
 })();
+
+
+// ---------------------------------------------------------------------------
+// NEW (1.5.0): the free voice library ("Browse free voices" in the voice list)
+// Every Piper voice from the library on Hugging Face: play its sample,
+// download it with one click. Frivo fetches the samples and the files, so
+// only the PC Frivo runs on needs to reach Hugging Face. A download becomes
+// one of your added voices, the same as "Add a voice".
+// ---------------------------------------------------------------------------
+(function initVoiceLibrary() {
+  const pop = $("voiceLibPop");
+  const openBtn = $("voiceLibBtn");
+  if (!pop || !openBtn) return;
+  const list = $("voiceLibList");
+  const search = $("voiceLibSearch");
+  const langSel = $("voiceLibLang");
+  const qualSel = $("voiceLibQuality");
+  const LANG_KEY = "frivo_voicelib_lang";
+  const QUAL_KEY = "frivo_voicelib_quality";
+  const QUALITY_LABEL = { x_low: "x-low", low: "low", medium: "medium", high: "high" };
+  let voices = [];
+  let disk = {};
+  let jobs = {};
+  let loaded = false;
+  let pollTimer = null;
+  let audio = null;
+  let playingKey = "";
+  let loadingKey = "";
+  const licences = {};
+  const notes = {};   // key -> a message to show on that row
+
+  const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const mb = (n) => (n >= 1073741824 ? `${(n / 1073741824).toFixed(1)} GB` : `${Math.max(1, Math.round(n / 1048576))} MB`);
+  const store = {
+    get(k) { try { return localStorage.getItem(k) || ""; } catch (_) { return ""; } },
+    set(k, v) { try { localStorage.setItem(k, v); } catch (_) { /* fine */ } },
+  };
+
+  function open() {
+    pop.classList.remove("is-hidden");
+    search.value = "";
+    if (!loaded) load(); else render();
+    setTimeout(() => search.focus(), 30);
+  }
+  function close() {
+    pop.classList.add("is-hidden");
+    stop();
+  }
+
+  async function load(refresh) {
+    list.innerHTML = '<p class="vlib-empty">Loading the voice library…</p>';
+    try {
+      const res = await fetch("/api/voices/library" + (refresh ? "?refresh=1" : ""));
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `Frivo said ${res.status}`);
+      voices = data.voices || [];
+      disk = data.disk || {};
+      loaded = true;
+      if (data.problem) notes._all = data.problem;
+      fillLanguages();
+      await pollJobs();
+      render();
+    } catch (err) {
+      list.innerHTML = `<p class="vlib-empty is-error">${esc(err.message || err)}</p>`;
+    }
+  }
+
+  function fillLanguages() {
+    const counts = new Map();
+    voices.forEach((v) => counts.set(v.language, (counts.get(v.language) || 0) + 1));
+    const langs = [...counts.keys()].sort((a, b) => a.localeCompare(b));
+    // The language Frivo speaks now is the starting point, then the last one picked.
+    const current = (typeof currentLanguage === "string" && currentLanguage) || "";
+    const guess = voices.find((v) => current && v.language.toLowerCase() === current.toLowerCase());   // currentLanguage is a name ("English")
+    const saved = store.get(LANG_KEY);
+    const pick = saved && (saved === "*" || counts.has(saved)) ? saved : (guess ? guess.language : "English");
+    langSel.innerHTML = `<option value="*">All languages (${voices.length})</option>`
+      + langs.map((l) => `<option value="${esc(l)}">${esc(l)} (${counts.get(l)})</option>`).join("");
+    langSel.value = counts.has(pick) || pick === "*" ? pick : "*";
+    qualSel.value = store.get(QUAL_KEY) || "";
+  }
+
+  function filtered() {
+    const q = search.value.trim().toLowerCase();
+    const lang = langSel.value;
+    const qual = qualSel.value;
+    return voices.filter((v) => {
+      if (q) {
+        const hay = `${v.name} ${v.language} ${v.language_native} ${v.country} ${v.key}`.toLowerCase();
+        if (!q.split(/\s+/).every((w) => hay.includes(w))) return false;
+      } else if (lang !== "*" && v.language !== lang) return false;
+      if (qual && v.quality !== qual) return false;
+      return true;
+    });
+  }
+
+  function renderDrive() {
+    const el = $("voiceLibDrive");
+    if (!disk || !disk.total) { el.innerHTML = ""; return; }
+    const used = disk.total - disk.free;
+    const pct = Math.min(100, (used / disk.total) * 100);
+    const mine = Math.min(pct, (disk.voices_bytes / disk.total) * 100);
+    el.innerHTML = `Downloads go to drive ${esc(disk.drive)} with your other added voices: <strong>${mb(disk.free)} free</strong>`
+      + ` of ${mb(disk.total)}${disk.voices_bytes ? `, added voices use ${mb(disk.voices_bytes)}` : ""}.`
+      + `<div class="om-bar" aria-hidden="true"><span class="om-bar-seg is-models" style="width:${mine}%"></span>`
+      + `<span class="om-bar-seg is-other" style="width:${Math.max(0, pct - mine)}%"></span></div>`;
+  }
+
+  function rowHtml(v) {
+    const job = jobs[v.key];
+    const busy = job && (job.state === "downloading" || job.state === "adding");
+    const playing = playingKey === v.key;
+    const icon = loadingKey === v.key ? "i-refresh" : playing ? "i-stop" : "i-play";
+    const badges = [`<span class="om-badge${v.quality === "high" ? " is-tight" : ""}" title="${v.quality === "high" ? "Clearest; about twice the CPU of medium" : "Quality"}">${esc(QUALITY_LABEL[v.quality] || v.quality)}</span>`];
+    if (v.speakers > 1) badges.push(`<span class="om-badge" title="Frivo uses the first speaker; the sample is that speaker">${v.speakers} speakers</span>`);
+    if (v.included) badges.push('<span class="om-badge is-fits">Included</span>');
+    else if (v.voice_id) badges.push('<span class="om-badge is-fits">Added</span>');
+    const where = [v.language, v.country].filter(Boolean).join(" · ");
+    let meta = `${esc(where)} · ${mb(v.size)}`;
+    let metaClass = "vlib-meta";
+    if (notes[v.key]) { meta = esc(notes[v.key].text); if (notes[v.key].error) metaClass += " is-error"; }
+    let action;
+    if (busy) {
+      const pct = job.total ? Math.min(100, Math.round((job.done / job.total) * 100)) : 0;
+      const adding = job.state === "adding";
+      action = `<div class="vlib-progress${adding ? " is-busy" : ""}" title="${adding ? "Converting and trying it out" : "Downloading"}"><span style="width:${pct}%"></span></div>`
+        + `<span class="vlib-pct">${adding ? "…" : `${pct}%`}</span>`
+        + (adding ? "" : `<button class="btn-ghost btn-sm" type="button" data-vlib-cancel="${esc(v.key)}">Cancel</button>`);
+    } else if (v.voice_id) {
+      action = `<button class="btn btn-sm" type="button" data-vlib-use="${esc(v.voice_id)}">Use</button>`;
+    } else {
+      action = `<button class="btn-ghost btn-sm" type="button" data-vlib-get="${esc(v.key)}" title="Download ${mb(v.size)}">`
+        + '<svg class="icon-14" aria-hidden="true"><use href="#i-download"/></svg>Download</button>';
+    }
+    const lic = licences[v.key];
+    return `<div class="vlib-row${playing ? " is-playing" : ""}" data-vlib-key="${esc(v.key)}">`
+      + `<button class="vlib-play${loadingKey === v.key ? " is-loading" : ""}" type="button" data-vlib-play="${esc(v.key)}" aria-label="${playing ? "Stop" : "Play"} ${esc(v.name)}"><svg><use href="#${icon}"/></svg></button>`
+      + `<div class="vlib-main"><div class="vlib-top"><span class="vlib-name">${esc(v.name)}</span>${badges.join("")}</div>`
+      + `<span class="${metaClass}">${meta}</span>`
+      + (lic ? `<span class="vlib-licence">Licence: ${esc(lic)}</span>` : "")
+      + `</div><div class="vlib-actions">${action}</div></div>`;
+  }
+
+  function render() {
+    if (!loaded) return;
+    renderDrive();
+    const shown = filtered();
+    $("voiceLibCount").textContent = `${shown.length} of ${voices.length} voices`;
+    if (notes._all) {
+      list.innerHTML = `<p class="vlib-empty is-error">${esc(notes._all)}</p>`;
+      return;
+    }
+    if (!shown.length) {
+      list.innerHTML = '<p class="vlib-empty">No voices match that.</p>';
+      return;
+    }
+    const keepScroll = list.scrollTop;
+    let html = "";
+    let group = "";
+    shown.forEach((v) => {
+      const g = [v.language, v.country].filter(Boolean).join(" · ");
+      if (g !== group) { group = g; html += `<div class="vlib-group">${esc(g)}</div>`; }
+      html += rowHtml(v);
+    });
+    list.innerHTML = html;
+    list.scrollTop = keepScroll;
+  }
+
+  function stop() {
+    if (audio) { audio.pause(); audio = null; }
+    playingKey = "";
+    loadingKey = "";
+  }
+
+  function play(key) {
+    const was = playingKey === key || loadingKey === key;
+    stop();
+    if (typeof stopVoicePreview === "function") stopVoicePreview();
+    if (was) { render(); return; }
+    const a = new Audio(`/api/voices/library/sample/${encodeURIComponent(key)}`);
+    a.volume = Math.min(1, typeof masterVolume === "number" ? masterVolume : 1);
+    audio = a;
+    loadingKey = key;
+    render();
+    a.addEventListener("playing", () => {
+      if (audio !== a) return;
+      loadingKey = "";
+      playingKey = key;
+      render();
+    });
+    a.addEventListener("ended", () => { if (audio === a) { stop(); render(); } });
+    a.addEventListener("error", async () => {
+      if (audio !== a) return;
+      stop();
+      let text = "Couldn't play its sample.";
+      try {
+        const r = await fetch(a.src);
+        const d = await r.json();
+        if (d.error) text = d.error;
+      } catch (_) { /* keep the plain message */ }
+      notes[key] = { text, error: true };
+      render();
+    });
+    a.play().catch(() => { /* the error event says why */ });
+    if (!(key in licences)) {
+      licences[key] = "";
+      fetch(`/api/voices/library/card/${encodeURIComponent(key)}`).then((r) => r.json()).then((d) => {
+        if (d && d.license) { licences[key] = d.license; render(); }
+      }).catch(() => {});
+    }
+  }
+
+  async function pollJobs() {
+    try {
+      const res = await fetch("/api/voices/library/install");
+      const data = await res.json();
+      const before = jobs;
+      jobs = data.jobs || {};
+      let finished = false;
+      Object.entries(jobs).forEach(([key, job]) => {
+        const v = voices.find((x) => x.key === key);
+        const was = before[key];
+        const fresh = !was || was.state === "downloading" || was.state === "adding";
+        if (job.state === "done" && v) {
+          if (!v.voice_id) finished = true;
+          v.voice_id = job.voice_id;
+          if (fresh) notes[key] = { text: `Added as ${job.name}. It's in the voice list under "added by you".` };
+        } else if (job.state === "error" && fresh) {
+          notes[key] = { text: job.error || "The download failed.", error: true };
+        } else if (job.state === "cancelled" && fresh) {
+          delete notes[key];
+        }
+      });
+      if (finished && typeof loadVoices === "function") loadVoices();
+      const active = Object.values(jobs).some((j) => j.state === "downloading" || j.state === "adding");
+      clearTimeout(pollTimer);
+      if (active) pollTimer = setTimeout(async () => { await pollJobs(); render(); }, 700);
+    } catch (_) { /* tried again on the next action */ }
+  }
+
+  async function download(key) {
+    delete notes[key];
+    try {
+      const res = await fetch("/api/voices/library/install", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `Frivo said ${res.status}`);
+    } catch (err) {
+      notes[key] = { text: err.message || String(err), error: true };
+    }
+    await pollJobs();
+    render();
+  }
+
+  list.addEventListener("click", async (e) => {
+    const t = e.target.closest("button");
+    if (!t) return;
+    if (t.dataset.vlibPlay) play(t.dataset.vlibPlay);
+    else if (t.dataset.vlibGet) download(t.dataset.vlibGet);
+    else if (t.dataset.vlibCancel) {
+      await fetch(`/api/voices/library/install/${encodeURIComponent(t.dataset.vlibCancel)}`, { method: "DELETE" }).catch(() => {});
+      await pollJobs();
+      render();
+    } else if (t.dataset.vlibUse) {
+      const v = typeof voiceById === "function" ? voiceById(t.dataset.vlibUse) : null;
+      if (!v) {
+        if (typeof loadVoices === "function") await loadVoices();
+      }
+      const voice = typeof voiceById === "function" ? voiceById(t.dataset.vlibUse) : null;
+      if (voice && typeof chooseVoice === "function") {
+        close();
+        chooseVoice(voice);
+      }
+    }
+  });
+
+  openBtn.addEventListener("click", open);
+  $("voiceLibCloseBtn").addEventListener("click", close);
+  pop.addEventListener("click", (e) => { if (e.target === pop) close(); });
+  pop.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); close(); openBtn.focus(); }
+  });
+  let typing = null;
+  search.addEventListener("input", () => { clearTimeout(typing); typing = setTimeout(render, 120); });
+  langSel.addEventListener("change", () => { store.set(LANG_KEY, langSel.value); list.scrollTop = 0; render(); });
+  qualSel.addEventListener("change", () => { store.set(QUAL_KEY, qualSel.value); list.scrollTop = 0; render(); });
+})();

@@ -2768,6 +2768,59 @@ html[data-theme="light"] .rail-theme .rail-sun { display: block; }
 .settings-section-sub { margin: 0 0 10px; font-size: var(--text-subhead); color: var(--ink-dim); }
 .settings-section-sub + .settings-card { margin-top: 4px; }
 
+/* NEW (1.5.0): the free voice library */
+.vlib-overlay { z-index: 85; }
+.vlib-dialog { width: min(760px, 100%); }
+.vlib-head-text { min-width: 0; }
+.vlib-sub { margin: 6px 0 0; font-size: var(--text-footnote); color: var(--ink-dim); line-height: 1.45; max-width: 560px; }
+.vlib-search-row { grid-template-columns: minmax(0, 1fr) auto auto; }
+.vlib-drive { padding: 0 22px 8px; font-size: var(--text-caption); color: var(--ink-dim); }
+.vlib-drive:empty { display: none; }
+.vlib-drive .om-bar { margin-top: 5px; height: 6px; }
+.vlib-list { flex: 1; min-height: 200px; overflow-y: auto; padding: 0 14px 6px; overscroll-behavior: contain; }
+.vlib-empty { margin: 24px 8px; color: var(--ink-dim); font-size: var(--text-subhead); text-align: center; }
+.vlib-empty.is-error { color: var(--alert); }
+.vlib-group {
+  position: sticky; top: 0; z-index: 1;
+  padding: 10px 8px 6px; background: var(--surface);
+  font-size: var(--text-caption2); font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-faint);
+}
+.vlib-row { display: flex; align-items: center; gap: 12px; padding: 8px; border-radius: 10px; transition: background var(--dur) var(--ease); }
+.vlib-row:hover { background: var(--fill); }
+.vlib-row.is-playing { background: var(--accent-soft); }
+.vlib-play {
+  flex: none; width: 34px; height: 34px; border-radius: 50%;
+  display: grid; place-items: center;
+  border: 1px solid var(--rule); background: var(--surface-2, var(--fill)); color: var(--ink);
+  cursor: pointer; transition: background var(--dur) var(--ease), color var(--dur) var(--ease), border-color var(--dur) var(--ease);
+}
+.vlib-play:hover { border-color: var(--accent-line); color: var(--accent); }
+.vlib-row.is-playing .vlib-play { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.vlib-play svg { width: 14px; height: 14px; }
+.vlib-play.is-loading svg { animation: vlib-spin 900ms linear infinite; }
+@keyframes vlib-spin { to { transform: rotate(360deg); } }
+.vlib-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.vlib-top { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.vlib-name { font-weight: 600; font-size: var(--text-callout); color: var(--ink); }
+.vlib-meta { font-size: var(--text-caption); color: var(--ink-dim); }
+.vlib-meta.is-error { color: var(--alert); }
+.vlib-licence { font-size: var(--text-caption); color: var(--ink-faint); }
+.vlib-actions { flex: none; display: flex; align-items: center; gap: 6px; }
+.vlib-progress { width: 120px; height: 4px; border-radius: 999px; background: var(--fill-strong); overflow: hidden; }
+.vlib-progress span { display: block; height: 100%; background: var(--accent); transition: width 500ms var(--ease); }
+.vlib-progress.is-busy span { width: 40% !important; animation: vlib-busy 1.1s var(--ease) infinite alternate; }
+@keyframes vlib-busy { from { transform: translateX(-10%); } to { transform: translateX(160%); } }
+.vlib-pct { font-size: var(--text-caption); color: var(--ink-dim); font-variant-numeric: tabular-nums; min-width: 34px; text-align: right; }
+.vlib-foot { display: flex; gap: 12px; align-items: baseline; justify-content: space-between; margin: 0; padding: 10px 22px 14px;
+  border-top: 1px solid var(--rule-soft); font-size: var(--text-caption); color: var(--ink-faint); }
+.vlib-foot-count { flex: none; }
+@media (max-width: 640px) {
+  .vlib-search-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .vlib-search-row .voice-search-field { grid-column: 1 / -1; }
+  .vlib-search-row .voice-sort { grid-column: auto; }
+  .vlib-progress { width: 70px; }
+}
+
 /* NEW (1.5.0): back up and restore */
 .backup-title { margin-top: 28px; }
 .visually-hidden-input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
