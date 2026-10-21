@@ -1412,7 +1412,7 @@
 
               <!-- Updates & about -->
               <section class="settings-section" data-settings-section="about" id="aboutSection">
-                <h3 class="settings-section-title">Updates &amp; about</h3>
+                <h3 class="settings-section-title">Updates, backup &amp; about</h3>
                 <p class="settings-section-sub">Updates come from Frivo's releases on GitHub and install on the PC Frivo runs on. Your settings, profiles and keys are kept.</p>
                 <div class="settings-card">
                   <div class="srow">
@@ -1443,6 +1443,60 @@
                   </button>
                 </div>
                 <p class="settings-note is-hidden" id="updateNote"></p>
+
+                <!-- NEW (1.5.0): back up and restore, for moving to another PC. -->
+                <h3 class="settings-section-title backup-title">Back up &amp; restore</h3>
+                <p class="settings-section-sub">Everything that makes Frivo yours in one file: settings, profiles, saved replies and their audio, favourite voices, your tags and tag taste. Restore it here, or on another PC, to carry it over. Restoring adds to what's here; nothing is deleted.</p>
+                <div class="settings-card" id="backupCard">
+                  <label class="srow">
+                    <span class="srow-main srow-main--flex">
+                      <span class="srow-label">Include API keys</span>
+                      <span class="srow-sub">Your OpenAI and ElevenLabs keys, in plain text. Keep the file somewhere private.</span>
+                    </span>
+                    <span class="switch">
+                      <input type="checkbox" id="backupKeysToggle">
+                      <span class="switch-track" aria-hidden="true"></span>
+                    </span>
+                  </label>
+                  <label class="srow">
+                    <span class="srow-main srow-main--flex">
+                      <span class="srow-label">Include voices you added</span>
+                      <span class="srow-sub">Free voices you added yourself. They can be large (60 MB or so each).</span>
+                    </span>
+                    <span class="switch">
+                      <input type="checkbox" id="backupVoicesToggle">
+                      <span class="switch-track" aria-hidden="true"></span>
+                    </span>
+                  </label>
+                  <button class="srow" type="button" id="backupMakeRow">
+                    <span class="srow-main srow-main--flex">
+                      <span class="srow-label">Download a backup</span>
+                      <span class="srow-sub">A .zip, saved by your browser.</span>
+                    </span>
+                    <span class="srow-value" id="backupMakeValue"></span>
+                    <span class="srow-chevron"><svg class="icon-16"><use href="#i-download"/></svg></span>
+                  </button>
+                  <label class="srow" id="backupRestoreRow">
+                    <span class="srow-main srow-main--flex">
+                      <span class="srow-label">Restore from a file…</span>
+                      <span class="srow-sub">A Frivo backup, a zip of an older Frivo's data folder (with config.json, profiles.json and saved in it), or saved replies from <em>Export all</em>.</span>
+                    </span>
+                    <span class="srow-value" id="backupRestoreValue"></span>
+                    <span class="srow-chevron"><svg class="icon-16"><use href="#i-chevron"/></svg></span>
+                    <input type="file" id="backupFile" accept=".zip,application/zip" class="visually-hidden-input">
+                  </label>
+                </div>
+                <div class="backup-result is-hidden" id="backupResult" aria-live="polite"></div>
+                <details class="backup-help">
+                  <summary>Moved Frivo and lost everything?</summary>
+                  <p>Your old data is still on the old PC, unless Frivo was uninstalled with its data. Find the folder there with <code>config.json</code>, <code>profiles.json</code> and a <code>saved</code> folder in it:</p>
+                  <ul>
+                    <li>If Frivo ran from a folder you put it in (like <code>E:\GithubRepos\Frivo</code>), it's <code>app</code> inside that folder.</li>
+                    <li>If it was installed, it's <code>%APPDATA%\Frivo</code>: paste that into the File Explorer address bar.</li>
+                  </ul>
+                  <p>Right-click the folder, <em>Send to › Compressed (zipped) folder</em>, and restore that zip here. Or open the old Frivo, download a backup, and restore that.</p>
+                  <p>Favourite voices and your tags are kept in the browser, for each address Frivo is opened at. They come across with a backup made in the browser you used with the old address.</p>
+                </details>
               </section>
 
               <p class="settings-none is-hidden" id="settingsNoMatch">Nothing matches that.</p>
@@ -1477,6 +1531,8 @@
                   <a class="btn btn-sm" href="https://elevenlabs.io/app/settings/api-keys"
                      target="_blank" rel="noopener noreferrer">Get a key ↗</a>
                 </div>
+                <!-- NEW (1.5.0): what ElevenLabs says about the key. -->
+                <div class="key-check is-hidden" id="elevenKeyCheck" aria-live="polite"></div>
                 <p class="field-note">
                   Only needed for ElevenLabs voices. Stored on this server in config.json and
                   only ever sent to ElevenLabs. Paste a new one to replace it. The voice itself is

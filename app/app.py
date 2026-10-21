@@ -5877,6 +5877,80 @@ def tidy_voice(v):
     }
 
 
+def elevenlabs_problem(resp):
+    """
+    NEW (1.5.0): what ElevenLabs' refusal means, in words. A key made with
+    only some permissions is refused with "missing_permissions", naming the
+    one it lacks; a wrong or deleted key with "invalid_api_key".
+    """
+    status = getattr(resp, "status_code", 0)
+    detail = {}
+    try:
+        body = resp.json()
+        detail = body.get("detail") if isinstance(body.get("detail"), dict) else {"message": str(body.get("detail") or "")}
+    except Exception:
+        detail = {"message": (getattr(resp, "text", "") or "")[:200]}
+    code = str(detail.get("status") or detail.get("code") or "")
+    message = str(detail.get("message") or "")
+    if code == "missing_permissions" or "permission" in message.lower():
+        perm = re.search(r"permission[s]?\s+([a-z_]+)", message, re.I)
+        what = perm.group(1) if perm else ""
+        friendly = {"voices_read": "Voices (read)", "voices_write": "Voices (write)", "user_read": "User (read)",
+                    "text_to_speech": "Text to Speech"}.get(what, what or "the permission it needs")
+        return ("permission", f"This key isn't allowed {friendly}. On ElevenLabs › API keys, edit the key "
+                              f"and allow it, or make a new key without restrictions.", message)
+    if status == 401 or code in ("invalid_api_key", "unauthorized"):
+        return ("invalid", "ElevenLabs doesn't accept this key. Check you copied all of it, or make a new one.", message)
+    if status == 429:
+        return ("busy", "ElevenLabs is rate-limiting this key for now. Try again in a minute.", message)
+    return ("error", f"ElevenLabs said {status}{': ' + message if message else ''}.", message)
+
+
+@app.route("/api/elevenlabs/check")
+def elevenlabs_check():
+    """
+    NEW (1.5.0): actually tries the key: your voices (and how many are your
+    own), and your account. "Connected" used to mean only that a key was
+    saved.
+    """
+    key = CFG.get("elevenlabs_api_key")
+    if not key:
+        return jsonify({"state": "missing", "message": "No key saved."})
+    out = {"state": "ok", "voices": None, "own_voices": None, "account": None, "problems": []}
+    try:
+        r = requests.get("https://api.elevenlabs.io/v1/voices", headers={"xi-api-key": key}, timeout=20)
+        if r.status_code == 200:
+            vs = r.json().get("voices") or []
+            out["voices"] = len(vs)
+            out["own_voices"] = sum(1 for v in vs if (v.get("category") or "") != "premade")
+        else:
+            kind, text, raw = elevenlabs_problem(r)
+            out["problems"].append({"what": "voices", "kind": kind, "message": text, "raw": raw})
+    except Exception as e:
+        out["problems"].append({"what": "voices", "kind": "unreachable", "message": f"Couldn't reach ElevenLabs: {e}"})
+    try:
+        r = requests.get("https://api.elevenlabs.io/v1/user/subscription", headers={"xi-api-key": key}, timeout=20)
+        if r.status_code == 200:
+            sub = r.json()
+            out["account"] = {"tier": sub.get("tier"), "used": sub.get("character_count"),
+                              "limit": sub.get("character_limit")}
+        else:
+            kind, text, raw = elevenlabs_problem(r)
+            out["problems"].append({"what": "account", "kind": kind, "message": text, "raw": raw})
+    except Exception as e:
+        out["problems"].append({"what": "account", "kind": "unreachable", "message": f"Couldn't reach ElevenLabs: {e}"})
+    kinds = {p["kind"] for p in out["problems"]}
+    if "invalid" in kinds:
+        out["state"] = "invalid"
+    elif "unreachable" in kinds and out["voices"] is None:
+        out["state"] = "unreachable"
+    elif any(p["what"] == "voices" for p in out["problems"]):
+        out["state"] = "no_voices"
+    elif out["problems"]:
+        out["state"] = "partial"
+    return jsonify(out)
+
+
 @app.route("/api/voices")
 def voices():
     # CHANGED (1.5.0): the free voices are always listed, and ElevenLabs'
@@ -5898,7 +5972,11 @@ def voices():
             headers={"xi-api-key": CFG["elevenlabs_api_key"]},
             timeout=30,
         )
-        resp.raise_for_status()
+        if resp.status_code != 200:   # CHANGED (1.5.0): why, in words
+            _, text, raw = elevenlabs_problem(resp)
+            log_server_event(f"Voices: ElevenLabs refused the voice list ({resp.status_code}): {raw}")
+            return jsonify({"voices": free, "notice": f"Your ElevenLabs voices didn't load. {text}",
+                            "eleven_problem": True})
         data = resp.json()
         return jsonify({"voices": [tidy_voice(v) for v in data.get("voices", [])] + free})
     except Exception as e:
@@ -9160,6 +9238,325 @@ def saved_export():
     from flask import send_file
     return send_file(buf, mimetype="application/zip", as_attachment=True,
                      download_name=time.strftime("Frivo saved replies %Y-%m-%d.zip"))
+
+
+# ---------------------------------------------------------------------------
+# NEW (1.5.0): back up and restore (Settings > Updates & about).
+#
+# A backup is one zip with everything that makes Frivo yours:
+#   frivo-backup.json    what's in it, and when it was made
+#   data/config.json     your settings (API keys only if you ask)
+#   data/profiles.json   your profiles
+#   data/saved/...       your saved replies, with their audio
+#   data/tag_taste.json  your tag taste
+#   data/voice_anchors.json, data/anchors/...   Hold the accent anchors
+#   data/voices/...      voices you added (only if you ask: they're big)
+#   browser.json         what this browser keeps: favourite voices, your
+#                        tags, recent voices and languages, the switches
+#
+# Restoring adds to what's here rather than wiping it: profiles and saved
+# replies that aren't here yet are added (a profile with the same id is
+# replaced by the backup's), settings are restored, except this server's
+# own addresses (Ollama, Evora) and keys you already have.
+#
+# It also takes the zip of an older Frivo's data folder (the folder with
+# config.json, profiles.json and saved\ in it, from before backups
+# existed), and the "Export all" zip of saved replies.
+# ---------------------------------------------------------------------------
+
+BACKUP_FORMAT = 1
+BACKUP_MAX_BYTES = 2 * 1024 ** 3
+# Settings that belong to this server, not to you: kept as they are here.
+BACKUP_KEEP_HERE = {"ollama_url", "whisper_url", "_moved_to_v4", "_evora_idle_off"}
+BACKUP_SECRET_KEYS = {"openai_api_key", "elevenlabs_api_key"}
+# What the page keeps in the browser that's worth carrying over.
+BACKUP_BROWSER_PREFIXES = ("voice_console_", "frivo_")
+BACKUP_BROWSER_SKIP = {"voice_console_session", "frivo_transcript_v1", "voice_console_mic_device_id",
+                       "voice_console_listen_device"}
+_ANCHOR_FILE_RE = re.compile(r"^[A-Za-z0-9_.\-]{1,120}\.(mp3|wav)$")
+
+
+def _read_json(path, default):
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return default
+
+
+@app.route("/api/backup", methods=["POST"])
+def backup_make():
+    import io
+    import zipfile
+    data = request.get_json(silent=True) or {}
+    with_keys = data.get("include_keys") is True
+    with_voices = data.get("include_voices") is True
+    browser = data.get("browser") if isinstance(data.get("browser"), dict) else {}
+    browser = {k: str(v)[:200000] for k, v in browser.items()
+               if isinstance(k, str) and k.startswith(BACKUP_BROWSER_PREFIXES) and k not in BACKUP_BROWSER_SKIP}
+    cfg = dict(CFG)
+    if not with_keys:
+        for key in BACKUP_SECRET_KEYS:
+            cfg.pop(key, None)
+    counts = {"profiles": 0, "saved": 0, "voices": 0}
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("data/config.json", json.dumps(cfg, indent=2))
+        profiles = load_profiles()
+        counts["profiles"] = len(profiles)
+        z.writestr("data/profiles.json", json.dumps(profiles, indent=2))
+        with SAVED_LOCK:
+            saved = load_saved()
+        kept = []
+        for item in saved:
+            path = os.path.join(SAVED_DIR, item.get("file", ""))
+            if _SAVED_FILE_RE.match(item.get("file", "")) and os.path.isfile(path):
+                z.write(path, f"data/saved/{item['file']}")
+                kept.append(item)
+        z.writestr("data/saved/saved.json", json.dumps(kept, ensure_ascii=False, indent=1))
+        counts["saved"] = len(kept)
+        if os.path.isfile(TAG_TASTE_PATH):
+            z.write(TAG_TASTE_PATH, "data/tag_taste.json")
+        if os.path.isfile(ANCHORS_FILE):
+            z.write(ANCHORS_FILE, "data/voice_anchors.json")
+            if os.path.isdir(ANCHORS_DIR):
+                for name in os.listdir(ANCHORS_DIR):
+                    if _ANCHOR_FILE_RE.match(name):
+                        z.write(os.path.join(ANCHORS_DIR, name), f"data/anchors/{name}")
+        if with_voices:
+            voices = load_custom_voices()
+            z.writestr("data/voices/voices.json", json.dumps(voices, ensure_ascii=False, indent=1))
+            for voice in voices:
+                folder = os.path.join(CUSTOM_VOICES_DIR, voice["key"])
+                for root, _, files in os.walk(folder):
+                    for name in files:
+                        full = os.path.join(root, name)
+                        rel = os.path.relpath(full, CUSTOM_VOICES_DIR).replace(os.sep, "/")
+                        z.write(full, f"data/voices/{rel}")
+            counts["voices"] = len(voices)
+        z.writestr("browser.json", json.dumps(browser, ensure_ascii=False, indent=1))
+        z.writestr("frivo-backup.json", json.dumps({
+            "format": BACKUP_FORMAT, "app": "Frivo", "version": APP_VERSION if "APP_VERSION" in globals() else "",
+            "made": time.strftime("%Y-%m-%d %H:%M"), "keys": with_keys, "voices": with_voices, "counts": counts,
+        }, indent=1))
+    buf.seek(0)
+    from flask import send_file
+    return send_file(buf, mimetype="application/zip", as_attachment=True,
+                     download_name=time.strftime("Frivo backup %Y-%m-%d.zip"))
+
+
+def _backup_root(names):
+    """Where the data is inside the zip: 'data/' in a backup, or the folder
+    holding config.json / profiles.json / saved/ in a zipped data folder."""
+    if "frivo-backup.json" in names:
+        return "data/", "backup"
+    for marker in ("config.json", "profiles.json", "saved/saved.json"):
+        hits = sorted((n for n in names if n == marker or n.endswith("/" + marker)), key=len)
+        if hits:
+            return hits[0][: len(hits[0]) - len(marker)], "folder"
+    if any(n.endswith("saved.txt") for n in names):
+        return "", "saved-export"
+    return None, None
+
+
+def _import_saved_export(z, names, report):
+    """The 'Export all' zip: audio files plus saved.txt with their text."""
+    text = ""
+    listing = next((n for n in names if n.endswith("saved.txt")), None)
+    if listing:
+        text = z.read(listing).decode("utf-8", "replace")
+    blocks = {}
+    for block in text.split("\n\n"):
+        lines = block.strip("\n").split("\n")
+        if len(lines) >= 2:
+            blocks[lines[0].strip()] = {"text": lines[1].strip(), "meta": (lines[2].strip() if len(lines) > 2 else "")}
+    with SAVED_LOCK:
+        items = load_saved()
+        for name in names:
+            if not re.search(r"\.(mp3|wav)$", name, re.I) or len(items) >= SAVED_MAX_ITEMS:
+                continue
+            info = blocks.get(name.split("/")[-1]) or blocks.get(name) or {}
+            voiced = info.get("text") or os.path.splitext(name.split("/")[-1])[0]
+            new_id = uuid.uuid4().hex
+            ext = name.rsplit(".", 1)[-1].lower()
+            os.makedirs(SAVED_DIR, exist_ok=True)
+            with open(os.path.join(SAVED_DIR, f"{new_id}.{ext}"), "wb") as f:
+                f.write(z.read(name))
+            meta = [m.strip() for m in info.get("meta", "").split("·")]
+            items.append({"id": new_id, "file": f"{new_id}.{ext}", "text": strip_audio_tags(voiced) or voiced,
+                          "voiced": voiced[:SAVED_MAX_TEXT + 600], "voice_name": meta[0] if meta else "",
+                          "profile_name": meta[1] if len(meta) > 1 else "", "saved_at": time.time()})
+            report["saved"] += 1
+        write_saved(items)
+
+
+@app.route("/api/backup/restore", methods=["POST"])
+def backup_restore():
+    import zipfile
+    upload = request.files.get("file")
+    if not upload:
+        return jsonify({"error": "Choose a backup (.zip) to restore."}), 400
+    try:
+        z = zipfile.ZipFile(upload.stream)
+        names = [n for n in z.namelist() if not n.endswith("/") and ".." not in n and not n.startswith("/")]
+    except zipfile.BadZipFile:
+        return jsonify({"error": "That isn't a zip file. Choose a Frivo backup (.zip)."}), 400
+    root, kind = _backup_root(names)
+    if kind is None:
+        return jsonify({"error": "That zip has no Frivo settings, profiles or saved replies in it."}), 400
+    report = {"kind": kind, "settings": 0, "profiles": 0, "saved": 0, "voices": 0, "anchors": 0, "taste": False,
+              "keys": 0, "browser": {}}
+    if kind == "saved-export":
+        _import_saved_export(z, names, report)
+        return jsonify(report)
+
+    def member(rel):
+        return root + rel if root + rel in names else None
+
+    # Settings: yours, but this server's addresses and keys already here stay.
+    path = member("config.json")
+    if path:
+        try:
+            incoming = json.loads(z.read(path).decode("utf-8"))
+        except ValueError:
+            incoming = {}
+        if isinstance(incoming, dict):
+            for key, value in incoming.items():
+                if key in BACKUP_KEEP_HERE or not isinstance(key, str):
+                    continue
+                if key in BACKUP_SECRET_KEYS:
+                    if value and not CFG.get(key):
+                        CFG[key] = value
+                        report["keys"] += 1
+                    continue
+                if CFG.get(key) != value:
+                    report["settings"] += 1
+                CFG[key] = value
+            save_config(CFG)
+    # Profiles: added, or replaced when the backup has the same one.
+    path = member("profiles.json")
+    if path:
+        try:
+            incoming = json.loads(z.read(path).decode("utf-8"))
+        except ValueError:
+            incoming = []
+        if isinstance(incoming, list):
+            current = load_profiles()
+            by_id = {p.get("id"): i for i, p in enumerate(current) if isinstance(p, dict)}
+            for p in incoming:
+                if not isinstance(p, dict) or not p.get("id"):
+                    continue
+                if p["id"] in by_id:
+                    current[by_id[p["id"]]] = p
+                else:
+                    current.append(p)
+                report["profiles"] += 1
+            save_profiles(current)
+    # Saved replies: the ones not here yet, with their audio.
+    path = member("saved/saved.json")
+    if path:
+        try:
+            incoming = json.loads(z.read(path).decode("utf-8"))
+        except ValueError:
+            incoming = []
+        with SAVED_LOCK:
+            items = load_saved()
+            have = {i.get("id") for i in items}
+            for item in incoming if isinstance(incoming, list) else []:
+                if not isinstance(item, dict) or item.get("id") in have or not _SAVED_ID_RE.match(str(item.get("id", ""))):
+                    continue
+                audio = member(f"saved/{item.get('file', '')}")
+                if not audio or not _SAVED_FILE_RE.match(item.get("file", "")) or len(items) >= SAVED_MAX_ITEMS:
+                    continue
+                os.makedirs(SAVED_DIR, exist_ok=True)
+                with open(os.path.join(SAVED_DIR, item["file"]), "wb") as f:
+                    f.write(z.read(audio))
+                items.append(item)
+                report["saved"] += 1
+            write_saved(items)
+    # Tag taste: the counts added together.
+    path = member("tag_taste.json")
+    if path:
+        try:
+            incoming = json.loads(z.read(path).decode("utf-8"))
+        except ValueError:
+            incoming = {}
+        if isinstance(incoming, dict):
+            with TAG_TASTE_LOCK:
+                taste = load_tag_taste()
+                for tag, e in incoming.items():
+                    if not isinstance(e, dict):
+                        continue
+                    mine = taste.setdefault(tag, {"kept": 0, "removed": 0, "added": 0})
+                    for k in ("kept", "removed", "added"):
+                        mine[k] = int(mine.get(k, 0)) + int(e.get(k, 0) or 0)
+                    mine["at"] = max(float(mine.get("at", 0)), float(e.get("at", 0) or 0))
+                os.makedirs(DATA_DIR, exist_ok=True)
+                with open(TAG_TASTE_PATH, "w", encoding="utf-8") as f:
+                    json.dump(taste, f, indent=1)
+                report["taste"] = True
+    # Hold the accent anchors: the ones not here yet.
+    path = member("voice_anchors.json")
+    if path:
+        try:
+            incoming = json.loads(z.read(path).decode("utf-8"))
+        except ValueError:
+            incoming = {}
+        if isinstance(incoming, dict):
+            with ANCHORS_LOCK:
+                anchors = load_anchors()
+                for key, entry in incoming.items():
+                    if key in anchors or not isinstance(entry, dict):
+                        continue
+                    audio = member(f"anchors/{entry.get('file', '')}") if entry.get("file") else None
+                    if audio and _ANCHOR_FILE_RE.match(entry["file"]):
+                        os.makedirs(ANCHORS_DIR, exist_ok=True)
+                        with open(os.path.join(ANCHORS_DIR, entry["file"]), "wb") as f:
+                            f.write(z.read(audio))
+                    anchors[key] = entry
+                    report["anchors"] += 1
+                write_anchors(anchors)
+    # Voices you added: the ones not here yet.
+    path = member("voices/voices.json")
+    if path:
+        try:
+            incoming = json.loads(z.read(path).decode("utf-8"))
+        except ValueError:
+            incoming = []
+        with CUSTOM_VOICES_LOCK:
+            voices = load_custom_voices()
+            have = {v["key"] for v in voices}
+            for voice in incoming if isinstance(incoming, list) else []:
+                key = str((voice or {}).get("key", ""))
+                if not _CUSTOM_KEY_RE.match(key) or key in have or len(voices) >= CUSTOM_VOICE_MAX_COUNT:
+                    continue
+                prefix = f"{root}voices/{key}/"
+                files = [n for n in names if n.startswith(prefix)]
+                if not files:
+                    continue
+                for n in files:
+                    rel = n[len(prefix):]
+                    if not rel or "/" in rel or not re.match(r"^[A-Za-z0-9_.\-]{1,120}$", rel):
+                        continue
+                    os.makedirs(os.path.join(CUSTOM_VOICES_DIR, key), exist_ok=True)
+                    with open(os.path.join(CUSTOM_VOICES_DIR, key, rel), "wb") as f:
+                        f.write(z.read(n))
+                voices.append(voice)
+                report["voices"] += 1
+            write_custom_voices(voices)
+    # What the browser keeps: sent back, for the page to put in place.
+    if "browser.json" in names:
+        try:
+            browser = json.loads(z.read("browser.json").decode("utf-8"))
+        except ValueError:
+            browser = {}
+        if isinstance(browser, dict):
+            report["browser"] = {k: v for k, v in browser.items()
+                                 if isinstance(k, str) and k.startswith(BACKUP_BROWSER_PREFIXES)
+                                 and k not in BACKUP_BROWSER_SKIP and isinstance(v, str)}
+    log_server_event(f"Restored a backup ({kind}): {report['profiles']} profiles, {report['saved']} saved replies, "
+                     f"{report['settings']} settings, {report['voices']} voices")
+    return jsonify(report)
 
 
 @app.route("/saved-audio/<filename>")

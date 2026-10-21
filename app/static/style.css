@@ -2767,6 +2767,21 @@ html[data-theme="light"] .rail-theme .rail-sun { display: block; }
 .settings-note + .settings-section-title { margin-top: 30px; font-size: 12px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-faint); }
 .settings-section-sub { margin: 0 0 10px; font-size: var(--text-subhead); color: var(--ink-dim); }
 .settings-section-sub + .settings-card { margin-top: 4px; }
+
+/* NEW (1.5.0): back up and restore */
+.backup-title { margin-top: 28px; }
+.visually-hidden-input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+#backupRestoreRow { cursor: pointer; position: relative; }
+#backupCard .srow.is-busy { opacity: 0.6; pointer-events: none; }
+.backup-result { margin: 10px 2px 0; padding: 10px 12px; border-radius: 10px; font-size: var(--text-footnote);
+  background: var(--surface-2, rgba(255,255,255,0.05)); color: var(--ink); line-height: 1.5; }
+.backup-result.is-error { color: var(--danger, #ff8f8f); }
+.backup-result ul { margin: 4px 0 0; padding-left: 18px; }
+.backup-help { margin: 12px 2px 0; font-size: var(--text-footnote); color: var(--ink-dim); line-height: 1.55; }
+.backup-help summary { cursor: pointer; color: var(--ink); font-weight: 500; }
+.backup-help p, .backup-help ul { margin: 8px 0 0; }
+.backup-help ul { padding-left: 18px; }
+.backup-help code { font-family: var(--font-mono); font-size: 0.95em; }
 .settings-inline-value { margin-left: 8px; font-size: var(--text-caption); font-weight: 400; letter-spacing: 0; text-transform: none; color: var(--ink-faint); }
 /* While searching every matching section shows, with its title. */
 .settings-stack.is-searching .settings-section.is-shown { margin-bottom: 18px; }
@@ -4709,3 +4724,26 @@ html.motion-ready .stage { transition: transform var(--dur-smooth) var(--spring-
   color: var(--ink);
 }
 .key-guide-note { margin-top: 14px; }
+
+
+/* NEW (1.5.0): what ElevenLabs says about the key. */
+.key-check {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--signal) 35%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--signal) 8%, transparent);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: flex-start;
+}
+.key-check.is-hidden { display: none; }
+.key-check.is-bad {
+  border-color: color-mix(in srgb, var(--alert) 40%, transparent);
+  background: color-mix(in srgb, var(--alert) 8%, transparent);
+}
+.key-check-line { margin: 0; font-size: var(--text-footnote); line-height: 1.45; color: var(--ink); }
+.key-check-line.is-ok { color: var(--signal); }
+.key-check-line.is-bad { color: var(--alert); }
+.lamp.is-warn { background: var(--alert); box-shadow: 0 0 6px var(--alert); }

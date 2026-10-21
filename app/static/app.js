@@ -3817,7 +3817,8 @@ async function loadVoices() {
     }
     allVoices = data.voices || [];
     // NEW (1.5.0): e.g. ElevenLabs unreachable while the free voices loaded.
-    if (data.notice) setStatus(data.notice, !allVoices.length);
+    // CHANGED (1.5.0): a refused key is an error, not a footnote.
+    if (data.notice) setStatus(data.notice, !allVoices.length || data.eleven_problem === true);
     syncVoiceSortOptions();
     renderVoiceFilters();
     renderVoiceList();
@@ -7185,7 +7186,9 @@ function applyServerTuning(data) {
     openaiStatusText.textContent = data.openai_key_set ? "Connected" : "Not set";
   }
   if (elevenStatusText) {
-    elevenStatusText.textContent = data.elevenlabs_key_set ? "Connected" : "Not set";
+    // CHANGED (1.5.0): "Saved" until the key has actually been tried.
+    elevenStatusText.textContent = data.elevenlabs_key_set ? "Checking…" : "Not set";
+    if (data.elevenlabs_key_set && typeof checkElevenKey === "function") checkElevenKey();
   }
   if (openaiStatus) openaiStatus.classList.toggle("is-lit", Boolean(data.openai_key_set));
   if (elevenStatus) elevenStatus.classList.toggle("is-lit", Boolean(data.elevenlabs_key_set));
@@ -13182,4 +13185,195 @@ function richFinishDrop(d, cancel) {
     });
   }
   richRender(input.value);
+})();
+
+
+// ---------------------------------------------------------------------------
+// NEW (1.5.0): the ElevenLabs key, actually tried. The Accounts row says
+// Connected only when ElevenLabs answers; otherwise what's wrong (a wrong
+// key, or one not allowed to read your voices). The key page shows the
+// details: how many voices, how many your own, and the plan.
+// ---------------------------------------------------------------------------
+var elevenCheckAt = 0;
+
+async function checkElevenKey(force) {
+  if (!force && Date.now() - elevenCheckAt < 20000) return;
+  elevenCheckAt = Date.now();
+  const text = $("elevenStatusText");
+  const lamp = $("elevenStatus");
+  const box = $("elevenKeyCheck");
+  let d;
+  try {
+    const res = await fetch("/api/elevenlabs/check");
+    d = await res.json();
+  } catch (e) {
+    return;
+  }
+  const words = {
+    ok: "Connected",
+    partial: "Connected",
+    no_voices: "Can't read voices",
+    invalid: "Key not accepted",
+    unreachable: "Can't reach ElevenLabs",
+    missing: "Not set",
+  }[d.state] || "Saved";
+  if (text) text.textContent = words;
+  if (lamp) {
+    lamp.classList.toggle("is-lit", d.state === "ok" || d.state === "partial");
+    lamp.classList.toggle("is-warn", !["ok", "partial", "missing"].includes(d.state));
+  }
+  if (!box) return;
+  box.replaceChildren();
+  box.classList.toggle("is-hidden", d.state === "missing");
+  box.classList.toggle("is-bad", !["ok", "partial"].includes(d.state));
+  const line = (t, cls) => {
+    const p = document.createElement("p");
+    p.className = "key-check-line" + (cls ? ` ${cls}` : "");
+    p.textContent = t;
+    box.append(p);
+  };
+  if (d.voices != null) {
+    line(`✓ ${d.voices} voices, ${d.own_voices} of them yours (clones and ones you added from the Voice Library).`, "is-ok");
+  }
+  if (d.account && d.account.limit) {
+    line(`✓ ${d.account.tier ? d.account.tier[0].toUpperCase() + d.account.tier.slice(1) + " plan, " : ""}${(d.account.limit - d.account.used).toLocaleString()} of ${d.account.limit.toLocaleString()} credits left.`, "is-ok");
+  }
+  (d.problems || []).forEach((p) => line(`✗ ${p.message}`, "is-bad"));
+  const again = document.createElement("button");
+  again.type = "button";
+  again.className = "link-btn";
+  again.textContent = "Check again";
+  again.addEventListener("click", async () => {
+    await checkElevenKey(true);
+    if (typeof loadVoices === "function") loadVoices();
+  });
+  box.append(again);
+}
+
+
+// ---------------------------------------------------------------------------
+// NEW (1.5.0): back up and restore (Settings > Updates & backup).
+// The server zips what it keeps; the page adds what this browser keeps
+// (favourite voices, your tags, recent voices, the switches), and puts it
+// back on restore.
+// ---------------------------------------------------------------------------
+(function initBackup() {
+  const makeRow = $("backupMakeRow");
+  const fileInput = $("backupFile");
+  const result = $("backupResult");
+  if (!makeRow || !fileInput || !result) return;
+  const PREFIXES = ["voice_console_", "frivo_"];
+  const SKIP = new Set(["voice_console_session", "frivo_transcript_v1", "voice_console_mic_device_id",
+    "voice_console_listen_device"]);
+  // Lists that are merged with what's here rather than replaced.
+  const LIST_KEYS = new Set(["voice_console_voice_favorites", "frivo_your_tags", "voice_console_voice_recents",
+    "voice_console_language_recents"]);
+
+  function browserData() {
+    const out = {};
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && PREFIXES.some((p) => k.startsWith(p)) && !SKIP.has(k)) out[k] = localStorage.getItem(k);
+      }
+    } catch (_) { /* storage blocked: the server part still backs up */ }
+    return out;
+  }
+
+  function mergeList(here, incoming) {
+    let a, b;
+    try { a = JSON.parse(here || "[]"); b = JSON.parse(incoming || "[]"); } catch (_) { return incoming; }
+    if (!Array.isArray(a) || !Array.isArray(b)) return incoming;
+    const seen = new Set(a.map((x) => JSON.stringify(x)));
+    return JSON.stringify(a.concat(b.filter((x) => !seen.has(JSON.stringify(x)))));
+  }
+
+  function putBrowserData(data) {
+    let n = 0;
+    try {
+      Object.entries(data || {}).forEach(([k, v]) => {
+        if (!PREFIXES.some((p) => k.startsWith(p)) || SKIP.has(k) || typeof v !== "string") return;
+        const here = localStorage.getItem(k);
+        localStorage.setItem(k, LIST_KEYS.has(k) && here ? mergeList(here, v) : v);
+        n++;
+      });
+    } catch (_) { /* storage blocked */ }
+    return n;
+  }
+
+  function show(html, isError) {
+    result.innerHTML = html;
+    result.classList.toggle("is-error", !!isError);
+    result.classList.remove("is-hidden");
+  }
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+
+  makeRow.addEventListener("click", async () => {
+    makeRow.classList.add("is-busy");
+    $("backupMakeValue").textContent = "Making…";
+    try {
+      const res = await fetch("/api/backup", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ include_keys: $("backupKeysToggle").checked,
+          include_voices: $("backupVoicesToggle").checked, browser: browserData() }),
+      });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || `Frivo said ${res.status}`);
+      const blob = await res.blob();
+      const name = (/filename="?([^";]+)"?/.exec(res.headers.get("Content-Disposition") || "") || [])[1]
+        || "Frivo backup.zip";
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = name;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 4000);
+      $("backupMakeValue").textContent = blob.size < 1048576 ? `${Math.max(1, Math.round(blob.size / 1024))} KB`
+        : `${(blob.size / 1048576).toFixed(blob.size > 10485760 ? 0 : 1)} MB`;
+      result.classList.add("is-hidden");
+    } catch (err) {
+      $("backupMakeValue").textContent = "";
+      show(`Couldn't make the backup: ${esc(err.message || err)}`, true);
+    } finally {
+      makeRow.classList.remove("is-busy");
+    }
+  });
+
+  fileInput.addEventListener("change", async () => {
+    const file = fileInput.files && fileInput.files[0];
+    fileInput.value = "";
+    if (!file) return;
+    const row = $("backupRestoreRow");
+    row.classList.add("is-busy");
+    $("backupRestoreValue").textContent = "Restoring…";
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const res = await fetch("/api/backup/restore", { method: "POST", body: form });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `Frivo said ${res.status}`);
+      const browserCount = putBrowserData(data.browser);
+      const parts = [];
+      if (data.profiles) parts.push(plural(data.profiles, "profile", "profiles"));
+      if (data.saved) parts.push(plural(data.saved, "saved reply", "saved replies"));
+      if (data.settings) parts.push(plural(data.settings, "setting", "settings"));
+      if (data.keys) parts.push(plural(data.keys, "API key", "API keys"));
+      if (data.voices) parts.push(plural(data.voices, "added voice", "added voices"));
+      if (data.anchors) parts.push(plural(data.anchors, "accent anchor", "accent anchors"));
+      if (data.taste) parts.push("your tag taste");
+      if (browserCount) parts.push("favourite voices, your tags and this browser's choices");
+      $("backupRestoreValue").textContent = "Done";
+      if (!parts.length) {
+        show("Nothing new to add: everything in that file is already here.");
+        return;
+      }
+      show(`Restored ${esc(file.name)}:<ul>${parts.map((p) => `<li>${esc(p)}</li>`).join("")}</ul>Reloading to show it…`);
+      setTimeout(() => location.reload(), 2200);
+    } catch (err) {
+      $("backupRestoreValue").textContent = "";
+      show(`Couldn't restore that: ${esc(err.message || err)}`, true);
+    } finally {
+      row.classList.remove("is-busy");
+    }
+  });
 })();
