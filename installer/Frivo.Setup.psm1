@@ -631,6 +631,28 @@ function Sync-VenvDependencies {
 # have been removed. Frivo's own voices (Piper) need neither: the speech
 # library is in requirements.txt and carries its own runtime.
 
+function Reset-FrivoVoicePermissions {
+    <#
+        NEW (1.6.0): makes the voices folder take its permissions from the
+        Frivo folder again. Earlier setups unpacked the voices in a folder
+        that newer Python makes readable by only the account running setup
+        (an administrator), so Frivo, running as you, couldn't load them:
+        "Load model ... failed: system error number 13". Every install,
+        update and Repair puts that right. Never throws.
+    #>
+    param([string] $Target)
+    try {
+        $voices = Join-Path $Target 'voices'
+        if (-not (Test-Path -LiteralPath $voices -PathType Container)) { return }
+        $icacls = Join-Path $env:SystemRoot 'System32\icacls.exe'
+        if (-not (Test-Path -LiteralPath $icacls -PathType Leaf)) { return }
+        $r = Invoke-Tool -FilePath $icacls -Arguments @($voices, '/reset', '/T', '/C', '/Q')
+        Write-SetupLog ('voices: permissions reset (icacls exit {0})' -f $r.ExitCode)
+    } catch {
+        Write-SetupLog ('voices: permissions not reset: {0}' -f $_.Exception.Message)
+    }
+}
+
 function Sync-FrivoVoices {
     <#
         NEW (1.5.0): gets Frivo's free voices by running voice_pack.py with
@@ -648,6 +670,7 @@ function Sync-FrivoVoices {
         foreach ($line in (($r.StdOut + "`n" + $r.StdErr) -split "`r?`n")) {
             if ($line.Trim()) { Write-SetupLog ('voices: ' + $line.Trim()) }
         }
+        Reset-FrivoVoicePermissions -Target $Target
         if ($r.ExitCode -ne 0) {
             & $Log 'Some of Frivo''s voices could not be downloaded. Frivo still works, and so do the Windows voices. Run setup again (Repair) to try again.'
             return $false
@@ -873,5 +896,6 @@ Export-ModuleMember -Function `
     Write-SetupLog, Invoke-Tool, ConvertTo-ArgumentString, Get-LastLines, Find-Python, Install-Python,
     Update-PathFromRegistry, New-Venv, Sync-VenvDependencies, Get-SetupLogPath,
     Sync-FrivoVoices,
+    Reset-FrivoVoicePermissions,
     Get-LocalHostname, Get-HostsFilePath, Add-FrivoHostsEntry, Remove-FrivoHostsEntry,
     Install-FrivoRootCertificate, Remove-FrivoRootCertificate, Get-LauncherShim, Get-WScriptPath

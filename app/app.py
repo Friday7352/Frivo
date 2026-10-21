@@ -2609,6 +2609,26 @@ def piper_problem(voice_id, language):
     return None
 
 
+def _new_staging(parent, prefix):
+    """
+    NEW (1.6.0): an empty folder to unpack into, inside `parent`.
+
+    Not tempfile.mkdtemp: on Windows, Python 3.12.4 and later create that
+    folder readable by only the account that made it, and files moved out
+    of it keep that. Setup runs as an administrator, so Frivo's voices ended
+    up unreadable by Frivo itself ("Load model ... failed: system error
+    number 13"). A plain folder takes its permissions from `parent`.
+    """
+    os.makedirs(parent, exist_ok=True)
+    while True:
+        path = os.path.join(parent, prefix + uuid.uuid4().hex[:10])
+        try:
+            os.mkdir(path)
+            return path
+        except FileExistsError:
+            continue
+
+
 def piper_engine(voice):
     """The loaded voice, loading it (and letting the oldest go) if needed."""
     key = voice["key"]
@@ -2624,10 +2644,22 @@ def piper_engine(voice):
             PIPER_STATE["package_problem"] = problem
         raise RuntimeError(problem)
     paths = piper_paths(voice)   # CHANGED (1.5.0): Frivo's own, or one you added
-    engine = sherpa_onnx.OfflineTts(sherpa_onnx.OfflineTtsConfig(model=sherpa_onnx.OfflineTtsModelConfig(
-        num_threads=PIPER_THREADS, provider="cpu",
-        vits=sherpa_onnx.OfflineTtsVitsModelConfig(model=paths["model"], tokens=paths["tokens"],
-                                                   data_dir=paths["espeak"]))))
+    try:
+        engine = sherpa_onnx.OfflineTts(sherpa_onnx.OfflineTtsConfig(model=sherpa_onnx.OfflineTtsModelConfig(
+            num_threads=PIPER_THREADS, provider="cpu",
+            vits=sherpa_onnx.OfflineTtsVitsModelConfig(model=paths["model"], tokens=paths["tokens"],
+                                                       data_dir=paths["espeak"]))))
+    except Exception as e:
+        # NEW (1.6.0): "system error number 13" is Windows refusing to let
+        # Frivo read the voice's files (see _new_staging). Say how to fix it.
+        if re.search(r"error number 13|permission denied|access is denied", str(e), re.I):
+            folder = os.path.dirname(os.path.dirname(paths["model"]))
+            log_server_event(f"Frivo voices: can't read {paths['model']}: {e}")
+            raise RuntimeError(
+                f"Windows won't let Frivo read its voice files in {folder}. Run Frivo's setup again and "
+                f"choose Repair, which fixes their permissions. Or, in PowerShell as administrator: "
+                f'icacls "{folder}" /reset /T /C /Q') from e
+        raise
     with PIPER_LOCK:
         PIPER_ENGINES[key] = engine
         PIPER_ENGINES.move_to_end(key)
@@ -2881,7 +2913,7 @@ def add_custom_voice(paths, name=""):
         raise ValueError(piper_package_problem() or "Frivo's voices aren't set up. Run Frivo's setup again (Repair).")
     if not VOICE_PACK.espeak_ready(PIPER_DIR):
         raise ValueError("Voices you add use the pronunciation data that comes with Frivo's voices. Run Frivo's setup again (Repair).")
-    staging = tempfile.mkdtemp(prefix=".adding-", dir=CUSTOM_VOICES_DIR)
+    staging = _new_staging(CUSTOM_VOICES_DIR, ".adding-")   # CHANGED (1.6.0): not mkdtemp
     try:
         files = _unpack_voice_upload(paths, staging)
         models = [(p, b) for p, b in files if b.lower().endswith(".onnx")]
@@ -2974,7 +3006,7 @@ def custom_voice_add():
     if not uploads:
         return jsonify({"error": "Choose the voice's files to add."}), 400
     os.makedirs(CUSTOM_VOICES_DIR, exist_ok=True)
-    holding = tempfile.mkdtemp(prefix=".upload-", dir=CUSTOM_VOICES_DIR)
+    holding = _new_staging(CUSTOM_VOICES_DIR, ".upload-")   # CHANGED (1.6.0)
     try:
         saved, total = [], 0
         for upload in uploads[:10]:
@@ -3258,7 +3290,7 @@ def _voice_lib_job(key, **changes):
 def _voice_lib_download(key, entry):
     import hashlib
     model, config, _, files = _voice_lib_files(entry)
-    staging = tempfile.mkdtemp(prefix=".library-", dir=CUSTOM_VOICES_DIR)
+    staging = _new_staging(CUSTOM_VOICES_DIR, ".library-")   # CHANGED (1.6.0)
     try:
         paths = []
         for rel in (config, model):
