@@ -309,12 +309,16 @@ const LOCAL_STATUS_POLL_MS = 30000;
 let localStatusTimer = null;
 
 function serviceChipTitle(service) {
-  const lines = [`${service.name} at ${service.url}`, service.message];
+  const lines = [`${service.name}: ${service.url}`, service.message].filter(Boolean);   // CHANGED (1.6.0)
   // FrivOSC has nothing to fall back to — if it is down, VRChat just gets
   // nothing. Only the providers with an OpenAI path behind them get the
   // warning about paying for it.
-  if (!service.ok && service.fallback !== false) {
+  // CHANGED (1.6.0): only when it really falls back (the switch is on and
+  // there's an OpenAI key); otherwise what happens meanwhile, if anything.
+  if (!service.ok && service.fallback === true) {
     lines.push("Falling back to OpenAI, which costs credits.");
+  } else if (!service.ok && service.fallback_note) {
+    lines.push(service.fallback_note + ".");
   }
   return lines.join("\n");
 }
@@ -329,6 +333,8 @@ const SERVICE_SETTINGS_TARGET = {
   whisper: { section: "providers" },
   ollama: { section: "providers" },
   builtin: { section: "providers" },   // NEW (1.6.0)
+  openai: { section: "providers" },    // NEW (1.6.0)
+  none: { section: "providers" },      // NEW (1.6.0)
   frivosc: { section: "vrchat" },
 };
 
@@ -365,10 +371,12 @@ function paintServiceBlock(block, service) {
   chip.className = "service-status " + (service.ok ? "is-ok" : "is-down");
   chip.title = serviceChipTitle(service);
   block.querySelector(".service-status-name").textContent = service.name;
-  block.querySelector(".service-status-state").textContent = service.ok ? "· connected" : "· unreachable";
+  // CHANGED (1.6.0): "not downloaded", "for replies", "no key", say.
+  block.querySelector(".service-status-state").textContent = `· ${service.state || (service.ok ? "connected" : "unreachable")}`;
   const detail = block.querySelector(".service-status-detail");
   detail.textContent = service.ok ? (service.url || "") : (service.message || "");
-  if (!service.ok && service.fallback !== false) detail.textContent += " · falling back to OpenAI";
+  if (!service.ok && service.fallback === true) detail.textContent += " · falling back to OpenAI";
+  else if (!service.ok && service.fallback_note) detail.textContent += ` · ${service.fallback_note}`;
 }
 
 // What the pill says when something is down: the first service that is.
@@ -378,7 +386,7 @@ function paintStatusPill(services) {
   const down = services.filter((s) => !s.ok);
   pill.classList.toggle("is-down", down.length > 0);
   const text = $("statusPillText");
-  if (text && down.length) text.textContent = `${down[0].name} offline`;
+  if (text && down.length) text.textContent = `${down[0].name} ${down[0].state || "offline"}`;   // CHANGED (1.6.0)
   else if (text && readyLamp.classList.contains("is-lit")) text.textContent = "Ready";
 }
 
@@ -541,6 +549,8 @@ function buildProviderPickers(settings) {
   }
   if (whisperUrl) whisperUrl.value = settings.whisper_url || "";
   if (allowFallbackToggle) allowFallbackToggle.checked = Boolean(settings.allow_openai_fallback);
+  // NEW (1.6.0): only offered with an OpenAI key to fall back on.
+  if ($("allowFallbackRow")) $("allowFallbackRow").classList.toggle("is-hidden", !settings.openai_key_set);
 
   syncProviderVisibility();
   if (typeof omCardUses === "function") omCardUses();   // NEW (1.6.0): your models' sizes, once known

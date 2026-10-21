@@ -1852,8 +1852,14 @@ def fallback_allowed():
     isn't honouring it — the failure mode is that everything keeps working
     perfectly while quietly costing money, which is precisely the case you
     would want to be told about.
+
+    CHANGED (1.6.0): and only with an OpenAI key to fall back on. Without
+    one the switch is hidden, and Clean up uses No AI (Frivo's rules).
     """
-    return bool(CFG.get("allow_openai_fallback", False))
+    return bool(CFG.get("allow_openai_fallback", False)) and bool(CFG.get("openai_api_key"))
+
+
+NO_AI_MEANWHILE = "Clean up uses No AI (Frivo's rules) meanwhile"   # NEW (1.6.0)
 
 
 def make_openai_client():
@@ -5769,6 +5775,12 @@ def settings():
             if key in data:
                 value = (data.get(key) or "").strip()
                 CFG[key] = value if value in provider_ids(options) else "openai"
+        # NEW (1.6.0): translation was switched to the built-in AI along with
+        # replies; moving replies off it moves translation too, so it isn't
+        # left on an AI you're no longer using.
+        if ("chat_provider" in data and CFG.get("chat_provider") != "builtin"
+                and CFG.get("translation_provider") == "builtin"):
+            CFG["translation_provider"] = CFG["chat_provider"] if CFG["chat_provider"] == "ollama" else "openai"
 
         for key, default in (
             ("ollama_url", DEFAULT_OLLAMA_URL),
@@ -5781,6 +5793,8 @@ def settings():
             if key in data:
                 CFG[key] = (data.get(key) or "").strip() or default
         # NEW (1.6.0): the built-in AI
+        if CLEANUP_RULES is not None and chat_ai_missing():   # NEW (1.6.0)
+            CLEANUP_RULES.warm_up()   # the word list, so the first clean-up doesn't wait
         if data.get("builtin_ai_model") in ("small", "better"):
             if CFG.get("builtin_ai_model") != data["builtin_ai_model"] and BUILTIN_AI is not None:
                 BUILTIN_AI.stop()   # the other model is loaded next time it's needed
@@ -5921,6 +5935,33 @@ def local_status():
 
     services = []
 
+    # NEW (1.6.0): the AI that writes replies always comes first, whichever
+    # it is, so the popover says what's picked: OpenAI and No AI included.
+    if chat == "openai":
+        has_key = bool(CFG.get("openai_api_key"))
+        services.append({
+            "id": "openai",
+            "name": "OpenAI",
+            "ok": True,   # nothing local to be down
+            "state": "for replies" if has_key else "no key",
+            "message": "",
+            "url": "Replies · OpenAI's servers" if has_key
+            else "No OpenAI key: " + NO_AI_MEANWHILE[0].lower() + NO_AI_MEANWHILE[1:],
+            "used_for": ["chat"],
+            "fallback": False,
+        })
+    elif chat == "none":
+        services.append({
+            "id": "none",
+            "name": "No AI",
+            "ok": True,
+            "state": "for replies",
+            "message": "Nothing is sent anywhere.",
+            "url": "Clean up by rules · Word for word",
+            "used_for": ["chat"],
+            "fallback": False,
+        })
+
     if "ollama" in (chat, translation):
         ok, message = probe_provider("ollama", timeout=2)
         uses = [
@@ -5933,9 +5974,12 @@ def local_status():
             "name": "Ollama",
             "ok": ok,
             "message": message,
-            "url": ollama_base_url(),
+            # CHANGED (1.6.0): says what it's for.
+            "url": ("Replies · " if chat == "ollama" else "Translation · ") + ollama_base_url(),
             "used_for": uses,
-            "fallback": True,
+            # CHANGED (1.6.0): only when it really will (the switch, and a key).
+            "fallback": fallback_allowed(),
+            "fallback_note": "" if fallback_allowed() or "chat" not in uses else NO_AI_MEANWHILE,
         })
 
     # NEW (1.6.0): the built-in AI. Nothing to probe over the network: it's
@@ -5949,11 +5993,19 @@ def local_status():
             "ok": not problem,
             "message": (problem[:1].upper() + problem[1:] + ". Download it in Settings > Providers.") if problem
             else (f"{builtin_ai_model_name()}, " + ("running" if running else "starts with the next reply")),
-            "url": f"the PC Frivo runs on · {builtin_ai_model_name()}",
+            "url": ("Replies · " if chat == "builtin" else "Translation · ")
+            + f"the PC Frivo runs on · {builtin_ai_model_name()}",
             "used_for": [label for label, provider in (("chat", chat), ("translation", translation))
                          if provider == "builtin"],
-            "fallback": True,
+            # CHANGED (1.6.0): not downloaded is not "unreachable"; and what
+            # happens meanwhile is No AI, unless OpenAI is really allowed.
+            "state": "not downloaded" if "downloaded" in problem else "",
+            "fallback": fallback_allowed(),
+            "fallback_note": "" if fallback_allowed() or chat != "builtin" else NO_AI_MEANWHILE,
         })
+
+    # The replies row first, then translation's if it's another one.
+    services.sort(key=lambda svc: 0 if "chat" in (svc.get("used_for") or []) else 1)
 
     if transcription == "local_whisper":
         ok, message = probe_provider("whisper", timeout=2)
@@ -5964,7 +6016,7 @@ def local_status():
             "message": message,
             "url": whisper_base_url(),
             "used_for": ["transcription"],
-            "fallback": True,
+            "fallback": fallback_allowed(),   # CHANGED (1.6.0)
         })
 
     # FrivOSC reports itself, so there is nothing to probe — it either

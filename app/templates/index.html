@@ -1237,10 +1237,11 @@
                 <h3 class="settings-section-title">Providers</h3>
                 <p class="settings-section-sub">Where each job runs. Everything defaults to OpenAI.</p>
                 <div class="settings-card">
-                  <label class="srow">
+                  <!-- CHANGED (1.6.0): only shown when there's an OpenAI key. -->
+                  <label class="srow is-hidden" id="allowFallbackRow">
                     <span class="srow-main srow-main--flex">
-                      <span class="srow-label">Fall back to OpenAI if a local service is down</span>
-                      <span class="srow-sub">Off, an unreachable local service returns an error instead of quietly costing money.</span>
+                      <span class="srow-label">Fall back to OpenAI if a local AI is down</span>
+                      <span class="srow-sub">Off, Clean up uses No AI (Frivo's rules) when the local AI can't answer, and Reply says it's down, instead of quietly costing money.</span>
                     </span>
                     <span class="switch">
                       <input type="checkbox" id="allowFallbackToggle">

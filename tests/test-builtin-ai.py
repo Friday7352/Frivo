@@ -186,6 +186,35 @@ check("No AI can be saved", mod.CFG["chat_provider"] == "none", mod.CFG["chat_pr
 mod.CFG["openai_api_key"] = ""
 mod.CFG["chat_provider"] = "openai"
 
+# The status pill: not downloaded is said so, and No AI is what happens
+# meanwhile; OpenAI only with the switch on and a key.
+mod.CFG["chat_provider"] = "builtin"
+mod.CFG["allow_openai_fallback"] = True
+mod.CFG["openai_api_key"] = ""
+svc = next(x for x in c.get("/api/local-status").get_json()["services"] if x["id"] == "builtin")
+check("status: not downloaded, No AI meanwhile", svc["state"] == "not downloaded" and not svc["fallback"]
+      and "No AI" in svc["fallback_note"], svc)
+mod.CFG["openai_api_key"] = "sk-test"
+svc = next(x for x in c.get("/api/local-status").get_json()["services"] if x["id"] == "builtin")
+check("status: falls back to OpenAI only with the switch and a key", svc["fallback"] is True and not svc["fallback_note"], svc)
+check("no key, no OpenAI fallback", (mod.CFG.update(openai_api_key="") or True) and not mod.fallback_allowed())
+mod.CFG["allow_openai_fallback"] = False
+# The popover names the AI picked for replies, first, whichever it is.
+for pick, name, want in (("none", "No AI", "for replies"), ("openai", "OpenAI", "no key")):
+    mod.CFG["chat_provider"] = pick
+    mod.CFG["translation_provider"] = "builtin"
+    svcs = c.get("/api/local-status").get_json()["services"]
+    check(f"popover leads with {name}", svcs[0]["name"] == name and svcs[0]["state"] == want and svcs[0]["ok"], svcs[0])
+    check(f"... and the built-in AI is listed for translation only", any(x["id"] == "builtin" and x["url"].startswith("Translation")
+                                                                       for x in svcs), [x["url"] for x in svcs])
+mod.CFG["chat_provider"] = "builtin"
+mod.CFG["translation_provider"] = "builtin"
+c.post("/api/settings", json={"chat_provider": "none", "translation_provider": "builtin"})
+check("moving replies off the built-in AI moves translation too", mod.CFG["translation_provider"] == "openai",
+      mod.CFG["translation_provider"])
+mod.CFG["translation_provider"] = "openai"
+mod.CFG["chat_provider"] = "openai"
+
 # AI chosen but unreachable: Clean up falls back to the rules.
 mod.CFG["response_style"] = "echo"
 mod.CFG["chat_provider"] = "ollama"

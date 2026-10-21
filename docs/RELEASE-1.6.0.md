@@ -31,3 +31,8 @@ Frivo now works without OpenAI or Ollama: Clean up has a no-AI mode, there's a o
 - **Test** asks it for a line and says how long that took. **Remove** deletes one model or everything, and replies go back to OpenAI.
 - **Same features:** the personality maker, tag suggestions and translation all work with it. The status pill shows it as **Built-in AI**.
 - **Quality:** replies are simpler than OpenAI's or a big Ollama model's, and personas are less consistent.
+
+## Falling back
+
+- When the AI you picked can't answer (the built-in AI isn't downloaded, or Ollama is down), Clean up uses **No AI** (Frivo's rules) instead. The status pill says so, for example **Built-in AI not downloaded · Clean up uses No AI meanwhile**, instead of claiming it's falling back to OpenAI.
+- **Fall back to OpenAI if a local AI is down** only appears once you've added an OpenAI key, and only falls back when it's on and there's a key.
