@@ -57,6 +57,8 @@ app/voices/
 # Build-App.bat make them again from package-lock.json.
 desktop/node_modules/
 desktop/dist/
+# The copy of Node.js Build-App.bat downloads to build the app.
+desktop/.tools/
 # The app's test certificates: public certificates only, no private keys
 # (desktop/test/fixtures/README.md). Kept, despite *.pem above.
 !desktop/test/fixtures/*.pem

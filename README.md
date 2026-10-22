@@ -346,8 +346,9 @@ repository. Everything else — the installer, Apps & features,
 Installed copies offer it within six hours. The release notes appear in the
 update dialog.
 
-**The Frivo app.** Its code is in `desktop\`. Run `Build-App.bat` (needs
-[Node.js](https://nodejs.org)) to make `desktop\dist\FrivoApp-Setup-<version>.exe`.
+**The Frivo app.** Its code is in `desktop\`. Run `Build-App.bat` to make
+`desktop\dist\FrivoApp-Setup-<version>.exe`. Nothing needs installing first:
+it downloads its own copy of Node.js into `desktop\.tools` the first time.
 See [`desktop/README.md`](desktop/README.md) for how it works and how to
 publish an app update.
 

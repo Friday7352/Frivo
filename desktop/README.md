@@ -70,12 +70,13 @@ Frivo keeps running through an app update.
 
 ## Building and publishing
 
-You need [Node.js](https://nodejs.org) (the LTS version).
-
 1. Change `"version"` in `package.json` (the app's own version, separate from
    Frivo's `VERSION` file).
 2. Run `Build-App.bat` in the repository root. It runs the tests and writes
-   `desktop\dist\FrivoApp-Setup-<version>.exe`.
+   `desktop\dist\FrivoApp-Setup-<version>.exe`. Nothing needs installing
+   first: the first time, it downloads a copy of Node.js (pinned in
+   `build\Build-App.ps1`, checked against nodejs.org's SHA-256) into
+   `desktop\.tools`, and uses only that.
 3. Make a GitHub release tagged `app-v<version>` (for example `app-v1.0.1`),
    not a pre-release or a draft, and attach that file with its name unchanged.
 4. **Untick "Set as the latest release".** GitHub's "latest release" link is
