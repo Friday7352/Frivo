@@ -13779,6 +13779,7 @@ async function checkElevenKey(force) {
     progress.classList.toggle("is-hidden", !busy);
     cancelBtn.classList.toggle("is-hidden", !busy);
     testBtn.classList.toggle("is-hidden", !ready || busy);
+    if ($("builtinAgainBtn")) $("builtinAgainBtn").classList.toggle("is-hidden", !ready || busy);   // NEW (1.6.1)
     getBtn.classList.toggle("is-hidden", busy || (ready && info.in_use));
     getBtn.textContent = ready ? "Use the built-in AI" : `Download and use (${gb(model.size || 0)})`;
     getBtn.disabled = !info.supported;
@@ -13840,17 +13841,19 @@ async function checkElevenKey(force) {
       setTimeout(() => { btn.dataset.armed = ""; btn.textContent = "Remove"; }, 3000);
       return;
     }
-    await fetch(`/api/builtin-ai/${encodeURIComponent(btn.dataset.remove)}`, { method: "DELETE" }).catch(() => {});
-    say("Removed.");
+    // CHANGED (1.6.1): says when something couldn't be deleted.
+    const res = await fetch(`/api/builtin-ai/${encodeURIComponent(btn.dataset.remove)}`, { method: "DELETE" }).catch(() => null);
+    const data = res ? await res.json().catch(() => ({})) : {};
+    if (res && res.ok) say("Removed."); else say(data.error || "Couldn't remove it.", "error");
     if (typeof loadSettings === "function") loadSettings();
     refresh();
   });
-  getBtn.addEventListener("click", async () => {
+  async function startDownload(again) {
     say("");
     getBtn.disabled = true;
     try {
       const res = await fetch("/api/builtin-ai/download", { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ model: chosen, use: true }) });
+        body: JSON.stringify({ model: chosen, use: true, again }) });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || `Frivo said ${res.status}`);
       if (data.ready) {
@@ -13864,7 +13867,11 @@ async function checkElevenKey(force) {
       getBtn.disabled = false;
     }
     refresh();
-  });
+  }
+  getBtn.addEventListener("click", () => startDownload(false));
+  // NEW (1.6.1): replaces the engine and the model, for when it won't start.
+  const againBtn = $("builtinAgainBtn");
+  if (againBtn) againBtn.addEventListener("click", () => startDownload(true));
   cancelBtn.addEventListener("click", () => fetch("/api/builtin-ai/cancel", { method: "POST" }).then(refresh));
   testBtn.addEventListener("click", async () => {
     testBtn.disabled = true;
@@ -13891,8 +13898,10 @@ async function checkElevenKey(force) {
     }
     btn.dataset.armed = "";
     btn.textContent = "Remove";
-    await fetch("/api/builtin-ai", { method: "DELETE" }).catch(() => {});
-    say("Removed. Clean up in English still works without AI.");
+    const res = await fetch("/api/builtin-ai", { method: "DELETE" }).catch(() => null);
+    const data = res ? await res.json().catch(() => ({})) : {};
+    if (res && res.ok) say("Removed. Clean up in English still works without AI.");
+    else say(data.error || "Couldn't remove it.", "error");
     if (typeof loadSettings === "function") loadSettings();
     refresh();
   });
@@ -13939,3 +13948,181 @@ function omCardUses() {
   if (lead) line.append(lead, " ");
   line.append(`About ${parts.join(", ")} of graphics memory with your models; only one is loaded at a time. Free.`);
 }
+
+
+// ---------------------------------------------------------------------------
+// NEW (1.6.1): Settings > Storage: where the big files are kept, and a
+// folder picker for the PC Frivo runs on.
+// ---------------------------------------------------------------------------
+(function initStorage() {
+  const list = $("storageList");
+  if (!list) return;
+  const pop = $("folderPop");
+  const statusEl = $("storageStatus");
+  let info = null;
+  let poll = null;
+  let picking = null;      // the kind a folder is being picked for
+  let browsePath = "";
+  const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const size = (n) => (n >= 1e9 ? `${(n / 1e9).toFixed(1)} GB` : n >= 1e6 ? `${Math.round(n / 1e6)} MB` : n > 0 ? "under 1 MB" : "empty");
+  const say = (text, kind) => {
+    statusEl.textContent = text || "";
+    statusEl.classList.toggle("is-error", kind === "error");
+    statusEl.classList.toggle("is-ok", kind === "ok");
+  };
+
+  function render() {
+    if (!info) return;
+    const job = info.job || {};
+    const moving = job.state === "moving";
+    list.innerHTML = info.kinds.map((k) => {
+      const free = k.drive && k.drive.free != null ? ` · ${size(k.drive.free)} free on ${esc(k.drive.name)}` : "";
+      return `<div class="st-row" data-kind="${esc(k.id)}">`
+        + `<div class="st-main"><span class="st-name">${esc(k.name)}</span>`
+        + `<span class="st-what">${esc(k.what)}</span>`
+        + `<span class="st-folder">${esc(k.folder)}</span>`
+        + `<span class="st-meta">Using ${size(k.size)}${free}${k.is_default ? " · Frivo's own folder" : ""}</span>`
+        + (k.problem ? `<span class="st-problem">${esc(k.problem)}</span>` : "")
+        + `</div><div class="st-actions">`
+        + `<button type="button" class="btn-ghost btn-sm" data-change="${esc(k.id)}"${moving ? " disabled" : ""}>Change…</button>`
+        + (k.is_default ? "" : `<button type="button" class="link-btn" data-default="${esc(k.id)}"${moving ? " disabled" : ""}>Back to Frivo's folder</button>`)
+        + `</div></div>`;
+    }).join("");
+    const jobEl = $("storageJob");
+    jobEl.classList.toggle("is-hidden", !moving);
+    if (moving) {
+      const pct = job.total ? Math.min(100, Math.round((job.done / job.total) * 100)) : 0;
+      const kind = info.kinds.find((k) => k.id === job.kind) || {};
+      $("storageJobText").textContent = `Moving ${kind.name || "files"} to ${job.folder}…`;
+      $("storageJobPct").textContent = job.total ? `${size(job.done)} of ${size(job.total)} · ${pct}%` : "";
+      $("storageJobBar").style.width = `${pct}%`;
+    }
+  }
+
+  let lastState = "";
+  async function refresh() {
+    try {
+      const res = await fetch("/api/storage");
+      info = await res.json();
+      const job = info.job || {};
+      if (lastState === "moving" && job.state === "done") say(job.message, "ok");
+      if (lastState === "moving" && job.state === "error") say(job.message, "error");
+      lastState = job.state;
+      render();
+      clearTimeout(poll);
+      poll = job.state === "moving" ? setTimeout(refresh, 700) : null;
+    } catch (_) { /* tried again when Storage is opened */ }
+  }
+
+  async function change(kind, body) {
+    say("");
+    const res = await fetch("/api/storage", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(Object.assign({ kind }, body)) }).catch(() => null);
+    const data = res ? await res.json().catch(() => ({})) : {};
+    if (res && res.status === 409 && data.exists) return data;   // the picker asks what to do
+    if (!res || !res.ok) { say(data.error || "Couldn't change it.", "error"); return null; }
+    if (data.unchanged) say("That's where it already is.");
+    else lastState = "moving";
+    refresh();
+    return data;
+  }
+
+  // ---- the folder picker ----
+  async function browse(path) {
+    const note = $("folderNote");
+    note.classList.remove("is-error");
+    note.textContent = "";
+    const res = await fetch(`/api/storage/browse?path=${encodeURIComponent(path || "")}`).catch(() => null);
+    const data = res ? await res.json().catch(() => ({})) : {};
+    if (!res || !res.ok) { note.textContent = data.error || "Couldn't look there."; note.classList.add("is-error"); return; }
+    browsePath = data.path || "";
+    $("folderPath").value = browsePath;
+    $("folderUpBtn").disabled = !data.parent && !(data.drives || []).length;
+    $("folderUpBtn").dataset.parent = data.parent || "";
+    $("folderDrives").innerHTML = (data.drives || []).map((d) => `<button type="button" class="st-drive" data-path="${esc(d)}">${esc(d)}</button>`).join("");
+    const folders = data.folders || [];
+    $("folderList").innerHTML = !browsePath ? '<p class="st-empty">Pick a drive.</p>'
+      : folders.length ? folders.map((f) => `<button type="button" class="st-folder-btn" data-name="${esc(f)}">${esc(f)}</button>`).join("")
+      : '<p class="st-empty">No folders in here. Make one below, or use this one.</p>';
+    $("folderChooseBtn").disabled = !browsePath || data.writable === false;
+    const kind = info && info.kinds.find((k) => k.id === picking);
+    const sub = kind ? kind.sub : "";
+    note.textContent = !browsePath ? "" : data.writable === false ? "Frivo can't write here."
+      : `Frivo will use ${browsePath.replace(/[\\/]$/, "")}${browsePath.includes("/") && !browsePath.includes("\\") ? "/" : "\\"}${sub}`
+        + (data.free != null ? ` · ${size(data.free)} free` : "");
+  }
+
+  function openPicker(kindId) {
+    picking = kindId;
+    const kind = info.kinds.find((k) => k.id === kindId);
+    $("folderTitle").textContent = `Where to keep: ${kind.name}`;
+    $("folderSub").textContent = `Pick a folder on the PC Frivo runs on. Frivo makes a "${kind.sub}" folder inside it and moves what's there now (${size(kind.size)}).`;
+    pop.classList.remove("is-hidden");
+    browse(kind.is_default ? "" : kind.parent);
+  }
+  const closePicker = () => { pop.classList.add("is-hidden"); picking = null; };
+
+  list.addEventListener("click", async (e) => {
+    const c = e.target.closest("[data-change]");
+    if (c) { openPicker(c.dataset.change); return; }
+    const d = e.target.closest("[data-default]");
+    if (d) {
+      if (d.dataset.armed !== "1") {
+        d.dataset.armed = "1";
+        d.textContent = "Move back? Click again";
+        setTimeout(() => { d.dataset.armed = ""; d.textContent = "Back to Frivo's folder"; }, 3000);
+        return;
+      }
+      const data = await change(d.dataset.default, { default: true, mode: "move" });
+      if (data && data.exists) say(`${data.error}`, "error");
+    }
+  });
+  $("folderList").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-name]");
+    if (!b) return;
+    const sep = browsePath.includes("\\") || /^[A-Za-z]:/.test(browsePath) ? "\\" : "/";
+    browse(browsePath.replace(/[\\/]+$/, "") + sep + b.dataset.name);
+  });
+  $("folderDrives").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-path]");
+    if (b) browse(b.dataset.path);
+  });
+  $("folderUpBtn").addEventListener("click", (e) => browse(e.currentTarget.dataset.parent || ""));
+  $("folderGoBtn").addEventListener("click", () => browse($("folderPath").value.trim()));
+  $("folderPath").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); browse($("folderPath").value.trim()); } });
+  $("folderNewBtn").addEventListener("click", async () => {
+    const name = $("folderNewName").value.trim();
+    if (!name || !browsePath) return;
+    const res = await fetch("/api/storage/mkdir", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: browsePath, name }) }).catch(() => null);
+    const data = res ? await res.json().catch(() => ({})) : {};
+    if (!res || !res.ok) { $("folderNote").textContent = data.error || "Couldn't make it."; $("folderNote").classList.add("is-error"); return; }
+    $("folderNewName").value = "";
+    browse(data.path);
+  });
+  $("folderChooseBtn").addEventListener("click", async () => {
+    const kind = picking;
+    const btn = $("folderChooseBtn");
+    btn.disabled = true;
+    let data = await change(kind, { folder: browsePath, mode: "move" });
+    if (data && data.exists) {
+      // Frivo's files from before are already there (an earlier install, say).
+      if (window.confirm(`${data.error}\n\nOK: use the files that are there. (What's in the current folder stays where it is.)\nCancel: pick another folder.`)) {
+        data = await change(kind, { folder: browsePath, mode: "use" });
+      } else {
+        btn.disabled = false;
+        return;
+      }
+    }
+    btn.disabled = false;
+    if (data) closePicker();
+  });
+  $("folderCloseBtn").addEventListener("click", closePicker);
+  pop.addEventListener("click", (e) => { if (e.target === pop) closePicker(); });
+  pop.addEventListener("keydown", (e) => { if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); closePicker(); } });
+
+  document.addEventListener("click", (e) => {
+    if (e.target.closest && e.target.closest('.settings-nav-btn[data-settings-section="storage"]')) setTimeout(refresh, 50);
+  });
+  refresh();
+})();

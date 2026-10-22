@@ -365,6 +365,10 @@ function Stop-FrivoProcesses {
         -ErrorAction SilentlyContinue |
         Where-Object { $_.ExecutablePath -and (Test-PathWithinDirectory -Path $_.ExecutablePath -Directory $Target) })
 
+    # NEW (1.6.1): the built-in AI's engine, which runs from the data folder.
+    $engines = Stop-FrivoBuiltinAI -Folders @($script:SetupDataDir, $Target)
+    if ($engines) { Write-SetupLog ('Stopped {0} built-in AI engine(s) before setup.' -f $engines) }
+
     if ($processes.Count -eq 0) { return }
 
     & $Log 'Closing the running Frivo application...'

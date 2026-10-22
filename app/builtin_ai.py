@@ -113,7 +113,11 @@ class BuiltinAI:
         self._last_used = 0.0
         self._log_file = None
         self.on_ready = None                  # called after a download finishes
+        self._job_object = None               # NEW (1.6.1): Windows: the engine dies with Frivo
         threading.Thread(target=self._idle_loop, daemon=True).start()
+        # NEW (1.6.1): an engine left running by a Frivo that was closed
+        # (or killed by an update) still holds its files: stop it.
+        threading.Thread(target=self.kill_strays, daemon=True).start()
 
     # ------------------------------------------------------------------ paths
 
@@ -205,9 +209,10 @@ class BuiltinAI:
 
     # --------------------------------------------------------------- download
 
-    def start_download(self, model_id):
+    def start_download(self, model_id, again=False):
         """Downloads the engine (if needed) and this model, in the
-        background. Raises BuiltinAIError when it can't begin."""
+        background. Raises BuiltinAIError when it can't begin.
+        CHANGED (1.6.1): again=True replaces what's there (Download again)."""
         model = MODELS_BY_ID.get(model_id)
         if not model:
             raise BuiltinAIError("Pick Small or Better.")
@@ -216,7 +221,10 @@ class BuiltinAI:
         with self._job_lock:
             if self._job.get("state") in ("engine", "model", "checking"):
                 raise BuiltinAIError("A download is already running.")
-            need = (0 if self.engine_path() else 30_000_000) + (0 if self.model_path(model_id) else model["size"])
+            if again:
+                need = 30_000_000 + model["size"]
+            else:
+                need = (0 if self.engine_path() else 30_000_000) + (0 if self.model_path(model_id) else model["size"])
             try:
                 os.makedirs(self.root, exist_ok=True)
                 free = shutil.disk_usage(self.root).free
@@ -227,7 +235,7 @@ class BuiltinAI:
                                      f"and {free / 1e9:.1f} GB is free.")
             self._cancel.clear()
             self._job = {"state": "checking", "model": model_id, "done": 0, "total": need, "error": ""}
-        threading.Thread(target=self._download, args=(model,), daemon=True).start()
+        threading.Thread(target=self._download, args=(model, again), daemon=True).start()
 
     def cancel_download(self):
         self._cancel.set()
@@ -236,8 +244,15 @@ class BuiltinAI:
         with self._job_lock:
             self._job.update(changes)
 
-    def _download(self, model):
+    def _download(self, model, again=False):
         try:
+            if again:   # NEW (1.6.1): Download again: the old copies go first
+                self.stop()
+                self.kill_strays()
+                if not _rmtree(self.engine_dir):
+                    raise BuiltinAIError("The old engine is still in use by another program. Restart the PC Frivo "
+                                         "runs on, then try again.")
+                _remove(os.path.join(self.root, "models", model["file"]))
             if not self.engine_path():
                 self._set_job(state="engine")
                 self._download_engine()
@@ -320,7 +335,11 @@ class BuiltinAI:
                 raise BuiltinAIError("The engine download didn't have llama-server in it.")
             if sys.platform != "win32":
                 os.chmod(os.path.join(found, ENGINE_EXE), 0o755)
-            shutil.rmtree(self.engine_dir, ignore_errors=True)
+            self.stop()
+            self.kill_strays()   # NEW (1.6.1): a running engine would hold the old files
+            if not _rmtree(self.engine_dir):
+                raise BuiltinAIError("The old engine is still in use by another program. Restart the PC Frivo "
+                                     "runs on, then try again.")
             os.replace(found, self.engine_dir)
         finally:
             shutil.rmtree(staging, ignore_errors=True)
@@ -352,16 +371,26 @@ class BuiltinAI:
                     os.path.join(folder, model["file"]), lfs["sha256"], size)
 
     def remove(self, model_id=None):
-        """Removes one model, or everything (engine and models)."""
+        """Removes one model, or everything (engine and models).
+        CHANGED (1.6.1): stops a stray engine first, and raises
+        BuiltinAIError if something couldn't be deleted, instead of
+        saying "Removed" with the files still there."""
         self.stop()
+        self.kill_strays()
         if model_id:
             model = MODELS_BY_ID.get(model_id)
             if model:
-                _remove(os.path.join(self.root, "models", model["file"]))
+                path = os.path.join(self.root, "models", model["file"])
+                _remove(path)
+                if os.path.exists(path):
+                    raise BuiltinAIError(f"{model['model']} is still in use by another program, so it wasn't deleted. "
+                                         "Restart the PC Frivo runs on, then remove it again.")
             return
-        shutil.rmtree(self.root, ignore_errors=True)
         with self._job_lock:
             self._job = {"state": "idle"}
+        if not _rmtree(self.root):
+            raise BuiltinAIError(f"Some of the built-in AI's files are still in use, so {self.root} wasn't fully "
+                                 "deleted. Restart the PC Frivo runs on, then remove it again.")
 
     # ---------------------------------------------------------------- running
 
@@ -377,6 +406,7 @@ class BuiltinAI:
                 self._last_used = time.time()
                 return self._port
             self._stop_locked()
+            self.kill_strays()   # NEW (1.6.1)
             port = _free_port()
             exe = self.engine_path()
             args = [exe, "-m", self.model_path(model_id), "--host", "127.0.0.1", "--port", str(port),
@@ -399,6 +429,7 @@ class BuiltinAI:
                 self._log_file = None
                 raise BuiltinAIError(f"The built-in AI couldn't start ({e}). If your antivirus blocked it, "
                                      f"allow {exe}.")
+            self._attach_to_job(self._proc)   # NEW (1.6.1): it dies with Frivo
             self._port = port
             self._model_id = model_id
             self._last_used = time.time()
@@ -445,6 +476,67 @@ class BuiltinAI:
     def stop(self):
         with self._lock:
             self._stop_locked()
+
+    # NEW (1.6.1) ------------------------------------------------- strays
+
+    def kill_strays(self):
+        """Stops any llama-server running from this folder that isn't the
+        one Frivo is using now: left behind when Frivo was closed, crashed
+        or was stopped by an update. Those keep the files open, so they
+        couldn't be deleted or replaced. Returns how many were stopped."""
+        mine = self._proc.pid if self._proc is not None and self._proc.poll() is None else None
+        stopped = 0
+        for pid, path in _engine_processes():
+            if pid == mine or not _inside(path, self.root):
+                continue
+            if _kill(pid):
+                stopped += 1
+        if stopped:
+            self.log(f"Built-in AI: stopped {stopped} engine(s) left running from before")
+            time.sleep(0.5)   # Windows lets go of the files a moment later
+        return stopped
+
+    def _attach_to_job(self, proc):
+        """Windows: puts the engine in a job that's closed when Frivo's
+        process ends, however it ends, so the engine never outlives it."""
+        if sys.platform != "win32":
+            return
+        try:
+            import ctypes
+            from ctypes import wintypes
+            k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+            if self._job_object is None:
+                k32.CreateJobObjectW.restype = wintypes.HANDLE
+                job = k32.CreateJobObjectW(None, None)
+                if not job:
+                    return
+
+                class BASIC(ctypes.Structure):
+                    _fields_ = [("PerProcessUserTimeLimit", ctypes.c_int64), ("PerJobUserTimeLimit", ctypes.c_int64),
+                                ("LimitFlags", wintypes.DWORD), ("MinimumWorkingSetSize", ctypes.c_size_t),
+                                ("MaximumWorkingSetSize", ctypes.c_size_t), ("ActiveProcessLimit", wintypes.DWORD),
+                                ("Affinity", ctypes.c_size_t), ("PriorityClass", wintypes.DWORD),
+                                ("SchedulingClass", wintypes.DWORD)]
+
+                class IO(ctypes.Structure):
+                    _fields_ = [(n, ctypes.c_uint64) for n in ("ReadOperationCount", "WriteOperationCount",
+                                                               "OtherOperationCount", "ReadTransferCount",
+                                                               "WriteTransferCount", "OtherTransferCount")]
+
+                class EXTENDED(ctypes.Structure):
+                    _fields_ = [("BasicLimitInformation", BASIC), ("IoInfo", IO),
+                                ("ProcessMemoryLimit", ctypes.c_size_t), ("JobMemoryLimit", ctypes.c_size_t),
+                                ("PeakProcessMemoryUsed", ctypes.c_size_t), ("PeakJobMemoryUsed", ctypes.c_size_t)]
+
+                info = EXTENDED()
+                info.BasicLimitInformation.LimitFlags = 0x2000   # JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+                if not k32.SetInformationJobObject(wintypes.HANDLE(job), 9, ctypes.byref(info), ctypes.sizeof(info)):
+                    k32.CloseHandle(wintypes.HANDLE(job))
+                    return
+                self._job_object = job   # kept open for as long as Frivo runs
+            k32.AssignProcessToJobObject(wintypes.HANDLE(self._job_object), wintypes.HANDLE(int(proc._handle)))
+        except Exception as e:
+            self.log(f"Built-in AI: couldn't tie the engine to Frivo ({e!r})")
 
     def _stop_locked(self):
         proc, self._proc = self._proc, None
@@ -511,6 +603,111 @@ def _remove(path):
         os.remove(path)
     except OSError:
         pass
+
+
+def _rmtree(path, tries=6):
+    """NEW (1.6.1): deletes a folder, trying again for a few seconds while
+    Windows lets go of files. True when it's gone."""
+    for attempt in range(tries):
+        shutil.rmtree(path, ignore_errors=True)
+        if not os.path.exists(path):
+            return True
+        time.sleep(0.5)
+    return not os.path.exists(path)
+
+
+def _inside(path, folder):
+    try:
+        path = os.path.normcase(os.path.realpath(path))
+        folder = os.path.normcase(os.path.realpath(folder))
+    except (OSError, ValueError):
+        return False
+    return path.startswith(folder + os.sep)
+
+
+def _engine_processes():
+    """NEW (1.6.1): (pid, executable path) of every running llama-server."""
+    found = []
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            from ctypes import wintypes
+            k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+
+            class ENTRY(ctypes.Structure):
+                _fields_ = [("dwSize", wintypes.DWORD), ("cntUsage", wintypes.DWORD),
+                            ("th32ProcessID", wintypes.DWORD), ("th32DefaultHeapID", ctypes.c_size_t),
+                            ("th32ModuleID", wintypes.DWORD), ("cntThreads", wintypes.DWORD),
+                            ("th32ParentProcessID", wintypes.DWORD), ("pcPriClassBase", ctypes.c_long),
+                            ("dwFlags", wintypes.DWORD), ("szExeFile", ctypes.c_wchar * 260)]
+
+            k32.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
+            k32.OpenProcess.restype = wintypes.HANDLE
+            snap = k32.CreateToolhelp32Snapshot(0x2, 0)   # TH32CS_SNAPPROCESS
+            if not snap or snap == wintypes.HANDLE(-1).value:
+                return found
+            try:
+                entry = ENTRY()
+                entry.dwSize = ctypes.sizeof(ENTRY)
+                ok = k32.Process32FirstW(wintypes.HANDLE(snap), ctypes.byref(entry))
+                while ok:
+                    if entry.szExeFile.lower() == ENGINE_EXE.lower():
+                        pid = int(entry.th32ProcessID)
+                        handle = k32.OpenProcess(0x1000, False, pid)   # PROCESS_QUERY_LIMITED_INFORMATION
+                        if handle:
+                            try:
+                                buf = ctypes.create_unicode_buffer(1024)
+                                size = wintypes.DWORD(len(buf))
+                                if k32.QueryFullProcessImageNameW(wintypes.HANDLE(handle), 0, buf, ctypes.byref(size)):
+                                    found.append((pid, buf.value))
+                            finally:
+                                k32.CloseHandle(wintypes.HANDLE(handle))
+                    ok = k32.Process32NextW(wintypes.HANDLE(snap), ctypes.byref(entry))
+            finally:
+                k32.CloseHandle(wintypes.HANDLE(snap))
+        except Exception:
+            pass
+        return found
+    try:
+        for name in os.listdir("/proc"):
+            if not name.isdigit():
+                continue
+            try:
+                exe = os.readlink(f"/proc/{name}/exe")
+            except OSError:
+                continue
+            if os.path.basename(exe).replace(" (deleted)", "") == ENGINE_EXE:
+                found.append((int(name), exe.replace(" (deleted)", "")))
+    except OSError:
+        pass
+    return found
+
+
+def _kill(pid):
+    """Stops one process. True if it's gone."""
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            from ctypes import wintypes
+            k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+            k32.OpenProcess.restype = wintypes.HANDLE
+            handle = k32.OpenProcess(0x0001 | 0x00100000, False, pid)   # TERMINATE | SYNCHRONIZE
+            if not handle:
+                return False
+            try:
+                k32.TerminateProcess(wintypes.HANDLE(handle), 1)
+                k32.WaitForSingleObject(wintypes.HANDLE(handle), 5000)
+                return True
+            finally:
+                k32.CloseHandle(wintypes.HANDLE(handle))
+        except Exception:
+            return False
+    try:
+        import signal
+        os.kill(pid, signal.SIGKILL)
+        return True
+    except OSError:
+        return False
 
 
 def _free_port():

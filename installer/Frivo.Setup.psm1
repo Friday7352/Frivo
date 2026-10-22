@@ -653,6 +653,46 @@ function Reset-FrivoVoicePermissions {
     }
 }
 
+function Stop-FrivoBuiltinAI {
+    <#
+        NEW (1.6.1): stops the built-in AI's engine (llama-server.exe) if it's
+        running. It runs from Frivo's data folder, not the program folder, so
+        stopping Frivo's Python alone could leave it behind, holding its
+        files open: they then couldn't be deleted or downloaded again.
+        Only an engine inside a Frivo builtin_ai folder is touched. Returns
+        how many were stopped. Never throws.
+    #>
+    param([string[]] $Folders = @())
+    $stopped = 0
+    # CHANGED (1.6.1): and the folder picked in Settings > Storage, read from
+    # config.json in any of these folders.
+    foreach ($folder in @($Folders)) {
+        try {
+            $config = Join-Path $folder 'config.json'
+            if ($folder -and (Test-Path -LiteralPath $config)) {
+                $picked = [string] ((Get-Content -LiteralPath $config -Raw -ErrorAction Stop | ConvertFrom-Json).storage_builtin_ai)
+                if ($picked -and [System.IO.Path]::IsPathRooted($picked)) { $Folders += $picked }
+            }
+        } catch { }
+    }
+    try {
+        Get-CimInstance Win32_Process -Filter "Name = 'llama-server.exe'" -ErrorAction SilentlyContinue |
+            Where-Object {
+                $path = [string] $_.ExecutablePath
+                if (-not $path) { return $false }
+                foreach ($folder in $Folders) {
+                    if ($folder -and (Test-PathWithinDirectory -Path $path -Directory (Join-Path $folder 'builtin_ai'))) { return $true }
+                }
+                return ($path -match '\\Frivo\\builtin_ai\\engine-[^\\]+\\')
+            } |
+            ForEach-Object {
+                try { Stop-Process -Id $_.ProcessId -Force -ErrorAction Stop; $stopped++ } catch { }
+            }
+        if ($stopped) { Start-Sleep -Milliseconds 800 }   # Windows lets go of the files a moment later
+    } catch { }
+    return $stopped
+}
+
 function Sync-FrivoVoices {
     <#
         NEW (1.5.0): gets Frivo's free voices by running voice_pack.py with
@@ -897,5 +937,6 @@ Export-ModuleMember -Function `
     Update-PathFromRegistry, New-Venv, Sync-VenvDependencies, Get-SetupLogPath,
     Sync-FrivoVoices,
     Reset-FrivoVoicePermissions,
+    Stop-FrivoBuiltinAI,
     Get-LocalHostname, Get-HostsFilePath, Add-FrivoHostsEntry, Remove-FrivoHostsEntry,
     Install-FrivoRootCertificate, Remove-FrivoRootCertificate, Get-LauncherShim, Get-WScriptPath

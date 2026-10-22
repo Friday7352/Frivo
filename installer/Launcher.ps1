@@ -229,6 +229,8 @@ function Stop-Server {
             Where-Object { $_.ExecutablePath -and (Test-PathWithinDirectory -Path $_.ExecutablePath -Directory $InstallDir) } |
             ForEach-Object { try { Stop-Process -Id $_.ProcessId -Force -ErrorAction Stop } catch { } }
     } catch { }
+    # NEW (1.6.1): and the built-in AI's engine, if it outlived Frivo.
+    [void] (Stop-FrivoBuiltinAI -Folders @($DataDir, $InstallDir))
     $script:serverProc = $null
     $script:state = 'stopped'
 }

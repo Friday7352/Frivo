@@ -772,6 +772,10 @@
             <button type="button" class="settings-nav-btn" data-settings-section="providers">
               <svg class="icon-16"><use href="#i-server"/></svg>Providers
             </button>
+            <!-- NEW (1.6.1) -->
+            <button type="button" class="settings-nav-btn" data-settings-section="storage">
+              <svg class="icon-16"><use href="#i-db"/></svg>Storage
+            </button>
             <span class="rail-spacer"></span>
             <button type="button" class="settings-nav-btn" data-settings-section="about">
               <svg class="icon-16"><use href="#i-download"/></svg>Updates
@@ -1285,6 +1289,8 @@
                       <button type="button" class="btn" id="builtinGetBtn">Download and use</button>
                       <button type="button" class="btn-ghost btn-sm is-hidden" id="builtinCancelBtn">Cancel</button>
                       <button type="button" class="btn-ghost btn-sm is-hidden" id="builtinTestBtn">Test</button>
+                      <!-- NEW (1.6.1) -->
+                      <button type="button" class="btn-ghost btn-sm is-hidden" id="builtinAgainBtn" title="Deletes the engine and this model and downloads them again">Download again</button>
                     </div>
                   </div>
                   <div class="srow">
@@ -1455,6 +1461,28 @@
                   <div class="om-head"><span class="om-head-label">Suggestions</span><span class="om-muted" id="omCardNote"></span></div>
                   <div class="om-suggest" id="omSuggest"><span class="om-muted">Loading suggestions…</span></div>
                 </div>
+              </section>
+
+              <!-- NEW (1.6.1): where the big things are kept -->
+              <section class="settings-section" data-settings-section="storage" id="storageSection">
+                <h3 class="settings-section-title">Storage</h3>
+                <p class="settings-section-sub">Where Frivo keeps its big files, on the PC Frivo runs on (not the one you're browsing from). Pick a bigger drive for any of them; Frivo moves what's already there. Settings, profiles and keys stay in Frivo's own folder.</p>
+                <div class="settings-card st-list" id="storageList"><p class="st-empty">Looking…</p></div>
+                <div class="st-job is-hidden" id="storageJob" aria-live="polite">
+                  <div class="bai-progress-line"><span id="storageJobText">Moving…</span><span id="storageJobPct"></span></div>
+                  <div class="om-progress"><span id="storageJobBar" style="width:0%"></span></div>
+                </div>
+                <p class="bai-status" id="storageStatus" aria-live="polite"></p>
+                <details class="backup-help">
+                  <summary>And Ollama's models?</summary>
+                  <p>Ollama keeps its own models, on the PC it runs on. To put them on another drive, on that PC:</p>
+                  <ol>
+                    <li>Quit Ollama (right-click its icon by the clock, then Quit).</li>
+                    <li>Move the folder <code>%USERPROFILE%\.ollama\models</code> to the new place, for example <code>D:\Ollama\models</code>.</li>
+                    <li>In PowerShell: <code>setx OLLAMA_MODELS "D:\Ollama\models"</code></li>
+                    <li>Start Ollama again. Models you download from Frivo go there too.</li>
+                  </ol>
+                </details>
               </section>
 
               <!-- Updates & about -->
@@ -1820,6 +1848,38 @@
                  accept=".onnx,.json,.zip,.gz,.tgz,.bz2,.tbz2,.tar,application/zip,application/gzip,application/x-bzip2,application/json">
         </span>
       </p>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       NEW (1.6.1): Pick a folder on the PC Frivo runs on (Storage)
+       ============================================================ -->
+  <div id="folderPop" class="overlay voice-overlay vlib-overlay is-hidden">
+    <div class="voice-dialog st-dialog" role="dialog" aria-modal="true" aria-labelledby="folderTitle">
+      <header class="voice-dialog-head">
+        <div class="vlib-head-text">
+          <h2 class="voice-dialog-title" id="folderTitle">Pick a folder</h2>
+          <p class="vlib-sub" id="folderSub">On the PC Frivo runs on.</p>
+        </div>
+        <button id="folderCloseBtn" class="voice-close" type="button" aria-label="Close">
+          <svg class="icon-18"><use href="#i-close"/></svg>
+        </button>
+      </header>
+      <div class="st-pathbar">
+        <button type="button" class="btn-ghost btn-sm" id="folderUpBtn" title="Up one folder">Up</button>
+        <input type="text" id="folderPath" class="st-path" spellcheck="false" autocomplete="off" aria-label="Folder">
+        <button type="button" class="btn-ghost btn-sm" id="folderGoBtn">Go</button>
+      </div>
+      <div class="st-drives" id="folderDrives"></div>
+      <div class="st-folders" id="folderList"></div>
+      <div class="st-newrow">
+        <input type="text" id="folderNewName" placeholder="New folder name" aria-label="New folder name" autocomplete="off">
+        <button type="button" class="btn-ghost btn-sm" id="folderNewBtn">Make folder</button>
+      </div>
+      <footer class="st-foot">
+        <span class="st-foot-note" id="folderNote"></span>
+        <button type="button" class="btn" id="folderChooseBtn">Use this folder</button>
+      </footer>
     </div>
   </div>
 
