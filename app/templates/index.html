@@ -346,10 +346,15 @@
           </section>
 
           <div class="composer-wrap">
+          <div class="composer-panel-card">   <!-- NEW (1.6.1): the panel -->
 
             <!-- The session strip: what used to be the sidebar, as chips.
                  Each one opens exactly what it names. -->
+            <!-- CHANGED (1.6.1): one panel: who's speaking on the left, how
+                 replies are made and heard on the right, the box, and the
+                 switches under it. -->
             <div class="session-strip">
+              <div class="strip-group strip-group--who">
               <div class="voice-picker" id="voicePicker">
                 <button type="button" class="chip voice-trigger" id="voiceTrigger"
                         aria-haspopup="listbox" aria-expanded="false"
@@ -359,6 +364,7 @@
                     <span class="voice-trigger-name" id="voiceTriggerName">Loading voices…</span>
                     <span class="voice-trigger-tags" id="voiceTriggerTags"></span>
                   </span>
+                  <svg class="icon-14 chip-caret" aria-hidden="true"><use href="#i-chevron"/></svg>
                 </button>
               </div>
 
@@ -370,6 +376,7 @@
                   <span class="voice-trigger-text">
                     <span class="voice-trigger-name" id="languageTriggerName">English</span>
                   </span>
+                  <svg class="icon-14 chip-caret" aria-hidden="true"><use href="#i-chevron"/></svg>
                 </button>
                 <!-- Still the store for the selection: fillLanguages() builds
                      its option groups and everything else reads .value from it. -->
@@ -377,6 +384,8 @@
                 <span class="side-row-sub is-hidden" id="languageNote">Replies and speech</span>
               </div>
               <button id="languageSuggestBtn" class="chip chip--suggest is-hidden" type="button"></button>
+              </div>
+              <div class="strip-group strip-group--how">
 
               <!-- NEW (2.0): the response style, as a chip. Opens the profile
                    editor (a profile's style) or the Replies settings. -->
@@ -392,6 +401,7 @@
                         aria-expanded="false" aria-controls="aiPop" title="Which AI model writes replies">
                   <svg class="icon-14" aria-hidden="true"><use href="#i-chip"/></svg>
                   <span id="aiChipText">Fast</span>
+                  <svg class="icon-14 chip-caret" aria-hidden="true"><use href="#i-chevron"/></svg>
                 </button>
                 <div id="aiPop" class="popover popover--osc popover--ai is-hidden" role="dialog" aria-label="AI model">
                   <div class="osc-pop-head">
@@ -459,6 +469,7 @@
                         aria-expanded="false" aria-controls="volumePop" title="Output volume">
                   <svg class="icon-14" aria-hidden="true"><use href="#i-speaker"/></svg>
                   <span id="masterVolumeValue">100%</span>
+                  <svg class="icon-14 chip-caret" aria-hidden="true"><use href="#i-chevron"/></svg>
                 </button>
                 <div id="volumePop" class="popover popover--narrow is-hidden" role="dialog" aria-label="Volume">
                   <div class="volume-row">
@@ -501,6 +512,7 @@
                     <span class="switch"><input type="checkbox" id="oscQuickTyping"><span class="switch-track" aria-hidden="true"></span></span>
                   </label>
                 </div>
+              </div>
               </div>
             </div>
 
@@ -629,9 +641,7 @@
             <div class="composer-under" id="composerUnder">
               <label class="switch under-toggle" title="Send the message automatically once you stop talking">
                 <input type="checkbox" id="autoSendToggle">
-                <span class="switch-track under-toggle-track" aria-hidden="true">
-                  <svg class="icon-14"><use href="#i-bolt"/></svg>
-                </span>
+                <span class="switch-track under-toggle-track" aria-hidden="true"></span>
                 <span class="switch-label under-toggle-label">Auto-send</span>
               </label>
               <!-- Speak and Chatbox: the two switches that decide what a
@@ -640,17 +650,13 @@
                 <label class="switch under-toggle" id="speakSwitch"
                        title="Speak the reply. Off = text only, costs nothing.">
                   <input type="checkbox" id="speakToggle" checked>
-                  <span class="switch-track under-toggle-track" aria-hidden="true">
-                    <svg class="icon-14"><use href="#i-speaker"/></svg>
-                  </span>
+                  <span class="switch-track under-toggle-track" aria-hidden="true"></span>
                   <span class="switch-label under-toggle-label">Speak</span>
                 </label>
                 <label class="switch under-toggle" id="oscSwitch"
                        title="Show the reply in your VRChat chatbox as it plays">
                   <input type="checkbox" id="oscToggle">
-                  <span class="switch-track under-toggle-track" aria-hidden="true">
-                    <svg class="icon-14"><use href="#i-chat"/></svg>
-                  </span>
+                  <span class="switch-track under-toggle-track" aria-hidden="true"></span>
                   <span class="switch-label under-toggle-label">Chatbox</span>
                 </label>
               </span>
@@ -662,6 +668,7 @@
               </span>
               <p id="status" class="status composer-status" role="status"></p>
             </div>
+          </div>
           </div>
         </main>
 

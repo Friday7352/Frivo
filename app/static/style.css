@@ -5072,3 +5072,151 @@ html.motion-ready .stage { transition: transform var(--dur-smooth) var(--spring-
 .rich-chip-menu button.is-active { background: var(--accent-soft); }
 .rich-chip-menu button.is-custom { font-family: var(--font-body); color: var(--ink-dim); }
 .rich-chip-menu-tag { font-family: var(--font-mono); color: var(--accent); }
+
+
+/* ============================================================
+   NEW (1.6.1): the message panel. One card: who's speaking on the left
+   and how replies are made and heard on the right (each a group with thin
+   dividers), the box, and the switches under it.
+   ============================================================ */
+.composer-wrap > .session-strip,
+.composer-wrap > .composer,
+.composer-wrap > .composer-under { position: relative; }
+.composer-panel-card {
+  border: 1px solid var(--rule);
+  border-radius: 16px;
+  background: var(--surface);
+  padding: 8px;
+}
+.session-strip {
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 0 8px;
+}
+.strip-group {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  min-width: 0;
+  padding: 3px;
+  border: 1px solid var(--rule-soft);
+  border-radius: 12px;
+  background: var(--surface-2);
+}
+.strip-group--who { flex: 0 1 auto; }
+.strip-group > .is-hidden { display: none !important; }
+/* A thin line between neighbours that are showing. */
+.strip-group > :not(.is-hidden) ~ :not(.is-hidden) { position: relative; margin-left: 9px; }
+.strip-group > :not(.is-hidden) ~ :not(.is-hidden)::before {
+  content: "";
+  position: absolute;
+  left: -5px;
+  top: 7px;
+  bottom: 7px;
+  width: 1px;
+  background: var(--rule);
+}
+.session-strip .chip {
+  height: 32px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 9px;
+  color: var(--ink-dim);
+  gap: 8px;
+}
+.session-strip .chip .voice-trigger-name, #aiChipText { color: var(--ink); font-weight: 600; }
+.session-strip .chip svg { color: var(--ink-faint); }
+.chip-caret { rotate: 90deg; width: 12px; height: 12px; margin-left: -2px; opacity: 0.8; }
+.session-strip .chip:hover .chip-caret, .session-strip .chip[aria-expanded="true"] .chip-caret { color: var(--ink); }
+.session-strip .chip[aria-expanded="true"] .chip-caret { rotate: -90deg; }
+.session-strip .chip.voice-trigger { padding: 0 10px; }
+
+/* The box. */
+.composer-wrap .composer {
+  min-height: 56px;
+  padding: 8px 8px 8px 18px;
+  border-radius: 12px;
+  background: var(--bg);
+  border-color: var(--rule-soft);
+}
+.composer-wrap .composer .btn-send { width: 44px; height: 40px; border-radius: 11px; }
+.composer-tag-btn { color: var(--accent); }
+
+/* The switches under it: real switches with their names, divided. */
+.composer-under {
+  margin: 8px 0 0;
+  padding: 8px 6px 2px;
+  border-top: 1px solid var(--rule-soft);
+  gap: 4px 0;
+}
+.composer-under > :not(.is-hidden):not(.composer-status) ~ :not(.is-hidden):not(.composer-status),
+.composer-under .composer-toggles > * + * { position: relative; margin-left: 17px; }
+.composer-under > :not(.is-hidden):not(.composer-status) ~ :not(.is-hidden):not(.composer-status)::before,
+.composer-under .composer-toggles > * + *::before {
+  content: "";
+  position: absolute;
+  left: -9px;
+  top: 6px;
+  bottom: 6px;
+  width: 1px;
+  background: var(--rule);
+}
+.under-toggle, .under-btn { height: 30px; padding: 0 6px; gap: 10px; font-size: var(--text-footnote); color: var(--ink-dim); }
+.under-toggle:hover, .under-btn:hover { background: transparent; color: var(--ink); }
+.under-toggle .under-toggle-track {
+  position: relative;
+  display: block;
+  width: 34px;
+  height: 20px;
+  border-radius: 999px;
+  background: var(--fill-strong);
+  transition: background var(--dur) var(--ease);
+}
+.under-toggle .under-toggle-track::after {
+  content: "";
+  display: block;
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--ink-faint);
+  transition: transform var(--dur) var(--spring-snappy, var(--ease)), background var(--dur) var(--ease);
+}
+.under-toggle input:checked ~ .under-toggle-track { background: var(--accent); }
+.under-toggle input:checked ~ .under-toggle-track::after { transform: translateX(14px); background: #fff; }
+.under-toggle:has(input:checked) { color: var(--ink); font-weight: 500; }
+.under-toggle:has(input:checked) .under-toggle-label::after { margin-left: 8px; width: 6px; height: 6px; }
+.under-toggle.is-paused .under-toggle-track { opacity: 0.5; }
+.under-tags .under-btn { color: var(--accent); font-weight: 600; gap: 8px; }
+.under-tags .under-btn:hover { background: transparent; color: color-mix(in srgb, var(--accent) 80%, #fff); }
+.composer-under .composer-status { font-size: var(--text-caption); }
+@media (max-width: 760px) {
+  .composer-panel-card { padding: 6px; border-radius: 14px; }
+  .composer-under > :not(.is-hidden):not(.composer-status) ~ :not(.is-hidden):not(.composer-status),
+  .composer-under .composer-toggles > * + * { margin-left: 13px; }
+  .composer-under > :not(.is-hidden):not(.composer-status) ~ :not(.is-hidden):not(.composer-status)::before,
+  .composer-under .composer-toggles > * + *::before { left: -7px; }
+  .under-toggle, .under-btn { gap: 7px; font-size: var(--text-caption); }
+}
+
+@media (max-width: 760px) {
+  /* On a phone the two groups stack, and each wraps rather than scrolls
+     (a scrolling row would cut off the chips' popovers). */
+  .session-strip { flex-wrap: wrap; overflow: visible; gap: 6px; }
+  .session-strip > .strip-group { flex: 1 1 100%; flex-wrap: wrap; row-gap: 2px; justify-content: flex-start; }
+  .strip-group--how { justify-content: flex-start; }
+  .session-strip .chip { height: 30px; padding: 0 8px; }
+  /* The switches: no dividers, a little space instead. */
+  .composer-under > :not(.is-hidden):not(.composer-status) ~ :not(.is-hidden):not(.composer-status),
+  .composer-under .composer-toggles > * + * { margin-left: 10px; }
+  .composer-under > :not(.is-hidden):not(.composer-status) ~ :not(.is-hidden):not(.composer-status)::before,
+  .composer-under .composer-toggles > * + *::before { display: none; }
+}
+
+/* The panel has a little more room than the conversation, so every chip
+   keeps its words. */
+@media (min-width: 761px) {
+  .composer-wrap { max-width: min(960px, 100%); }
+}

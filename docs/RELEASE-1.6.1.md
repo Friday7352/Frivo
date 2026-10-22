@@ -43,7 +43,8 @@ The launcher now follows the update itself. It closes when the update starts ins
 
 ## A cleaner message box
 
-- **Only typing in the box.** The box has the mic and Send, plus a small tag icon when the voice acts tags out. Auto-send, Speak, Chatbox and **Suggest tags** are in a row underneath, with their names; one that's on is lit, with a small dot.
+- **One panel.** The chips, the box and the switches are one card. Voice and language are grouped on the left; style, AI model, length, volume and VRChat on the right, each group with thin dividers, and the dropdowns marked with an arrow. On a phone the groups stack.
+- **Only typing in the box.** The box has the mic and Send, plus a small tag icon when the voice acts tags out. Auto-send, Speak and Chatbox are real switches in a row underneath, with their names, and **Suggest tags** sits next to them. A switch that's on also gets a small dot; status messages sit at the right end.
 - **The cursor starts at the beginning.** It no longer appears after "Say something…".
 - **Quieter chips.** The voice, language, style, length and volume chips above the box have no outlines.
 - **No more labels under replies.** "Cleaned up without AI", "Auto tags" and the like are a small dot by the reply's time. The words show in the line that appears when you point at the reply, with the details on hover.

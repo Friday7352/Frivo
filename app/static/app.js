@@ -8877,7 +8877,14 @@ function fitSessionStrip() {
     // Two steps, the gentlest first: drop " words", then the style's name.
     strip.classList.remove("is-compact", "is-compact-more");
     strip.classList.add("is-measuring");   // every chip at its natural width
-    const tooWide = () => strip.scrollWidth > strip.clientWidth + 1;
+    // CHANGED (1.6.1): measured from the chips' own widths. scrollWidth also
+    // counted a closed popover sticking out past the right-hand group.
+    const tooWide = () => {
+      const kids = Array.from(strip.children).filter((c) => c.offsetParent !== null || getComputedStyle(c).display !== "none");
+      const gap = parseFloat(getComputedStyle(strip).columnGap) || 0;
+      const need = kids.reduce((sum, c) => sum + c.getBoundingClientRect().width, 0) + gap * Math.max(0, kids.length - 1);
+      return need > strip.clientWidth + 1;
+    };
     if (tooWide()) {
       strip.classList.add("is-compact");
       if (tooWide()) strip.classList.add("is-compact-more");
