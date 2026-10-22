@@ -2729,12 +2729,13 @@ def builtin_ai_download():
     data = request.get_json(silent=True) or {}
     model_id = data.get("model") or "small"
     use = data.get("use") is not False
+    again = data.get("again") is True   # NEW (1.7.0): Download again
     try:
-        if BUILTIN_AI.engine_path() and BUILTIN_AI.model_path(model_id):
+        if BUILTIN_AI.engine_path() and BUILTIN_AI.model_path(model_id) and not again:
             _builtin_ai_ready(model_id, use)   # already here: just use it
             return jsonify({"ok": True, "ready": True})
         BUILTIN_AI.on_ready = lambda: _builtin_ai_ready(model_id, use)
-        BUILTIN_AI.start_download(model_id)
+        BUILTIN_AI.start_download(model_id, again=again)
     except BUILTIN_AI_MODULE.BuiltinAIError as e:
         return jsonify({"error": str(e)}), 400
     return jsonify({"ok": True})
@@ -2768,7 +2769,10 @@ def builtin_ai_test():
 def builtin_ai_remove(model_id=None):
     if BUILTIN_AI is None:
         return jsonify({"ok": True})
-    BUILTIN_AI.remove(model_id if model_id in ("small", "better") else None)
+    try:
+        BUILTIN_AI.remove(model_id if model_id in ("small", "better") else None)
+    except BUILTIN_AI_MODULE.BuiltinAIError as e:   # NEW (1.7.0): say so, don't claim it's gone
+        return jsonify({"error": str(e)}), 409
     # Nothing left to answer with: replies go back to OpenAI (Clean up still
     # works without AI).
     if resolve_provider("chat_provider", CHAT_PROVIDERS) == "builtin" and builtin_ai_problem():
@@ -9979,7 +9983,9 @@ def saved_export():
 BACKUP_FORMAT = 1
 BACKUP_MAX_BYTES = 2 * 1024 ** 3
 # Settings that belong to this server, not to you: kept as they are here.
-BACKUP_KEEP_HERE = {"ollama_url", "whisper_url", "_moved_to_v4", "_evora_idle_off"}
+BACKUP_KEEP_HERE = {"ollama_url", "whisper_url", "_moved_to_v4", "_evora_idle_off",
+                    # NEW (1.7.0): folders on this PC, not the one the backup came from
+                    "storage_builtin_ai", "storage_voices", "storage_saved", "storage_audio"}
 BACKUP_SECRET_KEYS = {"openai_api_key", "elevenlabs_api_key"}
 # What the page keeps in the browser that's worth carrying over.
 BACKUP_BROWSER_PREFIXES = ("voice_console_", "frivo_")
@@ -10791,6 +10797,290 @@ def serve(host, port, cert_path, key_path):
     # be killed from Task Manager.
     sys.stdout.flush()
     os._exit(0)
+
+
+# ---------------------------------------------------------------------------
+# NEW (1.7.0): where Frivo keeps its big things (Settings > Storage)
+#
+# The built-in AI, voices you add, saved replies and reply audio can each
+# live in a folder you pick on the PC Frivo runs on, say a bigger drive.
+# Frivo keeps them in a subfolder of the one you pick (builtin_ai, voices,
+# saved, audio_cache), never loose in it, so removing the built-in AI can
+# never delete anything of yours that sits beside it.
+#
+# Changing a folder moves what's there (with progress), then switches over;
+# nothing is deleted until the copy is complete. Settings, profiles and
+# keys stay in Frivo's data folder.
+# ---------------------------------------------------------------------------
+
+STORAGE_KINDS = [
+    {"id": "builtin_ai", "name": "Built-in AI", "sub": "builtin_ai",
+     "what": "The engine and the models you download: 1.3 GB (Small) or 2.7 GB (Better) each."},
+    {"id": "voices", "name": "Voices you add", "sub": "voices",
+     "what": "Voices from Browse free voices or Add a voice: about 20–120 MB each."},
+    {"id": "saved", "name": "Saved replies", "sub": "saved",
+     "what": "The replies you save, with their audio."},
+    {"id": "audio", "name": "Reply audio", "sub": "audio_cache",
+     "what": "Every spoken reply, deleted after 7 days."},
+]
+STORAGE_BY_ID = {k["id"]: k for k in STORAGE_KINDS}
+STORAGE_STATE = {"problems": {}, "job": {"state": "idle"}}
+STORAGE_LOCK = threading.Lock()
+
+
+def storage_parent(kind_id):
+    """The folder picked for this kind ("" for Frivo's data folder)."""
+    return str(CFG.get(f"storage_{kind_id}") or "").strip()
+
+
+def storage_dir(kind_id, parent=None):
+    parent = storage_parent(kind_id) if parent is None else parent
+    return os.path.join(parent or DATA_DIR, STORAGE_BY_ID[kind_id]["sub"])
+
+
+def apply_storage():
+    """Points everything at the folders picked in Settings. A folder that
+    can't be reached right now (a drive that isn't plugged in) is reported,
+    and Frivo uses its data folder for that kind until it's back; nothing
+    is moved or deleted."""
+    global AUDIO_DIR, SAVED_DIR, SAVED_INDEX, CUSTOM_VOICES_DIR, CUSTOM_VOICES_INDEX
+    problems = {}
+    resolved = {}
+    for kind in STORAGE_KINDS:
+        parent = storage_parent(kind["id"])
+        if parent and not (os.path.isdir(parent) and _dir_is_writable(parent)):
+            problems[kind["id"]] = f"{parent} can't be reached, so Frivo is using its own folder until it can."
+            parent = ""
+        resolved[kind["id"]] = storage_dir(kind["id"], parent)
+    AUDIO_DIR = resolved["audio"]
+    SAVED_DIR = resolved["saved"]
+    SAVED_INDEX = os.path.join(SAVED_DIR, "saved.json")
+    CUSTOM_VOICES_DIR = resolved["voices"]
+    CUSTOM_VOICES_INDEX = os.path.join(CUSTOM_VOICES_DIR, "voices.json")
+    if BUILTIN_AI is not None and BUILTIN_AI.root != resolved["builtin_ai"]:
+        BUILTIN_AI.stop()
+        BUILTIN_AI.root = resolved["builtin_ai"]
+    try:
+        os.makedirs(AUDIO_DIR, exist_ok=True)
+    except OSError:
+        pass
+    with STORAGE_LOCK:
+        STORAGE_STATE["problems"] = problems
+    for kind_id, problem in problems.items():
+        log_server_event(f"Storage: {problem}")
+
+
+def _current_dir(kind_id):
+    return {"builtin_ai": BUILTIN_AI.root if BUILTIN_AI is not None else storage_dir("builtin_ai"),
+            "voices": CUSTOM_VOICES_DIR, "saved": SAVED_DIR, "audio": AUDIO_DIR}[kind_id]
+
+
+def _same_or_inside(a, b):
+    a = os.path.normcase(os.path.realpath(a))
+    b = os.path.normcase(os.path.realpath(b))
+    return a == b or a.startswith(b.rstrip(os.sep) + os.sep)
+
+
+def _has_files(folder):
+    try:
+        return any(os.scandir(folder))
+    except OSError:
+        return False
+
+
+@app.route("/api/storage")
+def storage_status():
+    with STORAGE_LOCK:
+        problems = dict(STORAGE_STATE["problems"])
+        job = dict(STORAGE_STATE["job"])
+    kinds = []
+    for kind in STORAGE_KINDS:
+        current = _current_dir(kind["id"])
+        drive = {}
+        try:
+            probe = current if os.path.isdir(current) else os.path.dirname(current)
+            usage = shutil.disk_usage(probe if os.path.isdir(probe) else DATA_DIR)
+            drive = {"free": usage.free, "total": usage.total,
+                     "name": os.path.splitdrive(os.path.abspath(current))[0] or "/"}
+        except OSError:
+            pass
+        kinds.append(dict(kind, folder=current, parent=storage_parent(kind["id"]) or DATA_DIR,
+                          is_default=not storage_parent(kind["id"]),
+                          default_parent=DATA_DIR, size=_folder_bytes(current) if os.path.isdir(current) else 0,
+                          drive=drive, problem=problems.get(kind["id"], "")))
+    return jsonify({"kinds": kinds, "job": job, "data_dir": DATA_DIR, "windows": os.name == "nt"})
+
+
+@app.route("/api/storage/browse")
+def storage_browse():
+    """Folders on the PC Frivo runs on, for picking one. Folder names only;
+    no files are listed."""
+    path = (request.args.get("path") or "").strip()
+    drives = []
+    if os.name == "nt":
+        drives = [f"{letter}:\\" for letter in "ABCDEFGHIJKLMNOPQRSTUVWXYZ" if os.path.isdir(f"{letter}:\\")]
+    if not path:
+        path = DATA_DIR if not drives else ""
+    if not path:
+        return jsonify({"path": "", "parent": "", "folders": [], "drives": drives})
+    path = os.path.abspath(path)
+    if not os.path.isdir(path):
+        return jsonify({"error": "That folder doesn't exist on the PC Frivo runs on."}), 404
+    folders = []
+    try:
+        for entry in sorted(os.scandir(path), key=lambda e: e.name.lower()):
+            try:
+                if entry.is_dir() and not entry.name.startswith(("$", ".")) and entry.name not in (
+                        "System Volume Information", "Windows", "Recovery", "PerfLogs"):
+                    folders.append(entry.name)
+            except OSError:
+                continue
+    except OSError:
+        return jsonify({"error": "Frivo isn't allowed to look in that folder."}), 403
+    parent = os.path.dirname(path.rstrip("\\/")) if os.path.dirname(path.rstrip("\\/")) != path.rstrip("\\/") else ""
+    if os.name == "nt" and len(path.rstrip("\\")) == 2:   # "D:" is the top
+        parent = ""
+    free = None
+    try:
+        free = shutil.disk_usage(path).free
+    except OSError:
+        pass
+    return jsonify({"path": path, "parent": parent, "folders": folders[:500], "drives": drives,
+                    "writable": _dir_is_writable(path), "free": free})
+
+
+@app.route("/api/storage/mkdir", methods=["POST"])
+def storage_mkdir():
+    data = request.get_json(silent=True) or {}
+    parent = os.path.abspath(str(data.get("path") or ""))
+    name = str(data.get("name") or "").strip()
+    if not name or re.search(r'[<>:"/\\|?*\x00-\x1f]', name) or name in (".", ".."):
+        return jsonify({"error": "Give the folder a name without \\ / : * ? \" < > |."}), 400
+    target = os.path.join(parent, name)
+    try:
+        os.makedirs(target, exist_ok=True)
+    except OSError as e:
+        return jsonify({"error": f"Couldn't make that folder ({e.strerror or e})."}), 400
+    return jsonify({"ok": True, "path": target})
+
+
+def _copy_tree_with_progress(source, target):
+    for root, dirs, files in os.walk(source):
+        rel = os.path.relpath(root, source)
+        os.makedirs(os.path.join(target, rel), exist_ok=True)
+        for name in files:
+            src = os.path.join(root, name)
+            dst = os.path.join(target, rel, name)
+            with open(src, "rb") as fin, open(dst, "wb") as fout:
+                while True:
+                    chunk = fin.read(1 << 20)
+                    if not chunk:
+                        break
+                    fout.write(chunk)
+                    with STORAGE_LOCK:
+                        STORAGE_STATE["job"]["done"] = STORAGE_STATE["job"].get("done", 0) + len(chunk)
+            shutil.copystat(src, dst, follow_symlinks=False)
+
+
+def _storage_move(kind_id, new_parent, old_dir, new_dir, move):
+    kind = STORAGE_BY_ID[kind_id]
+    try:
+        # Nothing may be using the files while they move.
+        if kind_id == "builtin_ai" and BUILTIN_AI is not None:
+            BUILTIN_AI.stop()
+            BUILTIN_AI.kill_strays()
+        if kind_id == "voices":
+            with PIPER_LOCK:
+                for key in [k for k in PIPER_ENGINES if str(k).startswith(CUSTOM_VOICE_PREFIX)]:
+                    PIPER_ENGINES.pop(key, None)
+        copied = False
+        if move and os.path.isdir(old_dir) and _has_files(old_dir):
+            if kind_id == "saved":
+                with SAVED_LOCK:
+                    _copy_tree_with_progress(old_dir, new_dir)
+            else:
+                _copy_tree_with_progress(old_dir, new_dir)
+            copied = True
+        os.makedirs(new_dir, exist_ok=True)
+        # Switch over: from now on Frivo uses the new folder.
+        CFG[f"storage_{kind_id}"] = "" if os.path.normcase(os.path.abspath(new_parent)) == os.path.normcase(
+            os.path.abspath(DATA_DIR)) else new_parent
+        save_config(CFG)
+        apply_storage()
+        # Only now is the old copy deleted.
+        left = ""
+        if copied:
+            shutil.rmtree(old_dir, ignore_errors=True)
+            if os.path.exists(old_dir):
+                left = f" Some old files are still in {old_dir} (in use); delete them later."
+        with STORAGE_LOCK:
+            STORAGE_STATE["job"].update(state="done", message=f"{kind['name']} now in {new_dir}.{left}")
+        log_server_event(f"Storage: {kind['name']} moved to {new_dir}")
+    except Exception as e:
+        # The old folder is untouched; the half copy goes.
+        if move and os.path.isdir(new_dir) and not _same_or_inside(old_dir, new_dir):
+            shutil.rmtree(new_dir, ignore_errors=True)
+        with STORAGE_LOCK:
+            STORAGE_STATE["job"].update(state="error", message=f"Couldn't move {kind['name']}: {e}. "
+                                                              f"Nothing was changed.")
+        log_server_event(f"Storage: moving {kind_id} failed: {e!r}")
+
+
+@app.route("/api/storage", methods=["POST"])
+def storage_change():
+    """{kind, folder, mode}: mode "move" (default) brings the files along;
+    "use" switches to a folder that already has Frivo's files in it (from an
+    earlier install, say); "empty" starts fresh there and leaves the old
+    files where they are."""
+    data = request.get_json(silent=True) or {}
+    kind_id = data.get("kind")
+    if kind_id not in STORAGE_BY_ID:
+        return jsonify({"error": "Which kind of files?"}), 400
+    mode = data.get("mode") or "move"
+    if mode not in ("move", "use", "empty"):
+        return jsonify({"error": "Unknown mode."}), 400
+    folder = str(data.get("folder") or "").strip()
+    if data.get("default") is True:
+        folder = DATA_DIR
+    if not folder or not os.path.isabs(folder):
+        return jsonify({"error": "Pick a folder on the PC Frivo runs on (a full path, like D:\\Frivo)."}), 400
+    folder = os.path.abspath(folder)
+    try:
+        os.makedirs(folder, exist_ok=True)
+    except OSError as e:
+        return jsonify({"error": f"Couldn't use {folder} ({e.strerror or e})."}), 400
+    if not _dir_is_writable(folder):
+        return jsonify({"error": f"Frivo isn't allowed to write in {folder}. Pick another folder."}), 400
+    old_dir = _current_dir(kind_id)
+    new_dir = storage_dir(kind_id, folder)
+    if os.path.normcase(os.path.realpath(new_dir)) == os.path.normcase(os.path.realpath(old_dir)):
+        return jsonify({"ok": True, "unchanged": True})
+    if _same_or_inside(new_dir, old_dir) or _same_or_inside(old_dir, new_dir):
+        return jsonify({"error": "The new folder can't be inside the current one, or the other way round."}), 400
+    if mode == "move" and _has_files(new_dir):
+        return jsonify({"exists": True, "folder": new_dir,
+                        "error": f"There are already Frivo files in {new_dir}. Use them, or pick another folder."}), 409
+    size = _folder_bytes(old_dir) if mode == "move" and os.path.isdir(old_dir) else 0
+    try:
+        free = shutil.disk_usage(folder).free
+    except OSError:
+        free = None
+    if free is not None and size and free < size + 200 * 1024 * 1024:
+        return jsonify({"error": f"There isn't room: it needs {size / 1e9:.1f} GB and {free / 1e9:.1f} GB is free."}), 400
+    with STORAGE_LOCK:
+        if STORAGE_STATE["job"].get("state") == "moving":
+            return jsonify({"error": "Something is already being moved. Wait for it to finish."}), 409
+        if kind_id == "builtin_ai" and BUILTIN_AI is not None and \
+                BUILTIN_AI.status().get("job", {}).get("state") in ("checking", "engine", "model"):
+            return jsonify({"error": "The built-in AI is downloading. Move it when that's finished."}), 409
+        STORAGE_STATE["job"] = {"state": "moving", "kind": kind_id, "done": 0, "total": size, "message": "",
+                                "folder": new_dir}
+    threading.Thread(target=_storage_move, args=(kind_id, folder, old_dir, new_dir, mode == "move"),
+                     daemon=True).start()
+    return jsonify({"ok": True, "folder": new_dir})
+
+
+apply_storage()
 
 
 if __name__ == "__main__":

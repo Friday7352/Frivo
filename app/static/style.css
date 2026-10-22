@@ -2574,6 +2574,22 @@ html[data-theme="light"] .rail-theme .rail-sun { display: block; }
 }
 .turn.is-you .turn-flag { align-self: flex-end; }
 
+/* NEW (1.7.0): what happened to a reply: a small mark by the time, and a
+   word in the hover line (details on hover). Replaces the pills. */
+.bubble-note {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.75;
+  vertical-align: 1px;
+  cursor: help;
+}
+.turn-note { flex: none; color: var(--ink-dim); cursor: help; }
+.turn-note + .turn-note::before, .turn-note + :not(.turn-note)::before { content: none; }
+
 /* ============================================================
    Listening — a drawer beside the chat
    ============================================================ */
@@ -2790,6 +2806,41 @@ html[data-theme="light"] .rail-theme .rail-sun { display: block; }
 }
 .radio-row--cards .radio-pill.is-compact .radio-label { flex: none; }
 @media (max-width: 760px) { .radio-row.radio-row--cards { grid-template-columns: minmax(0, 1fr); } }
+
+/* NEW (1.7.0): Storage */
+.st-list { display: flex; flex-direction: column; }
+.st-empty { margin: 8px 0; color: var(--ink-dim); font-size: var(--text-footnote); }
+.st-row { display: flex; gap: 12px; align-items: flex-start; padding: 12px 0; border-top: 1px solid var(--rule-soft); }
+.st-row:first-child { border-top: 0; }
+.st-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.st-name { font-weight: 600; color: var(--ink); }
+.st-what { font-size: var(--text-caption); color: var(--ink-dim); }
+.st-folder { font-family: var(--font-mono); font-size: 12px; color: var(--ink); overflow-wrap: anywhere; }
+.st-meta { font-size: var(--text-caption); color: var(--ink-faint); }
+.st-problem { font-size: var(--text-caption); color: var(--warn); }
+.st-actions { flex: none; display: flex; flex-direction: column; gap: 6px; align-items: flex-end; }
+.st-job { margin: 10px 2px 0; }
+.st-job.is-hidden { display: none; }
+.st-dialog { width: min(640px, 100%); }
+.st-pathbar { display: flex; gap: 8px; padding: 0 22px 10px; }
+.st-path { flex: 1; min-width: 0; font-family: var(--font-mono); font-size: 13px; }
+.st-drives { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 22px 8px; }
+.st-drives:empty { display: none; }
+.st-drive { padding: 4px 10px; border-radius: 999px; border: 1px solid var(--rule); background: var(--fill); color: var(--ink);
+  font: inherit; font-size: var(--text-caption); cursor: pointer; }
+.st-drive:hover { border-color: var(--accent-line); }
+.st-folders { flex: 1; min-height: 160px; max-height: 46vh; overflow-y: auto; margin: 0 14px; padding: 4px; border: 1px solid var(--rule-soft); border-radius: 10px; }
+.st-folder-btn { display: flex; align-items: center; gap: 8px; width: 100%; padding: 7px 10px; border: 0; border-radius: 7px;
+  background: none; color: var(--ink); font: inherit; font-size: var(--text-subhead); text-align: left; cursor: pointer; }
+.st-folder-btn:hover { background: var(--fill); }
+.st-folder-btn::before { content: ""; width: 14px; height: 11px; border-radius: 2px; background: var(--ink-faint); opacity: 0.6; flex: none; }
+.st-folders .st-empty { padding: 8px 10px; }
+.st-newrow { display: flex; gap: 8px; padding: 10px 22px 0; }
+.st-newrow input { flex: 1; min-width: 0; }
+.st-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 22px 18px; }
+.st-foot-note { font-size: var(--text-caption); color: var(--ink-dim); min-width: 0; overflow-wrap: anywhere; }
+.st-foot-note.is-error { color: var(--alert); }
+@media (max-width: 640px) { .st-row { flex-direction: column; } .st-actions { flex-direction: row; align-items: center; } }
 
 /* NEW (1.6.0): the built-in AI */
 .bai-models { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px; margin-top: 8px; }
@@ -3453,9 +3504,7 @@ html[data-theme="light"] { --bubble-lift: 0 8px 22px rgba(15, 23, 42, 0.13), 0 0
   .session-strip > #languagePicker .chip.voice-trigger { max-width: 100%; }
   .session-strip #languageTriggerName { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
   .session-strip.is-measuring > * { flex: none !important; min-width: max-content !important; }
-  .session-strip.is-compact .chip-unit,
-  .session-strip.is-compact-more #styleChipText { display: none; }
-  .session-strip.is-compact-more #styleChip { padding: 0 8px; }
+  .session-strip.is-compact .chip-unit { display: none; }
 }
 
 /* The "Use English" suggestion pops in rather than appearing. */
@@ -4853,3 +4902,596 @@ html.motion-ready .stage { transition: transform var(--dur-smooth) var(--spring-
 .key-check-line.is-ok { color: var(--signal); }
 .key-check-line.is-bad { color: var(--alert); }
 .lamp.is-warn { background: var(--alert); box-shadow: 0 0 6px var(--alert); }
+
+
+/* ============================================================
+   NEW (1.7.0): a cleaner message box
+   ============================================================ */
+
+/* The placeholder sits behind the caret instead of before it, so the
+   caret is at the start of the box, not after "Say something...". */
+.composer.has-rich .rich-input { position: relative; }
+.rich-input.is-empty::before {
+  position: absolute;
+  left: 4px;
+  top: 8px;
+  right: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* In the box: typing, the tag icon (voices that act tags out), the mic
+   and Send. */
+.composer-icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--ink-faint);
+  cursor: pointer;
+  transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+.composer-icon:hover, .composer-icon[aria-expanded="true"] { background: var(--fill); color: var(--accent); }
+.composer-tag-btn { color: color-mix(in srgb, var(--accent) 70%, var(--ink-faint)); }
+.voice-tag-wrap.is-thinking .composer-tag-btn svg { animation: pm-breathe 1.2s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .voice-tag-wrap.is-thinking .composer-tag-btn svg { animation: none; } }
+
+/* Under the box: the switches, with their names, and Suggest. */
+.composer-under {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px 4px;
+  margin: 8px 2px 0;
+  min-height: 28px;
+}
+.composer-under .composer-toggles { display: inline-flex; gap: 4px; }
+.composer-under .composer-toggles.is-hidden { display: none; }
+.under-toggle, .under-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px 0 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink-faint);
+  font: inherit;
+  font-size: var(--text-caption);
+  cursor: pointer;
+  transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+.under-toggle:hover, .under-btn:hover { background: var(--fill); color: var(--ink); }
+.under-toggle .under-toggle-track {
+  width: auto; height: auto;
+  display: grid; place-items: center;
+  background: transparent;
+  border-radius: 0;
+  color: inherit;
+}
+.under-toggle .under-toggle-track::after { display: none; }
+.under-toggle .under-toggle-label { position: static; width: auto; height: auto; overflow: visible; clip: auto; }
+/* On: the icon and the name in the accent colour, and a small dot. */
+.under-toggle:has(input:checked) { color: var(--ink); }
+.under-toggle input:checked ~ .under-toggle-track { background: transparent; color: var(--accent); }
+/* CHANGED (1.7.0): no dot beside a switch that's on; the switch says it. */
+.under-toggle:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 1px; }
+.under-toggle.is-paused { opacity: 0.55; }
+.under-toggle.is-paused .under-toggle-track { outline: 0; }
+.under-tags.tag-split {   /* was a pill in the box */
+  height: auto; border: 0; background: transparent; color: inherit; overflow: visible; border-radius: 0;
+}
+.under-tags.is-hidden { display: none; }
+.under-tags .under-btn { color: color-mix(in srgb, var(--accent) 80%, var(--ink-dim)); }
+.under-tags .under-btn:hover { background: var(--accent-soft); color: var(--accent); }
+.under-tags.is-auto .under-btn { color: var(--accent); font-weight: 600; }
+.under-tags.is-auto .under-btn:hover { background: var(--accent-soft); }
+.under-btn.is-busy svg { animation: pm-breathe 1.2s ease-in-out infinite; }
+.composer-under .composer-status {
+  flex: 1 1 160px;
+  min-width: 0;
+  margin: 0 0 0 auto;
+  text-align: right;
+}
+
+/* The chips above the box: no outlines, just the words and their icons,
+   with a soft background where you point. */
+.session-strip { gap: 2px; margin-bottom: 8px; }
+.session-strip .chip { border-color: transparent; padding: 0 9px; border-radius: 8px; }
+.session-strip .chip:hover, .session-strip .chip[aria-expanded="true"] { background: var(--fill); border-color: transparent; }
+.session-strip .chip--suggest { border-color: transparent; }
+@media (max-width: 640px) {
+  .composer-under .composer-status { flex-basis: 100%; text-align: left; margin-left: 4px; }
+  .under-toggle .under-toggle-label { font-size: var(--text-caption2); }
+}
+
+
+/* NEW (1.7.0): the voice list, straightened. Each row: the mark, the name
+   with "language · gender" under it, the tag label in its own column, then
+   the cost, the sample and the menu, all on fixed tracks. */
+.voice-pick {
+  grid-template-columns: minmax(0, 1fr) 76px;
+  gap: 10px;
+  padding: 9px 6px 9px 8px;
+}
+.voice-name { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.voice-name-text { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.voice-sub {
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+  font-size: var(--text-caption);
+  font-weight: 400;
+  color: var(--ink-faint);
+  white-space: nowrap;
+  overflow: hidden;
+}
+.voice-sub .voice-lang {
+  padding: 0; border-radius: 0; background: none; box-shadow: none;
+  font-size: inherit; color: inherit; overflow: hidden; text-overflow: ellipsis; min-width: 0;
+}
+.voice-sub .voice-lang.is-guess { font-style: italic; box-shadow: none; }
+.voice-sub .voice-gender { font-size: inherit; color: inherit; flex: none; }
+.voice-sub .voice-lang:not(:empty) + .voice-gender:not(:empty)::before { content: "·"; margin-right: 6px; }
+.voice-row.is-current .voice-sub { color: color-mix(in srgb, var(--accent) 60%, var(--ink-faint)); }
+.voice-fit-cell { justify-self: end; display: flex; justify-content: flex-end; }
+.voice-cost { width: 44px; }
+@media (max-width: 720px) {
+  .voice-pick { grid-template-columns: minmax(0, 1fr) 70px; }
+}
+
+
+/* NEW (1.7.0): a tag's menu: type any tag, or pick a suggestion. */
+.rich-chip-menu { width: 230px; gap: 2px; }
+.rich-chip-menu-form { padding: 4px 4px 2px; }
+.rich-chip-menu-form input {
+  width: 100%;
+  height: 32px;
+  padding: 0 10px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  border-radius: 8px;
+}
+.rich-chip-menu-list { display: flex; flex-direction: column; max-height: 220px; overflow-y: auto; }
+.rich-chip-menu button.is-active { background: var(--accent-soft); }
+.rich-chip-menu button.is-custom { font-family: var(--font-body); color: var(--ink-dim); }
+.rich-chip-menu-tag { font-family: var(--font-mono); color: var(--accent); }
+
+
+/* ============================================================
+   NEW (1.7.0): the message panel. One card: who's speaking on the left
+   and how replies are made and heard on the right (each a group with thin
+   dividers), the box, and the switches under it.
+   ============================================================ */
+.composer-wrap > .session-strip,
+.composer-wrap > .composer,
+.composer-wrap > .composer-under { position: relative; }
+.composer-panel-card {
+  border: 1px solid var(--rule);
+  border-radius: 16px;
+  background: var(--surface);
+  padding: 8px;
+}
+.session-strip {
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 0 8px;
+}
+.strip-group {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  min-width: 0;
+  padding: 3px;
+  border: 1px solid var(--rule-soft);
+  border-radius: 12px;
+  background: var(--surface-2);
+}
+.strip-group--who { flex: 0 1 auto; }
+.strip-group > .is-hidden { display: none !important; }
+/* A thin line between neighbours that are showing. */
+.strip-group > :not(.is-hidden) ~ :not(.is-hidden) { position: relative; margin-left: 9px; }
+.strip-group > :not(.is-hidden) ~ :not(.is-hidden)::before {
+  content: "";
+  position: absolute;
+  left: -5px;
+  top: 7px;
+  bottom: 7px;
+  width: 1px;
+  background: var(--rule);
+}
+.session-strip .chip {
+  height: 32px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 9px;
+  color: var(--ink-dim);
+  gap: 8px;
+}
+.session-strip .chip .voice-trigger-name, #aiChipText { color: var(--ink); font-weight: 600; }
+.session-strip .chip svg { color: var(--ink-faint); }
+.chip-caret { rotate: 90deg; width: 12px; height: 12px; margin-left: -2px; opacity: 0.8; }
+.session-strip .chip:hover .chip-caret, .session-strip .chip[aria-expanded="true"] .chip-caret { color: var(--ink); }
+.session-strip .chip[aria-expanded="true"] .chip-caret { rotate: -90deg; }
+.session-strip .chip.voice-trigger { padding: 0 10px; }
+
+/* The box. */
+.composer-wrap .composer {
+  min-height: 56px;
+  padding: 8px 8px 8px 18px;
+  border-radius: 12px;
+  background: var(--bg);
+  border-color: var(--rule-soft);
+}
+.composer-wrap .composer .btn-send { width: 44px; height: 40px; border-radius: 11px; }
+.composer-tag-btn { color: var(--accent); }
+
+/* The switches under it: real switches with their names, divided. */
+.composer-under {
+  margin: 8px 0 0;
+  padding: 8px 6px 2px;
+  border-top: 1px solid var(--rule-soft);
+  gap: 4px 0;
+}
+.composer-under > :not(.is-hidden):not(.composer-status) ~ :not(.is-hidden):not(.composer-status),
+.composer-under .composer-toggles > * + * { position: relative; margin-left: 17px; }
+.composer-under > :not(.is-hidden):not(.composer-status) ~ :not(.is-hidden):not(.composer-status)::before,
+.composer-under .composer-toggles > * + *::before {
+  content: "";
+  position: absolute;
+  left: -9px;
+  top: 6px;
+  bottom: 6px;
+  width: 1px;
+  background: var(--rule);
+}
+.under-toggle, .under-btn { height: 30px; padding: 0 6px; gap: 10px; font-size: var(--text-footnote); color: var(--ink-dim); }
+.under-toggle:hover, .under-btn:hover { background: transparent; color: var(--ink); }
+.under-toggle .under-toggle-track {
+  position: relative;
+  display: block;
+  width: 34px;
+  height: 20px;
+  border-radius: 999px;
+  background: var(--fill-strong);
+  transition: background var(--dur) var(--ease);
+}
+.under-toggle .under-toggle-track::after {
+  content: "";
+  display: block;
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--ink-faint);
+  transition: transform var(--dur) var(--spring-snappy, var(--ease)), background var(--dur) var(--ease);
+}
+.under-toggle input:checked ~ .under-toggle-track { background: var(--accent); }
+.under-toggle input:checked ~ .under-toggle-track::after { transform: translateX(14px); background: #fff; }
+.under-toggle:has(input:checked) { color: var(--ink); font-weight: 500; }
+.under-toggle.is-paused .under-toggle-track { opacity: 0.5; }
+.under-tags .under-btn { color: var(--accent); font-weight: 600; gap: 8px; }
+.under-tags .under-btn:hover { background: transparent; color: color-mix(in srgb, var(--accent) 80%, #fff); }
+.composer-under .composer-status { font-size: var(--text-caption); }
+@media (max-width: 760px) {
+  .composer-panel-card { padding: 6px; border-radius: 14px; }
+  .composer-under > :not(.is-hidden):not(.composer-status) ~ :not(.is-hidden):not(.composer-status),
+  .composer-under .composer-toggles > * + * { margin-left: 13px; }
+  .composer-under > :not(.is-hidden):not(.composer-status) ~ :not(.is-hidden):not(.composer-status)::before,
+  .composer-under .composer-toggles > * + *::before { left: -7px; }
+  .under-toggle, .under-btn { gap: 7px; font-size: var(--text-caption); }
+}
+
+@media (max-width: 760px) {
+  /* On a phone the two groups stack, and each wraps rather than scrolls
+     (a scrolling row would cut off the chips' popovers). */
+  .session-strip { flex-wrap: wrap; overflow: visible; gap: 6px; }
+  .session-strip > .strip-group { flex: 1 1 100%; flex-wrap: wrap; row-gap: 2px; justify-content: flex-start; }
+  .strip-group--how { justify-content: flex-start; }
+  .session-strip .chip { height: 30px; padding: 0 8px; }
+  /* The switches: no dividers, a little space instead. */
+  .composer-under > :not(.is-hidden):not(.composer-status) ~ :not(.is-hidden):not(.composer-status),
+  .composer-under .composer-toggles > * + * { margin-left: 10px; }
+  .composer-under > :not(.is-hidden):not(.composer-status) ~ :not(.is-hidden):not(.composer-status)::before,
+  .composer-under .composer-toggles > * + *::before { display: none; }
+}
+
+/* The panel has a little more room than the conversation, so every chip
+   keeps its words. */
+@media (min-width: 761px) {
+  .composer-wrap { max-width: min(960px, 100%); }
+}
+
+/* ============================================================
+   NEW (1.7.0): the voice menu, redesigned
+   ============================================================
+   Search, one Filters menu and reload on top; All / Favorites / Free tabs
+   with sort; Recent chips; rows of name, free dot, star, play and "…",
+   with the details opening under the voice in use. */
+#voicePop .vm-search-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 8px;
+  align-items: center;
+  padding: 0 22px 6px;
+}
+#voicePop .voice-search { padding-top: 10px; padding-bottom: 10px; }
+#voicePop .voice-refresh { width: 40px; height: 40px; }
+.vm-filter-wrap, .vm-sort-wrap { position: relative; display: inline-flex; }
+.vm-tool-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 40px;
+  padding: 0 14px;
+  border: 1px solid var(--rule-soft);
+  border-radius: var(--radius);
+  background: var(--field);
+  color: var(--ink);
+  font-family: var(--font-panel);
+  font-size: var(--text-subhead);
+  cursor: pointer;
+  transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease);
+}
+.vm-tool-btn:hover { background: var(--surface-3); }
+.vm-tool-btn.is-on { border-color: var(--accent-line); }
+.vm-tool-btn .icon-16 { color: var(--ink-dim); }
+.vm-badge {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+}
+.vm-pop {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 60;
+  min-width: 260px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  animation: pop-in 150ms var(--ease);
+}
+.vm-pop.is-hidden { display: none; }
+.vm-pop-field { display: flex; flex-direction: column; gap: 5px; }
+.vm-pop-label {
+  font-size: var(--text-caption2);
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+.vm-pop-foot { display: flex; justify-content: flex-end; }
+.vm-pop-foot .btn-ghost:disabled { opacity: 0.4; cursor: default; }
+.vm-sort-menu { min-width: 200px; padding: 8px; gap: 2px; }
+.vm-sort-menu .vm-pop-label { padding: 2px 8px 6px; }
+.vm-sort-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px;
+  border: 0;
+  border-radius: var(--radius);
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--text-subhead);
+  text-align: left;
+  cursor: pointer;
+}
+.vm-sort-item:hover { background: var(--fill); }
+.vm-sort-item.is-on { color: var(--accent); font-weight: 600; }
+.vm-sort-tick { width: 14px; display: inline-grid; place-items: center; }
+
+/* The tabs */
+.vm-tabs-row {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 4px 22px 10px;
+  border-bottom: 1px solid var(--rule-soft);
+}
+.vm-tabs { display: flex; gap: 22px; }
+.vm-tab {
+  position: relative;
+  padding: 10px 2px 11px;
+  border: 0;
+  background: none;
+  color: var(--ink-dim);
+  font-family: var(--font-panel);
+  font-size: var(--text-subhead);
+  font-weight: 500;
+  cursor: pointer;
+}
+.vm-tab:hover { color: var(--ink); }
+.vm-tab.is-on { color: var(--ink); font-weight: 600; }
+.vm-tab.is-on::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+.vm-icon-btn {
+  width: 32px;
+  height: 32px;
+  margin-bottom: 4px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--ink-dim);
+  cursor: pointer;
+}
+.vm-icon-btn:hover, .vm-icon-btn[aria-expanded="true"] { background: var(--fill); color: var(--ink); }
+
+/* Recent */
+#voicePop .voice-recent { align-items: center; padding: 0 22px 10px; }
+.voice-recent-label { margin-right: 4px; font-size: var(--text-footnote); color: var(--ink-faint); }
+
+/* The rows */
+#voicePop .voice-list { margin: 0 14px; border: 0; }
+#voicePop .vm-row {
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr) 32px 32px 32px;
+  align-items: start;
+  column-gap: 4px;
+  padding: 6px 8px 6px 10px;
+  border-radius: 10px;
+  box-shadow: none;
+}
+#voicePop .vm-row + .vm-row { margin-top: 1px; }
+#voicePop .vm-row > .voice-mark { height: 34px; }
+#voicePop .vm-row > .vm-star,
+#voicePop .vm-row > .voice-preview,
+#voicePop .vm-row > .voice-preview-spacer,
+#voicePop .vm-row > .voice-menu-btn { width: 32px; height: 32px; margin-top: 1px; }
+#voicePop .vm-row:hover, #voicePop .vm-row.is-active { background: var(--fill); }
+#voicePop .vm-row.is-current {
+  background: var(--accent-soft);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+#voicePop .vm-pick {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  min-width: 0;
+  padding: 0 6px;
+  min-height: 34px;
+  justify-content: center;
+}
+.vm-line { display: flex; align-items: center; gap: 8px; min-width: 0; height: 34px; }
+#voicePop .vm-line .voice-name {
+  display: block;
+  flex: 0 1 auto;
+  min-width: 0;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#voicePop .vm-row.is-current .voice-name { color: var(--ink); font-weight: 600; }
+.vm-free-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--signal);
+}
+.vm-details { display: none; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding-bottom: 6px; }
+#voicePop .vm-row.is-current .vm-details,
+#voicePop .vm-row.is-active .vm-details { display: flex; }
+.vm-meta { font-size: var(--text-footnote); color: var(--ink-dim); }
+.vm-cost { color: var(--ink-dim); }
+.vm-cost.is-free { color: var(--signal); }
+#voicePop .vm-fit {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  font-size: var(--text-caption);
+}
+#voicePop .vm-fit .icon-12 { width: 12px; height: 12px; }
+.vm-star {
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  color: var(--ink-faint);
+  cursor: pointer;
+  transition: color var(--dur) var(--ease), background var(--dur) var(--ease);
+}
+.vm-star:hover { color: var(--ink); background: var(--fill); }
+.vm-star.is-on { color: var(--warn); }
+.vm-star svg { fill: none; }
+.vm-star.is-on svg { fill: currentColor; }
+#voicePop .voice-preview { border-radius: 50%; }
+
+/* The footer */
+#voicePop .vm-foot { padding: 12px 22px 16px; border-top: 1px solid var(--rule-soft); margin-top: 8px; }
+.vm-count { font-family: var(--font-mono); font-size: var(--text-footnote); color: var(--ink-faint); }
+#voicePop .vm-foot .voice-foot-actions { gap: 14px; flex-wrap: wrap; justify-content: flex-end; }
+.vm-foot-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 2px;
+  border: 0;
+  background: none;
+  color: var(--ink-dim);
+  font: inherit;
+  font-size: var(--text-footnote);
+  cursor: pointer;
+}
+.vm-foot-link:hover { color: var(--ink); }
+.vm-foot-link.is-hidden { display: none; }
+.vm-legend { display: inline-flex; align-items: center; gap: 6px; font-size: var(--text-footnote); color: var(--ink-faint); }
+.vm-add-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: var(--radius);
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-family: var(--font-panel);
+  font-size: var(--text-footnote);
+  font-weight: 600;
+  cursor: pointer;
+}
+.vm-add-btn:hover:not(:disabled) { filter: brightness(1.08); }
+.vm-add-btn:disabled { opacity: 0.6; cursor: default; }
+
+@media (max-width: 720px) {
+  #voicePop .vm-search-row { grid-template-columns: minmax(0, 1fr) auto auto; padding: 0 16px 6px; }
+  #voicePop .vm-tool-btn span:not(.vm-badge) { display: none; }
+  #voicePop .vm-tool-btn { padding: 0 11px; }
+  .vm-tabs-row { margin: 4px 16px 8px; }
+  #voicePop .voice-recent { padding: 0 16px 8px; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+  #voicePop .voice-recent .chip { flex: none; }
+  #voicePop .voice-list { margin: 0 8px; }
+  #voicePop .vm-foot { padding: 10px 16px 14px; }
+  #voicePop .vm-legend { display: none; }
+}
+
+/* NEW (1.7.0): the length and volume chips keep their width, so "125 words"
+   or "150%" doesn't push the chips beside them over. */
+#lengthValue, #masterVolumeValue {
+  display: inline-block;
+  font-variant-numeric: tabular-nums;
+  text-align: left;
+}
+#lengthValue { min-width: 9ch; }
+.session-strip.is-compact #lengthValue { min-width: 3ch; }
+#masterVolumeValue { min-width: 4ch; }

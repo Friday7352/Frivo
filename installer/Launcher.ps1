@@ -51,6 +51,12 @@ $IconPath     = [System.IO.Path]::Combine($InstallDir, 'static', 'Frivo.ico')
 $PythonW      = [System.IO.Path]::Combine($InstallDir, '.venv', 'Scripts', 'pythonw.exe')
 $ShimPath     = [System.IO.Path]::Combine($InstallDir, 'Frivo.vbs')
 $RunKey       = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+# NEW (1.7.0): the in-app updater's progress, which the launcher now follows
+# itself (see Watch-UpdateStatus).
+$UpdateStatusPath = [System.IO.Path]::Combine($(if ($env:ProgramData) { $env:ProgramData } else { 'C:\ProgramData' }),
+                                               'Frivo', 'Updates', 'status.json')
+$script:launcherStartedUtc = [DateTime]::UtcNow
+$script:updateHandled = @{}
 $Hostname     = Get-LocalHostname
 
 # ==================================================================
@@ -229,6 +235,8 @@ function Stop-Server {
             Where-Object { $_.ExecutablePath -and (Test-PathWithinDirectory -Path $_.ExecutablePath -Directory $InstallDir) } |
             ForEach-Object { try { Stop-Process -Id $_.ProcessId -Force -ErrorAction Stop } catch { } }
     } catch { }
+    # NEW (1.7.0): and the built-in AI's engine, if it outlived Frivo.
+    [void] (Stop-FrivoBuiltinAI -Folders @($DataDir, $InstallDir))
     $script:serverProc = $null
     $script:state = 'stopped'
 }
@@ -890,11 +898,51 @@ $form.Add_FormClosed({
     if ($script:quitting) { [System.Windows.Forms.Application]::Exit() }
 })
 
+# NEW (1.7.0): follows an in-app update itself. The update watcher asks the
+# launcher to close (Local\FrivoLauncherQuit), but when that didn't reach
+# it, the launcher stayed open saying "Stopped" after setup stopped the
+# server, and because a launcher was still running, nothing started Frivo
+# again. Now the launcher reads the updater's status.json too:
+#   installing             close, so setup can replace the files and start
+#                          a fresh Frivo afterwards
+#   done or failed, and    if the server is down, start it again here
+#   this launcher is
+#   still open
+# Only updates that started while this launcher was running count, so an
+# old status.json can't close a launcher that's just been opened.
+$script:updateTick = 0
+function Watch-UpdateStatus {
+    $script:updateTick++
+    if ($script:updateTick % 2) { return }   # every other tick: about every 2.4 s
+    try {
+        if (-not (Test-Path -LiteralPath $UpdateStatusPath -PathType Leaf)) { return }
+        $s = [System.IO.File]::ReadAllText($UpdateStatusPath) | ConvertFrom-Json
+    } catch { return }   # mid-replace; looked at again shortly
+    $id = [string] $s.id
+    if (-not $id) { return }
+    $started = [DateTime]::MinValue
+    try { $started = ([DateTime]::Parse([string] $s.started_utc)).ToUniversalTime() } catch { return }
+    if ($started -lt $script:launcherStartedUtc.AddSeconds(-5)) { return }
+    if ([DateTime]::UtcNow - $started -gt [TimeSpan]::FromMinutes(60)) { return }
+    $state = [string] $s.state
+    if ($state -eq 'installing' -and -not $script:updateHandled[$id + ':quit']) {
+        $script:updateHandled[$id + ':quit'] = $true
+        try { Add-Content -LiteralPath $LauncherLog -Value ('{0} update {1} installing: closing' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $id) } catch { }
+        [void] $quitSignal.Set()   # handled just below, the same way the watcher's request is
+    } elseif ($state -in @('done', 'failed') -and $s.restart -eq $true -and
+              $script:state -in @('stopped', 'failed') -and -not $script:updateHandled[$id + ':start']) {
+        $script:updateHandled[$id + ':start'] = $true
+        try { Add-Content -LiteralPath $LauncherLog -Value ('{0} update {1} {2}: starting the server again' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $id, $state) } catch { }
+        Start-Server
+    }
+}
+
 # Reset the Copy buttons and poll the server.
 $timer = New-Object System.Windows.Forms.Timer
 $timer.Interval = 1200
 $timer.Add_Tick({
     Update-Status
+    try { Watch-UpdateStatus } catch { }   # NEW (1.7.0)
     if ($copy1.Text -eq 'Copied') { $copy1.Text = 'Copy' }
     if ($copy2 -and $copy2.Text -eq 'Copied') { $copy2.Text = 'Copy' }
     # A second launcher was started — bring this one forward instead.

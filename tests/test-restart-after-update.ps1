@@ -80,8 +80,8 @@ function Register-ScheduledTask { param($TaskName, $Action, $Principal, $Setting
 function Start-ScheduledTask { param($TaskName) $script:started += $TaskName; & $script:onStart }
 function Unregister-ScheduledTask { param($TaskName, [switch] $Confirm, $ErrorAction) $script:removed += $TaskName }
 
-$server   = Fake 11 'pythonw.exe'   (Join-Path $target '.venv/Scripts/pythonw.exe') 'FRIVOBOX' 'Payton'
-$launcher = Fake 12 'FrivoHost.exe' (Join-Path $target 'installer/FrivoHost.exe')    'FRIVOBOX' 'Payton'
+$server   = Fake 11 'pythonw.exe'   (Join-Path $target '.venv/Scripts/pythonw.exe') 'FRIVOBOX' 'Riley'
+$launcher = Fake 12 'FrivoHost.exe' (Join-Path $target 'installer/FrivoHost.exe')    'FRIVOBOX' 'Riley'
 $system   = Fake 13 'pythonw.exe'   (Join-Path $target '.venv/Scripts/pythonw.exe') 'NT AUTHORITY' 'SYSTEM'
 $other    = Fake 14 'python.exe'    (Join-Path $elsewhere 'python.exe')             'FRIVOBOX' 'Someone'
 
@@ -89,7 +89,7 @@ try {
     Write-Host '--- who Frivo is running as ---'
     $script:processes = @($server, $launcher, $other)
     $users = Get-FrivoRunningUsers -Target $target
-    Check 'the account running Frivo, once (server and launcher are the same person)' (($users -join ',') -eq 'FRIVOBOX\Payton') ($users -join ',')
+    Check 'the account running Frivo, once (server and launcher are the same person)' (($users -join ',') -eq 'FRIVOBOX\Riley') ($users -join ',')
     Check 'not someone else''s Python from another folder' (-not ($users -contains 'FRIVOBOX\Someone'))
 
     $script:processes = @($system)
@@ -109,10 +109,10 @@ try {
     Write-Host '--- starting it again ---'
     $script:processes = @()
     $script:onStart = { $script:processes = @($server, $launcher) }   # Windows starts it
-    $ok = Start-FrivoAsUser -Target $target -User 'FRIVOBOX\Payton'
+    $ok = Start-FrivoAsUser -Target $target -User 'FRIVOBOX\Riley'
     $task = $script:tasks[-1]
     Check 'Frivo is started again' ($ok -eq $true)
-    Check 'as that user' ($task.Principal.UserId -eq 'FRIVOBOX\Payton') $task.Principal.UserId
+    Check 'as that user' ($task.Principal.UserId -eq 'FRIVOBOX\Riley') $task.Principal.UserId
     Check 'in their own session, no password (Interactive)' ([string] $task.Principal.LogonType -eq 'Interactive') $task.Principal.LogonType
     Check 'without administrator rights' ([string] $task.Principal.RunLevel -eq 'Limited') $task.Principal.RunLevel
     Check 'the way sign-in does: Frivo.vbs -Tray, through wscript' ($task.Action.Execute -match 'wscript\.exe$' -and $task.Action.Argument -match 'Frivo\.vbs" -Tray$') ($task.Action.Execute + ' ' + $task.Action.Argument)
@@ -122,13 +122,13 @@ try {
     $script:removed = @()
     $script:processes = @()
     $script:onStart = { }   # the user is not signed in: nothing comes up
-    $ok = Start-FrivoAsUser -Target $target -User 'FRIVOBOX\Payton'
+    $ok = Start-FrivoAsUser -Target $target -User 'FRIVOBOX\Riley'
     Check 'when nothing comes up, it says so instead of claiming success' ($ok -eq $false)
     Check 'and still removes the task' ($script:removed -contains 'Frivo Restart')
 
     Remove-Item -LiteralPath (Join-Path $target 'Frivo.vbs')
     $count = $script:tasks.Count
-    $ok = Start-FrivoAsUser -Target $target -User 'FRIVOBOX\Payton'
+    $ok = Start-FrivoAsUser -Target $target -User 'FRIVOBOX\Riley'
     Check 'no launcher script: nothing is registered' ($ok -eq $false -and $script:tasks.Count -eq $count)
 
     Write-Host ''

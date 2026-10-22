@@ -287,6 +287,28 @@ if real:
     check("test answers", res.status_code == 200 and res.get_json().get("text"), res.get_json())
     B.stop()
     check("stopped", not B.status()["running"])
+    # An engine left running by an earlier Frivo (closed, crashed, or stopped
+    # by an update) is stopped, so its files can be replaced or deleted.
+    import subprocess
+    stray = subprocess.Popen([B.engine_path(), "-m", B.model_path("small"), "--port", "18777", "--no-webui"],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    time.sleep(1.0)
+    check("a stray engine is found", any(pid == stray.pid for pid, _ in bai._engine_processes()))
+    check("and stopped", B.kill_strays() >= 1 and stray.wait(timeout=10) is not None)
+    # A new Frivo starting up stops strays by itself.
+    stray = subprocess.Popen([B.engine_path(), "-m", B.model_path("small"), "--port", "18778", "--no-webui"],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    time.sleep(1.0)
+    fresh = bai.BuiltinAI(os.path.dirname(B.root), lambda *a: None)
+    for _ in range(40):
+        if stray.poll() is not None:
+            break
+        time.sleep(0.25)
+    check("a new Frivo stops one left from before", stray.poll() is not None)
+    res = c.post("/api/builtin-ai/download", json={"model": "small", "again": True})
+    job = wait_job()
+    check("Download again replaces the engine and model", res.status_code == 200 and job["state"] == "done"
+          and B.engine_path() and B.model_path("small"), job)
 else:
     # The engine is a stand-in here: the reply goes through BuiltinAI.chat.
     calls = []
@@ -302,8 +324,8 @@ else:
 c.delete("/api/builtin-ai/small")
 check("model removed", not B.model_path("small"))
 check("replies go back to OpenAI when nothing's left to answer", mod.CFG["chat_provider"] == "openai", mod.CFG["chat_provider"])
-c.delete("/api/builtin-ai")
-check("everything removed", not os.path.exists(B.root))
+res = c.delete("/api/builtin-ai")
+check("everything removed", res.status_code == 200 and not os.path.exists(B.root), res.get_json())
 
 print()
 print("FAILED: %d" % len(failures) if failures else "All passed.")

@@ -107,8 +107,6 @@ const voiceTriggerName = $("voiceTriggerName");
 const voiceTriggerTags = $("voiceTriggerTags");
 const voicePop = $("voicePop");
 const voiceSearch = $("voiceSearch");
-const voiceFilters = $("voiceFilters");
-const voiceFavFilter = $("voiceFavFilter");
 const voiceLangFilter = $("voiceLangFilter");
 const voiceGenderFilter = $("voiceGenderFilter");
 const voiceTypeFilter = $("voiceTypeFilter");
@@ -1811,53 +1809,44 @@ function addTurn(who, text, opts = {}) {
   // a page at a time.
   if (opts.footer) stack.appendChild(opts.footer);
 
+  // CHANGED (1.7.0): what happened to a reply ("Cleaned up without AI",
+  // "Auto tags"...) used to be a pill under every bubble. Now it's one quiet
+  // mark by the bubble's time, and the words are in the line that appears
+  // when you point at the reply, with the details on hover.
+  const notes = [];
   if (opts.condensed) {
-    const flag = document.createElement("span");
-    flag.className = "turn-flag";
-    flag.textContent = "Shortened to fit the reply length";  // CHANGED (1.5.0)
-    stack.appendChild(flag);
+    notes.push({ text: "Shortened to fit", title: "Shortened to fit the reply length." });
   } else if (opts.repaired) {
-    const flag = document.createElement("span");
-    flag.className = "turn-flag";
-    flag.textContent = "Trimmed to last full sentence";
-    stack.appendChild(flag);
+    notes.push({ text: "Trimmed", title: "Trimmed to the last full sentence." });
   } else if (opts.ruleCleanup) {
-    // NEW (1.6.0): no AI to ask, so Frivo's rules cleaned it up.
-    const flag = document.createElement("span");
-    flag.className = "turn-flag";
-    flag.textContent = "Cleaned up without AI";
-    flag.title = "Spelling, capitals and punctuation fixed by Frivo's rules"
+    notes.push({ text: "No AI", title: "Cleaned up without AI: spelling, capitals and punctuation fixed by Frivo's rules"
       + (opts.ruleCleanupReason ? ` (${opts.ruleCleanupReason})` : "")
-      + ". The AI does the rest: misheard words and garbled sentences.";
-    stack.appendChild(flag);
+      + ". The AI does the rest: misheard words and garbled sentences." });
   } else if (opts.keptExact) {
-    // NEW (1.5.0): Echo tried to reword it, so your own words were used.
-    const flag = document.createElement("span");
-    flag.className = "turn-flag";
-    flag.textContent = "Kept to your words";
-    flag.title = "The clean-up added things you didn't say, so Frivo used your own wording instead.";
-    stack.appendChild(flag);
+    notes.push({ text: "Your words", title: "Kept to your words: the clean-up added things you didn't say, so Frivo used your own wording." });
   }
   if (!isYou && opts.tagShaped) {
-    // NEW (1.5.0): Shape words for tags changed words next to the tags.
-    const flag = document.createElement("span");
-    flag.className = "turn-flag";
-    flag.textContent = "Shaped for tags";
-    flag.title = "Clean up added voice tags and lightly adjusted the words next to them (Shape words for tags).";
-    stack.appendChild(flag);
+    notes.push({ text: "Shaped for tags", title: "Clean up added voice tags and lightly adjusted the words next to them (Shape words for tags)." });
   } else if (!isYou && opts.retaken) {
-    // NEW (1.5.0): spoken again with Retake.
-    const flag = document.createElement("span");
-    flag.className = "turn-flag";
-    flag.textContent = { same: "Said again", plain: "Said again, without tags", fresh: "Said again, different tags" }[opts.retaken] || "Said again";
-    stack.appendChild(flag);
+    notes.push({ text: { same: "Said again", plain: "Said again, no tags", fresh: "Said again, new tags" }[opts.retaken] || "Said again",
+      title: "Spoken again with Retake." });
   } else if (!isYou && opts.autoTagged) {
-    // NEW (1.5.0): Auto tags added the voice tags shown in the bubble.
-    const flag = document.createElement("span");
-    flag.className = "turn-flag";
-    flag.textContent = "Auto tags";
-    flag.title = "The AI added the voice tags, because Auto tags is on (✦ menu).";
-    stack.appendChild(flag);
+    notes.push({ text: "Auto tags", title: "The AI added the voice tags, because Auto tags is on." });
+  }
+  if (notes.length) {
+    notes.forEach((n) => {
+      const el = document.createElement("span");
+      el.className = "turn-note";
+      el.textContent = n.text;
+      el.title = n.title;
+      meta.insertBefore(el, meta.firstChild);
+    });
+    const mark = document.createElement("span");
+    mark.className = "bubble-note";
+    mark.setAttribute("role", "img");
+    mark.setAttribute("aria-label", notes.map((n) => n.title).join(" "));
+    mark.title = notes.map((n) => n.title).join("\n");
+    stamp.insertBefore(mark, stamp.firstChild);
   }
 
   // Under the bubble, in the margin — present when you look for it, out of
@@ -2815,7 +2804,9 @@ const VOICE_RECENTS_MAX = 6;
 
 let voiceQuery = "";
 
-const voiceFacets = { fav: false, language: "", gender: "", category: "" };
+// CHANGED (1.7.0): `fav` and `free` are the All / Favorites / Free tabs; the
+// rest are in the Filters menu.
+const voiceFacets = { fav: false, free: false, language: "", gender: "", category: "" };
 let voiceRows = [];          // rendered rows, in display order, for arrow keys
 let voiceActiveIndex = -1;
 let voicePreviewAudio = null;
@@ -2981,6 +2972,7 @@ function voiceHaystack(v) {
 
 function voiceMatchesFacets(v, favs) {
   if (voiceFacets.fav && !favs.has(v.voice_id)) return false;
+  if (voiceFacets.free && voiceEngine(v) === "elevenlabs") return false;   // NEW (1.7.0)
   if (
     voiceFacets.language &&
     !(v.languages || []).some((l) => l.name === voiceFacets.language)
@@ -3011,10 +3003,12 @@ function matchingVoices() {
   });
 }
 
+// CHANGED (1.7.0): only what's in the Filters menu; the tabs aren't filters.
+function activeFilterCount() {
+  return [voiceFacets.language, voiceFacets.gender, voiceFacets.category].filter(Boolean).length;
+}
 function anyFacetActive() {
-  return Boolean(
-    voiceFacets.fav || voiceFacets.language || voiceFacets.gender || voiceFacets.category
-  );
+  return activeFilterCount() > 0;
 }
 
 // Counts are of the whole library, not of what's currently showing. Live
@@ -3051,13 +3045,18 @@ function countBy(pick) {
   return [...counts.entries()].sort((a, b) => a[0].localeCompare(b[0]));
 }
 
+function voiceTab() {
+  return voiceFacets.fav ? "fav" : voiceFacets.free ? "free" : "all";
+}
+
 function renderVoiceFilters() {
-  const favCount = voiceFavorites().filter((id) => voiceById(id)).length;
-  voiceFavFilter.classList.toggle("is-on", voiceFacets.fav);
-  voiceFavFilter.disabled = !favCount;
-  voiceFavFilter.title = favCount
-    ? `${favCount} starred`
-    : "Star a voice to use this";
+  // NEW (1.7.0): the tabs, and how many filters are on.
+  const tab = voiceTab();
+  document.querySelectorAll("#voicePop .vm-tab").forEach((b) => {
+    const on = b.dataset.tab === tab;
+    b.classList.toggle("is-on", on);
+    b.setAttribute("aria-selected", String(on));
+  });
 
   voiceFacets.language = fillFacetSelect(
     voiceLangFilter,
@@ -3078,7 +3077,15 @@ function renderVoiceFilters() {
     voiceFacets.category
   );
 
-  voiceFilterClear.classList.toggle("is-hidden", !anyFacetActive());
+  const count = activeFilterCount();
+  voiceFilterClear.disabled = !count;
+  const badge = $("voiceFilterCount");
+  if (badge) {
+    badge.textContent = String(count);
+    badge.classList.toggle("is-hidden", !count);
+  }
+  const fbtn = $("voiceFilterBtn");
+  if (fbtn) fbtn.classList.toggle("is-on", count > 0);
 }
 
 function onFacetChange() {
@@ -3086,9 +3093,14 @@ function onFacetChange() {
   renderVoiceList();
 }
 
-voiceFavFilter.addEventListener("click", () => {
-  voiceFacets.fav = !voiceFacets.fav;
-  onFacetChange();
+// NEW (1.7.0): All / Favorites / Free.
+document.querySelectorAll("#voicePop .vm-tab").forEach((b) => {
+  b.addEventListener("click", () => {
+    voiceFacets.fav = b.dataset.tab === "fav";
+    voiceFacets.free = b.dataset.tab === "free";
+    onFacetChange();
+    voiceList.scrollTop = 0;
+  });
 });
 voiceLangFilter.addEventListener("change", () => {
   voiceFacets.language = voiceLangFilter.value;
@@ -3103,11 +3115,76 @@ voiceTypeFilter.addEventListener("change", () => {
   onFacetChange();
 });
 voiceFilterClear.addEventListener("click", () => {
-  voiceFacets.fav = false;
   voiceFacets.language = "";
   voiceFacets.gender = "";
   voiceFacets.category = "";
   onFacetChange();
+});
+
+// NEW (1.7.0): the Filters menu and the sort menu, under their buttons.
+function setVoicePop(pop, btn, open) {
+  if (!pop || !btn) return;
+  pop.classList.toggle("is-hidden", !open);
+  btn.setAttribute("aria-expanded", String(open));
+}
+
+function closeVoiceSubPops() {
+  const was = !$("voiceFilterPop").classList.contains("is-hidden")
+    || !$("voiceSortMenu").classList.contains("is-hidden");
+  setVoicePop($("voiceFilterPop"), $("voiceFilterBtn"), false);
+  setVoicePop($("voiceSortMenu"), $("voiceSortBtn"), false);
+  return was;
+}
+
+function renderVoiceSortMenu() {
+  const menu = $("voiceSortMenu");
+  menu.innerHTML = "";
+  const head = document.createElement("div");
+  head.className = "vm-pop-label";
+  head.textContent = "Sort by";
+  menu.appendChild(head);
+  [...voiceSort.options].filter((o) => !o.hidden).forEach((o) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.setAttribute("role", "menuitemradio");
+    const on = o.value === voiceSortMode;
+    b.setAttribute("aria-checked", String(on));
+    b.className = "vm-sort-item" + (on ? " is-on" : "");
+    const tick = document.createElement("span");
+    tick.className = "vm-sort-tick";
+    if (on) tick.appendChild(iconNode("i-check", "icon-14"));
+    b.append(tick, document.createTextNode(o.textContent));
+    b.addEventListener("click", () => {
+      voiceSort.value = o.value;
+      voiceSort.dispatchEvent(new Event("change"));
+      setVoicePop(menu, $("voiceSortBtn"), false);
+    });
+    menu.appendChild(b);
+  });
+}
+
+$("voiceFilterBtn").addEventListener("click", (e) => {
+  e.stopPropagation();
+  const pop = $("voiceFilterPop");
+  const open = pop.classList.contains("is-hidden");
+  closeVoiceSubPops();
+  closeVoiceMenu();
+  setVoicePop(pop, $("voiceFilterBtn"), open);
+});
+
+$("voiceSortBtn").addEventListener("click", (e) => {
+  e.stopPropagation();
+  const menu = $("voiceSortMenu");
+  const open = menu.classList.contains("is-hidden");
+  closeVoiceSubPops();
+  closeVoiceMenu();
+  if (open) renderVoiceSortMenu();
+  setVoicePop(menu, $("voiceSortBtn"), open);
+});
+
+document.addEventListener("click", (e) => {
+  if (e.target.closest("#voiceFilterPop, #voiceSortMenu, .pretty-select-pop")) return;
+  closeVoiceSubPops();
 });
 
 
@@ -3225,6 +3302,13 @@ function renderVoiceRecent() {
   host.innerHTML = "";
   const seen = new Set();
   const ids = [...voiceRecents(), ...voiceFavorites()].filter((id) => !seen.has(id) && seen.add(id)).slice(0, 6);
+  // NEW (1.7.0): labelled, so the chips don't read as filters.
+  if (ids.some((id) => voiceById(id))) {
+    const label = document.createElement("span");
+    label.className = "voice-recent-label";
+    label.textContent = "Recent";
+    host.appendChild(label);
+  }
   ids.forEach((id) => {
     const v = voiceById(id);
     if (!v) return;
@@ -3270,82 +3354,109 @@ const TAG_FIT_LABELS = {
   older: { label: "older", title: "A voice from before the expressive models. Tags work, but it may drift between accents with them." },
 };
 
+// NEW (1.7.0): who speaks a voice, for its details line.
+const VOICE_PROVIDER_LABELS = {
+  elevenlabs: "ElevenLabs",
+  piper: "Frivo",
+  custom: "Added by you",
+  windows: "Windows",
+};
+
+function capitalize(text) {
+  const t = String(text || "");
+  return t ? t[0].toUpperCase() + t.slice(1) : t;
+}
+
+// CHANGED (1.7.0): a row is the name, a green dot when it's free, a star,
+// a play button and the "…" menu. The rest (language, gender, who speaks
+// it, credits, how it takes tags) opens under the name on the voice in use
+// and on the row picked with the arrow keys.
 function voiceRowNode(v) {
   const isCurrent = v.voice_id === activeVoiceId();
+  const engine = voiceEngine(v);
+  const free = engine !== "elevenlabs";
+  const isFav = voiceFavorites().includes(v.voice_id);
 
   const row = document.createElement("div");
-  row.className = "voice-row";
+  row.className = "voice-row vm-row";
   row.setAttribute("role", "option");
   row.setAttribute("aria-selected", String(isCurrent));
   row.classList.toggle("is-current", isCurrent);
+  row.classList.toggle("is-free", free);
 
   const mark = document.createElement("span");
   mark.className = "voice-mark";
   mark.style.setProperty("--voice-color", voiceColor(v.voice_id));
-  // CHANGED (1.5.0): the voice in use shows its check here, so its "…"
-  // menu (Favorites and the rest) looks like every other row's.
   mark.appendChild(iconNode(isCurrent ? "i-check" : "i-wave", "icon-18"));
   if (isCurrent) mark.title = "The voice in use";
 
-  // Three fixed columns — name, language, gender — so the values line up
-  // down the list and can be compared by scanning rather than read one row
-  // at a time. Everything else about a voice is behind the row menu.
   const pick = document.createElement("button");
   pick.type = "button";
-  pick.className = "voice-pick";
+  pick.className = "voice-pick vm-pick";
 
-  const name = document.createElement("span");
-  name.className = "voice-name";
-  // NEW (1.5.0): how well it takes voice tags, from what ElevenLabs reports.
-  // The name shortens before the label does.
+  const line = document.createElement("span");
+  line.className = "vm-line";
+  const nameText = document.createElement("span");
+  nameText.className = "voice-name voice-name-text";
+  nameText.textContent = voiceShortName(v);
+  nameText.title = v.name;
+  line.appendChild(nameText);
+  if (free) {
+    const dot = document.createElement("span");
+    dot.className = "vm-free-dot";
+    dot.title = "Free: no credits";
+    dot.setAttribute("aria-label", "Free");
+    line.appendChild(dot);
+  }
+
+  const details = document.createElement("span");
+  details.className = "vm-details";
+  const meta = document.createElement("span");
+  meta.className = "vm-meta";
+  const langLabel = voiceLanguageLabel(v);
+  const parts = [
+    langLabel ? (v.language_source === "accent" ? `${langLabel} (from the accent)` : langLabel) : "",
+    capitalize(v.gender),
+    VOICE_PROVIDER_LABELS[engine] || "",
+  ].filter(Boolean);
+  meta.textContent = parts.join(" · ");
+  const cost = document.createElement("span");
+  cost.className = "vm-cost" + (free ? " is-free" : "");
+  cost.textContent = free ? "Free" : "Uses credits";
+  if (parts.length) meta.appendChild(document.createTextNode(" · "));
+  meta.appendChild(cost);
+  details.appendChild(meta);
   const fit = TAG_FIT_LABELS[v.tag_fit];
   if (fit) {
-    const text = document.createElement("span");
-    text.className = "voice-name-text";
-    text.textContent = voiceShortName(v);
     const badge = document.createElement("span");
-    badge.className = `voice-fit is-${v.tag_fit}`;
-    badge.textContent = fit.label;
+    badge.className = `voice-fit vm-fit is-${v.tag_fit}`;
     badge.title = fit.title;
-    name.classList.add("has-fit");
-    name.append(text, badge);
-  } else {
-    name.textContent = voiceShortName(v);
+    badge.append(iconNode("i-tag", "icon-12"), document.createTextNode(fit.label));
+    details.appendChild(badge);
   }
 
-  const lang = document.createElement("span");
-  lang.className = "voice-lang";
-  const langLabel = voiceLanguageLabel(v);
-  if (langLabel) {
-    // A language worked out from the accent rather than stated by the voice
-    // is marked, so a wrong guess is explicable instead of baffling.
-    if (v.language_source === "accent") lang.classList.add("is-guess");
-    lang.textContent = langLabel;
-  } else {
-    // Kept in the DOM even when empty so the gender column stays aligned
-    // with the rows above and below it.
-    lang.classList.add("is-blank");
-  }
-
-  const gender = document.createElement("span");
-  gender.className = "voice-gender";
-  gender.textContent = v.gender || "";
-
-  pick.append(name, lang, gender);
+  pick.append(line, details);
   pick.addEventListener("click", () => chooseVoice(v));
 
-  row.append(mark, pick);
+  const star = document.createElement("button");
+  star.type = "button";
+  star.className = "vm-star" + (isFav ? " is-on" : "");
+  star.setAttribute("aria-pressed", String(isFav));
+  star.setAttribute("aria-label", isFav ? `Remove ${v.name} from favorites` : `Add ${v.name} to favorites`);
+  star.title = isFav ? "Remove from favorites" : "Add to favorites";
+  star.appendChild(iconNode("i-star", "icon-16"));
+  star.addEventListener("click", (e) => {
+    e.stopPropagation();
+    toggleFavorite(v.voice_id);
+    renderVoiceFilters();
+    renderVoiceList();
+    renderVoiceRecent();
+    // The row was redrawn: keep focus on its star, so the keys still work.
+    const again = voiceRows.find((r) => r.voice.voice_id === v.voice_id);
+    if (again) again.row.querySelector(".vm-star").focus();
+  });
 
-  // CHANGED (2.0): what a reply with this voice costs.
-  const cost = document.createElement("span");
-  cost.className = "voice-cost";
-  if (voiceEngine(v) === "elevenlabs") {
-    cost.textContent = "credits";
-  } else {
-    cost.classList.add("is-free");
-    cost.textContent = "free";
-  }
-  row.appendChild(cost);
+  row.append(mark, pick, star);
 
   if (v.preview_url) {
     const play = document.createElement("button");
@@ -3353,7 +3464,7 @@ function voiceRowNode(v) {
     play.className = "voice-preview";
     const playing = voicePreviewId === v.voice_id;
     play.classList.toggle("is-playing", playing);
-    play.appendChild(iconNode(playing ? "i-stop" : "i-play", "icon-16"));
+    play.appendChild(iconNode(playing ? "i-stop" : "i-play", "icon-14"));
     play.title = "Hear a sample — costs nothing";
     play.setAttribute("aria-label", playing ? "Stop sample" : "Play sample");
     play.addEventListener("click", (e) => {
@@ -3362,31 +3473,27 @@ function voiceRowNode(v) {
     });
     row.appendChild(play);
   } else {
-    // NEW (1.5.0): a voice with no sample keeps the column, so the buttons
-    // still line up down the list.
+    // A voice with no sample keeps the column, so the buttons line up.
     const spacer = document.createElement("span");
     spacer.className = "voice-preview-spacer";
     row.appendChild(spacer);
   }
 
-  // Keep the action menu on the voice in use too. It used to be replaced by
-  // a non-interactive checkmark, which meant the selected voice could not be
-  // added to or removed from Favorites.
   const menuBtn = document.createElement("button");
   menuBtn.type = "button";
   menuBtn.className = "voice-menu-btn";
-  menuBtn.title = "Favorites, details and more";
+  menuBtn.title = "Details and more";
   menuBtn.setAttribute("aria-label", `More options for ${v.name}${isCurrent ? " (selected)" : ""}`);
-  menuBtn.appendChild(iconNode("i-dots", "icon-18"));   // CHANGED (1.5.0): the same on every row
+  menuBtn.appendChild(iconNode("i-dots", "icon-18"));
   menuBtn.addEventListener("click", (e) => {
     e.stopPropagation();
+    closeVoiceSubPops();
     openVoiceMenu(menuBtn, v);
   });
   row.appendChild(menuBtn);
 
   return row;
 }
-
 
 let voiceMenuEl = null;
 
@@ -3433,11 +3540,7 @@ function openVoiceMenu(anchor, v) {
     menu.appendChild(b);
   };
 
-  item(isFav ? "Remove from favorites" : "Add to favorites", null, () => {
-    toggleFavorite(v.voice_id);
-    renderVoiceFilters();
-    renderVoiceList();
-  });
+  // CHANGED (1.7.0): favorites are the star on the row.
   item("Voice details", "i-spark", () => showVoiceTip(anchor, v));
   // NEW (1.5.0): a voice you added can be renamed or removed.
   if (voiceEngine(v) === "custom") {
@@ -3539,19 +3642,9 @@ function voiceSections(matches) {
     return [...starts, ...ordered.filter((v) => !startIds.has(v.voice_id))];
   };
 
-  const sections = [];
-  let rest = matches;
-  if (!query && voiceSortMode === "favorites") {
-    const favs = new Set(voiceFavorites());
-    const fav = matches.filter((v) => favs.has(v.voice_id)).sort(byVoiceName);
-    if (fav.length) sections.push(["Favorites", fav]);
-    rest = matches.filter((v) => !favs.has(v.voice_id));
-  }
-  VOICE_ENGINE_GROUPS.forEach(([engine, label, note, free]) => {
-    const list = rest.filter((v) => voiceEngine(v) === engine);
-    if (list.length) sections.push([label, order(list), note, free]);
-  });
-  return sections;
+  // CHANGED (1.7.0): one list. What it costs is the green dot on the row
+  // and the Free tab, instead of a heading over each group.
+  return [[null, order(matches)]];
 }
 
 function sortVoicesFlat(matches) {
@@ -3597,6 +3690,8 @@ voiceSort.addEventListener("change", () => {
 function renderVoiceList() {
   // The rows the tooltip was anchored to are about to be destroyed.
   cancelVoiceTip();
+  const keepScroll = voiceList.scrollTop;   // NEW (1.7.0): starring a voice doesn't jump the list
+  const keepActive = voiceActiveIndex >= 0 && voiceRows[voiceActiveIndex] ? voiceRows[voiceActiveIndex].voice.voice_id : "";
   voiceList.innerHTML = "";
   voiceRows = [];
   voiceActiveIndex = -1;
@@ -3614,9 +3709,17 @@ function renderVoiceList() {
   if (!matches.length) {
     const note = document.createElement("p");
     note.className = "voice-none";
-    note.textContent = "Nothing matches that.";
+    // NEW (1.7.0): an empty tab says how to fill it.
+    note.textContent = voiceQuery.trim() || anyFacetActive()
+      ? "Nothing matches that."
+      : voiceFacets.fav
+        ? "No favorites yet. Tap the star on a voice to keep it here."
+        : voiceFacets.free
+          ? "No free voices yet. Browse free to download some."
+          : "Nothing matches that.";
     voiceList.appendChild(note);
-    voiceFoot.textContent = `0 of ${allVoices.length}`;
+    voiceFoot.textContent = `0 / ${allVoices.length}`;
+    showHiddenCategoryNote();
     return;
   }
 
@@ -3636,8 +3739,14 @@ function renderVoiceList() {
   voiceFoot.textContent =
     matches.length === allVoices.length
       ? `${allVoices.length} voices`
-      : `${matches.length} of ${allVoices.length} voices`;
+      : `${matches.length} / ${allVoices.length}`;
+  voiceFoot.title = `${matches.length} of ${allVoices.length} voices showing`;
   showHiddenCategoryNote();
+  voiceList.scrollTop = keepScroll;
+  if (keepActive) {
+    const i = voiceRows.findIndex((r) => r.voice.voice_id === keepActive);
+    if (i >= 0) { voiceRows[i].row.classList.add("is-active"); voiceActiveIndex = i; }
+  }
 }
 
 // One quiet line in the footer rather than a banner: hidden categories are
@@ -3652,8 +3761,11 @@ function showHiddenCategoryNote() {
     return;
   }
   note.classList.remove("is-hidden");
-  note.textContent = `${hidden.map(categoryLabel).join(", ")} hidden — show`;
-  note.title = "Bring these categories back into the list";
+  // CHANGED (1.7.0): one short button; what's hidden is in its tooltip.
+  const label = note.querySelector("span");
+  if (label) label.textContent = `Hidden (${hidden.length})`;
+  else note.textContent = `Hidden (${hidden.length})`;
+  note.title = `${hidden.map(categoryLabel).join(", ")} hidden. Click to show them again.`;
 }
 
 // ---- preview playback ----
@@ -3760,9 +3872,11 @@ function openVoicePop() {
   voiceQuery = "";
   voiceSearch.value = "";
   voiceFacets.fav = false;
+  voiceFacets.free = false;
   voiceFacets.language = "";
   voiceFacets.gender = "";
   voiceFacets.category = "";
+  closeVoiceSubPops();
   renderVoiceFilters();
   renderVoiceList();
 
@@ -3783,6 +3897,7 @@ function closeVoicePop() {
   // with it — they would be left floating over the page on their own.
   cancelVoiceTip();
   closeVoiceMenu();
+  closeVoiceSubPops();
 }
 
 function voicePopIsOpen() {
@@ -3815,6 +3930,8 @@ function setVoiceActiveIndex(next) {
 // so keys pressed while the search field has focus never reach the picker.
 voicePop.addEventListener("keydown", (e) => {
   if (!voicePopIsOpen()) return;
+  // NEW (1.7.0): arrows inside the Filters or sort menu belong to it.
+  if (e.key !== "Escape" && e.target.closest && e.target.closest("#voiceFilterPop, #voiceSortMenu")) return;
   if (e.key === "ArrowDown") {
     e.preventDefault();
     setVoiceActiveIndex(voiceActiveIndex + 1);
@@ -3831,6 +3948,8 @@ voicePop.addEventListener("keydown", (e) => {
     }
   } else if (e.key === "Escape") {
     e.preventDefault();
+    // NEW (1.7.0): a menu that's open closes first.
+    if (closeVoiceSubPops()) return;
     closeVoicePop();
     voiceTrigger.focus();
   }
@@ -8885,7 +9004,14 @@ function fitSessionStrip() {
     // Two steps, the gentlest first: drop " words", then the style's name.
     strip.classList.remove("is-compact", "is-compact-more");
     strip.classList.add("is-measuring");   // every chip at its natural width
-    const tooWide = () => strip.scrollWidth > strip.clientWidth + 1;
+    // CHANGED (1.7.0): measured from the chips' own widths. scrollWidth also
+    // counted a closed popover sticking out past the right-hand group.
+    const tooWide = () => {
+      const kids = Array.from(strip.children).filter((c) => c.offsetParent !== null || getComputedStyle(c).display !== "none");
+      const gap = parseFloat(getComputedStyle(strip).columnGap) || 0;
+      const need = kids.reduce((sum, c) => sum + c.getBoundingClientRect().width, 0) + gap * Math.max(0, kids.length - 1);
+      return need > strip.clientWidth + 1;
+    };
     if (tooWide()) {
       strip.classList.add("is-compact");
       if (tooWide()) strip.classList.add("is-compact-more");
@@ -9944,6 +10070,7 @@ function updateVoiceTagButton() {
   const id = activeVoiceId();
   const eleven = Boolean(id) && voiceEngine({ voice_id: id }) === "elevenlabs";
   wrap.classList.toggle("is-hidden", !eleven);
+  if ($("tagSplit")) $("tagSplit").classList.toggle("is-hidden", !eleven);   // NEW (1.7.0): Suggest, under the box
   if (!eleven) {
     const pop = $("voiceTagPop");
     if (pop) pop.classList.add("is-hidden");
@@ -10855,7 +10982,7 @@ function showAutoTagsState() {
   const label = $("tagSplitLabel");
   const main = $("voiceTagSuggestQuick");
   if (split) split.classList.toggle("is-auto", on);
-  if (label) label.textContent = on ? "Auto" : "Suggest";
+  if (label) label.textContent = on ? "Auto tags on" : "Suggest tags";   // CHANGED (1.7.0)
   if (main) main.title = on
     ? "Auto tags is on: the AI tags every message as it's spoken. Click for the options."
     : "The AI adds voice tags that fit what you've typed. Your words stay the same.";
@@ -12752,16 +12879,19 @@ function richCloseMenu() {
   if (rich.menu) { rich.menu.remove(); rich.menu = null; }
 }
 
+// CHANGED (1.7.0): a box at the top to type any tag of your own, with
+// matching tags listed as you type (the ones you use, Frivo's, yours);
+// otherwise suggestions that fit the one you clicked. Arrows choose, Enter
+// takes it, Esc closes.
 function richOpenMenu(chip) {
   richCloseMenu();
   const composer = rich.el.closest(".composer");
+  const current = chip.dataset.tag || "";
   const menu = document.createElement("div");
   menu.className = "rich-chip-menu";
-  menu.setAttribute("role", "menu");
-  const label = document.createElement("span");
-  label.className = "rich-chip-menu-label";
-  label.textContent = "Swap for";
-  menu.append(label);
+  menu.setAttribute("role", "dialog");
+  menu.setAttribute("aria-label", `Change [${current}]`);
+
   const replaceWith = (tag) => {
     const segs = richSegments();
     const seg = segs.find((s) => s.n === chip);
@@ -12777,30 +12907,101 @@ function richOpenMenu(chip) {
     richCloseMenu();
     rich.el.focus();
   };
-  (typeof tagSwaps === "function" ? tagSwaps(chip.dataset.tag) : []).forEach((t) => {
-    const b = document.createElement("button");
-    b.type = "button";
-    b.setAttribute("role", "menuitem");
-    b.textContent = t;
-    b.addEventListener("mousedown", (e) => e.preventDefault());
-    b.addEventListener("click", () => replaceWith(t));
-    menu.append(b);
-  });
+
+  const form = document.createElement("form");
+  form.className = "rich-chip-menu-form";
+  form.setAttribute("autocomplete", "off");
+  const input = document.createElement("input");
+  input.type = "text";
+  input.maxLength = 38;
+  input.placeholder = "Type any tag…";
+  input.setAttribute("aria-label", "Type a tag");
+  input.spellcheck = false;
+  form.append(input);
+  const label = document.createElement("span");
+  label.className = "rich-chip-menu-label";
+  const list = document.createElement("div");
+  list.className = "rich-chip-menu-list";
+  list.setAttribute("role", "listbox");
   const remove = document.createElement("button");
   remove.type = "button";
   remove.className = "is-remove";
-  remove.setAttribute("role", "menuitem");
-  remove.textContent = "Remove";
+  remove.textContent = "Remove this tag";
   remove.addEventListener("mousedown", (e) => e.preventDefault());
   remove.addEventListener("click", () => replaceWith(null));
-  menu.append(remove);
+  menu.append(form, label, list, remove);
+
+  const VALID = /^[A-Za-z][A-Za-z' \-]{0,37}$/;
+  const everyTag = () => Array.from(new Set([
+    ...((typeof bracketState === "object" && bracketState.likes) || []),
+    ...(typeof yourTags === "function" ? yourTags() : []),
+    ...(audioTagGroups || []).flatMap((g) => g.tags || []),
+  ]));
+  let items = [];
+  let active = 0;
+  const paint = () => {
+    list.querySelectorAll("button").forEach((b, i) => b.classList.toggle("is-active", i === active));
+  };
+  const fill = () => {
+    const q = input.value.trim().toLowerCase().replace(/^\[|\]$/g, "");
+    if (q) {
+      const matches = everyTag().filter((t) => t !== current && t.toLowerCase().includes(q))
+        .sort((a, b) => (a.toLowerCase().startsWith(q) ? 0 : 1) - (b.toLowerCase().startsWith(q) ? 0 : 1));
+      items = matches.slice(0, 6).map((t) => ({ tag: t }));
+      if (VALID.test(q) && !matches.some((t) => t.toLowerCase() === q)) items.push({ tag: q, custom: true });
+      label.textContent = !items.length ? "Letters, spaces, ' and - only"
+        : items.every((i) => i.custom) ? "Your own tag" : "Matches";
+    } else {
+      items = (typeof tagSwaps === "function" ? tagSwaps(current) : []).map((t) => ({ tag: t }));
+      label.textContent = "Swap for";
+    }
+    active = 0;
+    list.replaceChildren(...items.map((item, i) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.setAttribute("role", "option");
+      if (item.custom) {
+        b.classList.add("is-custom");
+        b.innerHTML = `Use <span class="rich-chip-menu-tag"></span>`;
+        b.querySelector("span").textContent = `[${item.tag}]`;
+      } else {
+        b.textContent = item.tag;
+      }
+      b.addEventListener("mousedown", (e) => e.preventDefault());
+      b.addEventListener("mouseenter", () => { active = i; paint(); });
+      b.addEventListener("click", () => take(item));
+      return b;
+    }));
+    paint();
+  };
+  const take = (item) => {
+    if (!item) return;
+    if (item.custom && typeof rememberYourTag === "function") rememberYourTag(item.tag);
+    replaceWith(item.tag);
+  };
+  input.addEventListener("input", fill);
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "ArrowDown") { e.preventDefault(); active = Math.min(items.length - 1, active + 1); paint(); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); active = Math.max(0, active - 1); paint(); }
+    else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); richCloseMenu(); rich.el.focus(); }
+  });
+  form.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const q = input.value.trim().replace(/^\[|\]$/g, "");
+    if (items[active]) take(items[active]);
+    else if (VALID.test(q)) take({ tag: q, custom: true });
+  });
+  fill();
+
   composer.append(menu);
   const c = chip.getBoundingClientRect();
   const box = composer.getBoundingClientRect();
-  const width = menu.offsetWidth || 180;
+  const width = menu.offsetWidth || 220;
   menu.style.left = `${Math.max(8, Math.min(c.left - box.left, box.width - width - 8))}px`;
   menu.style.bottom = `${box.bottom - c.top + 6}px`;
   rich.menu = menu;
+  // Typing goes straight into the box; the message keeps its place.
+  setTimeout(() => input.focus(), 0);
 }
 
 // ---- dragging a chip: lift, follow, magnify, settle ----
@@ -13779,6 +13980,7 @@ async function checkElevenKey(force) {
     progress.classList.toggle("is-hidden", !busy);
     cancelBtn.classList.toggle("is-hidden", !busy);
     testBtn.classList.toggle("is-hidden", !ready || busy);
+    if ($("builtinAgainBtn")) $("builtinAgainBtn").classList.toggle("is-hidden", !ready || busy);   // NEW (1.7.0)
     getBtn.classList.toggle("is-hidden", busy || (ready && info.in_use));
     getBtn.textContent = ready ? "Use the built-in AI" : `Download and use (${gb(model.size || 0)})`;
     getBtn.disabled = !info.supported;
@@ -13840,17 +14042,19 @@ async function checkElevenKey(force) {
       setTimeout(() => { btn.dataset.armed = ""; btn.textContent = "Remove"; }, 3000);
       return;
     }
-    await fetch(`/api/builtin-ai/${encodeURIComponent(btn.dataset.remove)}`, { method: "DELETE" }).catch(() => {});
-    say("Removed.");
+    // CHANGED (1.7.0): says when something couldn't be deleted.
+    const res = await fetch(`/api/builtin-ai/${encodeURIComponent(btn.dataset.remove)}`, { method: "DELETE" }).catch(() => null);
+    const data = res ? await res.json().catch(() => ({})) : {};
+    if (res && res.ok) say("Removed."); else say(data.error || "Couldn't remove it.", "error");
     if (typeof loadSettings === "function") loadSettings();
     refresh();
   });
-  getBtn.addEventListener("click", async () => {
+  async function startDownload(again) {
     say("");
     getBtn.disabled = true;
     try {
       const res = await fetch("/api/builtin-ai/download", { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ model: chosen, use: true }) });
+        body: JSON.stringify({ model: chosen, use: true, again }) });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || `Frivo said ${res.status}`);
       if (data.ready) {
@@ -13864,7 +14068,11 @@ async function checkElevenKey(force) {
       getBtn.disabled = false;
     }
     refresh();
-  });
+  }
+  getBtn.addEventListener("click", () => startDownload(false));
+  // NEW (1.7.0): replaces the engine and the model, for when it won't start.
+  const againBtn = $("builtinAgainBtn");
+  if (againBtn) againBtn.addEventListener("click", () => startDownload(true));
   cancelBtn.addEventListener("click", () => fetch("/api/builtin-ai/cancel", { method: "POST" }).then(refresh));
   testBtn.addEventListener("click", async () => {
     testBtn.disabled = true;
@@ -13891,8 +14099,10 @@ async function checkElevenKey(force) {
     }
     btn.dataset.armed = "";
     btn.textContent = "Remove";
-    await fetch("/api/builtin-ai", { method: "DELETE" }).catch(() => {});
-    say("Removed. Clean up in English still works without AI.");
+    const res = await fetch("/api/builtin-ai", { method: "DELETE" }).catch(() => null);
+    const data = res ? await res.json().catch(() => ({})) : {};
+    if (res && res.ok) say("Removed. Clean up in English still works without AI.");
+    else say(data.error || "Couldn't remove it.", "error");
     if (typeof loadSettings === "function") loadSettings();
     refresh();
   });
@@ -13939,3 +14149,181 @@ function omCardUses() {
   if (lead) line.append(lead, " ");
   line.append(`About ${parts.join(", ")} of graphics memory with your models; only one is loaded at a time. Free.`);
 }
+
+
+// ---------------------------------------------------------------------------
+// NEW (1.7.0): Settings > Storage: where the big files are kept, and a
+// folder picker for the PC Frivo runs on.
+// ---------------------------------------------------------------------------
+(function initStorage() {
+  const list = $("storageList");
+  if (!list) return;
+  const pop = $("folderPop");
+  const statusEl = $("storageStatus");
+  let info = null;
+  let poll = null;
+  let picking = null;      // the kind a folder is being picked for
+  let browsePath = "";
+  const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const size = (n) => (n >= 1e9 ? `${(n / 1e9).toFixed(1)} GB` : n >= 1e6 ? `${Math.round(n / 1e6)} MB` : n > 0 ? "under 1 MB" : "empty");
+  const say = (text, kind) => {
+    statusEl.textContent = text || "";
+    statusEl.classList.toggle("is-error", kind === "error");
+    statusEl.classList.toggle("is-ok", kind === "ok");
+  };
+
+  function render() {
+    if (!info) return;
+    const job = info.job || {};
+    const moving = job.state === "moving";
+    list.innerHTML = info.kinds.map((k) => {
+      const free = k.drive && k.drive.free != null ? ` · ${size(k.drive.free)} free on ${esc(k.drive.name)}` : "";
+      return `<div class="st-row" data-kind="${esc(k.id)}">`
+        + `<div class="st-main"><span class="st-name">${esc(k.name)}</span>`
+        + `<span class="st-what">${esc(k.what)}</span>`
+        + `<span class="st-folder">${esc(k.folder)}</span>`
+        + `<span class="st-meta">Using ${size(k.size)}${free}${k.is_default ? " · Frivo's own folder" : ""}</span>`
+        + (k.problem ? `<span class="st-problem">${esc(k.problem)}</span>` : "")
+        + `</div><div class="st-actions">`
+        + `<button type="button" class="btn-ghost btn-sm" data-change="${esc(k.id)}"${moving ? " disabled" : ""}>Change…</button>`
+        + (k.is_default ? "" : `<button type="button" class="link-btn" data-default="${esc(k.id)}"${moving ? " disabled" : ""}>Back to Frivo's folder</button>`)
+        + `</div></div>`;
+    }).join("");
+    const jobEl = $("storageJob");
+    jobEl.classList.toggle("is-hidden", !moving);
+    if (moving) {
+      const pct = job.total ? Math.min(100, Math.round((job.done / job.total) * 100)) : 0;
+      const kind = info.kinds.find((k) => k.id === job.kind) || {};
+      $("storageJobText").textContent = `Moving ${kind.name || "files"} to ${job.folder}…`;
+      $("storageJobPct").textContent = job.total ? `${size(job.done)} of ${size(job.total)} · ${pct}%` : "";
+      $("storageJobBar").style.width = `${pct}%`;
+    }
+  }
+
+  let lastState = "";
+  async function refresh() {
+    try {
+      const res = await fetch("/api/storage");
+      info = await res.json();
+      const job = info.job || {};
+      if (lastState === "moving" && job.state === "done") say(job.message, "ok");
+      if (lastState === "moving" && job.state === "error") say(job.message, "error");
+      lastState = job.state;
+      render();
+      clearTimeout(poll);
+      poll = job.state === "moving" ? setTimeout(refresh, 700) : null;
+    } catch (_) { /* tried again when Storage is opened */ }
+  }
+
+  async function change(kind, body) {
+    say("");
+    const res = await fetch("/api/storage", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(Object.assign({ kind }, body)) }).catch(() => null);
+    const data = res ? await res.json().catch(() => ({})) : {};
+    if (res && res.status === 409 && data.exists) return data;   // the picker asks what to do
+    if (!res || !res.ok) { say(data.error || "Couldn't change it.", "error"); return null; }
+    if (data.unchanged) say("That's where it already is.");
+    else lastState = "moving";
+    refresh();
+    return data;
+  }
+
+  // ---- the folder picker ----
+  async function browse(path) {
+    const note = $("folderNote");
+    note.classList.remove("is-error");
+    note.textContent = "";
+    const res = await fetch(`/api/storage/browse?path=${encodeURIComponent(path || "")}`).catch(() => null);
+    const data = res ? await res.json().catch(() => ({})) : {};
+    if (!res || !res.ok) { note.textContent = data.error || "Couldn't look there."; note.classList.add("is-error"); return; }
+    browsePath = data.path || "";
+    $("folderPath").value = browsePath;
+    $("folderUpBtn").disabled = !data.parent && !(data.drives || []).length;
+    $("folderUpBtn").dataset.parent = data.parent || "";
+    $("folderDrives").innerHTML = (data.drives || []).map((d) => `<button type="button" class="st-drive" data-path="${esc(d)}">${esc(d)}</button>`).join("");
+    const folders = data.folders || [];
+    $("folderList").innerHTML = !browsePath ? '<p class="st-empty">Pick a drive.</p>'
+      : folders.length ? folders.map((f) => `<button type="button" class="st-folder-btn" data-name="${esc(f)}">${esc(f)}</button>`).join("")
+      : '<p class="st-empty">No folders in here. Make one below, or use this one.</p>';
+    $("folderChooseBtn").disabled = !browsePath || data.writable === false;
+    const kind = info && info.kinds.find((k) => k.id === picking);
+    const sub = kind ? kind.sub : "";
+    note.textContent = !browsePath ? "" : data.writable === false ? "Frivo can't write here."
+      : `Frivo will use ${browsePath.replace(/[\\/]$/, "")}${browsePath.includes("/") && !browsePath.includes("\\") ? "/" : "\\"}${sub}`
+        + (data.free != null ? ` · ${size(data.free)} free` : "");
+  }
+
+  function openPicker(kindId) {
+    picking = kindId;
+    const kind = info.kinds.find((k) => k.id === kindId);
+    $("folderTitle").textContent = `Where to keep: ${kind.name}`;
+    $("folderSub").textContent = `Pick a folder on the PC Frivo runs on. Frivo makes a "${kind.sub}" folder inside it and moves what's there now (${size(kind.size)}).`;
+    pop.classList.remove("is-hidden");
+    browse(kind.is_default ? "" : kind.parent);
+  }
+  const closePicker = () => { pop.classList.add("is-hidden"); picking = null; };
+
+  list.addEventListener("click", async (e) => {
+    const c = e.target.closest("[data-change]");
+    if (c) { openPicker(c.dataset.change); return; }
+    const d = e.target.closest("[data-default]");
+    if (d) {
+      if (d.dataset.armed !== "1") {
+        d.dataset.armed = "1";
+        d.textContent = "Move back? Click again";
+        setTimeout(() => { d.dataset.armed = ""; d.textContent = "Back to Frivo's folder"; }, 3000);
+        return;
+      }
+      const data = await change(d.dataset.default, { default: true, mode: "move" });
+      if (data && data.exists) say(`${data.error}`, "error");
+    }
+  });
+  $("folderList").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-name]");
+    if (!b) return;
+    const sep = browsePath.includes("\\") || /^[A-Za-z]:/.test(browsePath) ? "\\" : "/";
+    browse(browsePath.replace(/[\\/]+$/, "") + sep + b.dataset.name);
+  });
+  $("folderDrives").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-path]");
+    if (b) browse(b.dataset.path);
+  });
+  $("folderUpBtn").addEventListener("click", (e) => browse(e.currentTarget.dataset.parent || ""));
+  $("folderGoBtn").addEventListener("click", () => browse($("folderPath").value.trim()));
+  $("folderPath").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); browse($("folderPath").value.trim()); } });
+  $("folderNewBtn").addEventListener("click", async () => {
+    const name = $("folderNewName").value.trim();
+    if (!name || !browsePath) return;
+    const res = await fetch("/api/storage/mkdir", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: browsePath, name }) }).catch(() => null);
+    const data = res ? await res.json().catch(() => ({})) : {};
+    if (!res || !res.ok) { $("folderNote").textContent = data.error || "Couldn't make it."; $("folderNote").classList.add("is-error"); return; }
+    $("folderNewName").value = "";
+    browse(data.path);
+  });
+  $("folderChooseBtn").addEventListener("click", async () => {
+    const kind = picking;
+    const btn = $("folderChooseBtn");
+    btn.disabled = true;
+    let data = await change(kind, { folder: browsePath, mode: "move" });
+    if (data && data.exists) {
+      // Frivo's files from before are already there (an earlier install, say).
+      if (window.confirm(`${data.error}\n\nOK: use the files that are there. (What's in the current folder stays where it is.)\nCancel: pick another folder.`)) {
+        data = await change(kind, { folder: browsePath, mode: "use" });
+      } else {
+        btn.disabled = false;
+        return;
+      }
+    }
+    btn.disabled = false;
+    if (data) closePicker();
+  });
+  $("folderCloseBtn").addEventListener("click", closePicker);
+  pop.addEventListener("click", (e) => { if (e.target === pop) closePicker(); });
+  pop.addEventListener("keydown", (e) => { if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); closePicker(); } });
+
+  document.addEventListener("click", (e) => {
+    if (e.target.closest && e.target.closest('.settings-nav-btn[data-settings-section="storage"]')) setTimeout(refresh, 50);
+  });
+  refresh();
+})();

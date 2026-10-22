@@ -119,6 +119,23 @@ if (-not $script:InstallOwned) {
 # The removal itself
 # ==================================================================
 
+function Get-FrivoBuiltinAIFolders {
+    <#
+        NEW (1.7.0): every folder that may hold the built-in AI: the data
+        folder, the program folder, and the one picked in Settings > Storage
+        (config.json's storage_builtin_ai), each with builtin_ai inside.
+    #>
+    $parents = @($DataDir, $InstallDir)
+    try {
+        $config = Join-Path $DataDir 'config.json'
+        if (Test-Path -LiteralPath $config) {
+            $picked = [string] ((Get-Content -LiteralPath $config -Raw -ErrorAction Stop | ConvertFrom-Json).storage_builtin_ai)
+            if ($picked -and [System.IO.Path]::IsPathRooted($picked)) { $parents += $picked }
+        }
+    } catch { }
+    return $parents
+}
+
 function Invoke-Removal {
     # $PreserveSettings, never $keepSettings: that name collides with the
     # [switch] $KeepSettings parameter (variable names are case-insensitive),
@@ -156,6 +173,8 @@ function Invoke-Removal {
             ForEach-Object {
                 try { Stop-Process -Id $_.ProcessId -Force -ErrorAction Stop; $killed++ } catch { }
             }
+        # NEW (1.7.0): the built-in AI's engine runs from the data folder.
+        $killed += Stop-FrivoBuiltinAI -Folders (Get-FrivoBuiltinAIFolders)
         if ($killed) {
             Add-Step ('Stopped {0} running instance(s)' -f $killed)
             # File handles are released asynchronously.
@@ -316,10 +335,45 @@ function Invoke-Removal {
         }
     }
 
+    # --- NEW (1.7.0): the built-in AI ---
+    # Gigabytes of engine and models, not settings: always removed, even
+    # when settings are kept. Setting it up again is one click.
+    # CHANGED (1.7.0): including a folder picked in Settings > Storage. Only
+    # its builtin_ai subfolder: never anything else in the folder you picked.
+    foreach ($folder in @(Get-FrivoBuiltinAIFolders | ForEach-Object { Join-Path $_ 'builtin_ai' })) {
+        if (Test-Path -LiteralPath $folder) {
+            try {
+                Remove-Item -LiteralPath $folder -Recurse -Force -ErrorAction Stop
+                Add-Step 'Removed the built-in AI'
+            } catch {
+                Add-Step ('Remove the built-in AI ({0})' -f $folder) $false
+            }
+        }
+    }
+
     # --- settings ---
     if ($PreserveSettings) {
         if (Test-Path -LiteralPath $DataDir) { Add-Step ('Kept settings in {0}' -f $DataDir) }
     } elseif (Test-Path -LiteralPath $DataDir) {
+        # NEW (1.7.0): folders picked in Settings > Storage go too, but only
+        # Frivo's own subfolder in each (voices, saved, audio_cache).
+        try {
+            $config = Join-Path $DataDir 'config.json'
+            if (Test-Path -LiteralPath $config) {
+                $cfg = Get-Content -LiteralPath $config -Raw -ErrorAction Stop | ConvertFrom-Json
+                foreach ($pair in @(@('storage_voices', 'voices'), @('storage_saved', 'saved'), @('storage_audio', 'audio_cache'))) {
+                    $picked = [string] $cfg.($pair[0])
+                    if ($picked -and [System.IO.Path]::IsPathRooted($picked)) {
+                        $folder = Join-Path $picked $pair[1]
+                        if (Test-Path -LiteralPath $folder) {
+                            try { Remove-Item -LiteralPath $folder -Recurse -Force -ErrorAction Stop } catch {
+                                Add-Step ('Delete {0}' -f $folder) $false
+                            }
+                        }
+                    }
+                }
+            }
+        } catch { }
         try {
             Remove-Item -LiteralPath $DataDir -Recurse -Force -ErrorAction Stop
             Add-Step 'Deleted settings'
