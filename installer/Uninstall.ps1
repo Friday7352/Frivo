@@ -121,7 +121,7 @@ if (-not $script:InstallOwned) {
 
 function Get-FrivoBuiltinAIFolders {
     <#
-        NEW (1.6.1): every folder that may hold the built-in AI: the data
+        NEW (1.7.0): every folder that may hold the built-in AI: the data
         folder, the program folder, and the one picked in Settings > Storage
         (config.json's storage_builtin_ai), each with builtin_ai inside.
     #>
@@ -173,7 +173,7 @@ function Invoke-Removal {
             ForEach-Object {
                 try { Stop-Process -Id $_.ProcessId -Force -ErrorAction Stop; $killed++ } catch { }
             }
-        # NEW (1.6.1): the built-in AI's engine runs from the data folder.
+        # NEW (1.7.0): the built-in AI's engine runs from the data folder.
         $killed += Stop-FrivoBuiltinAI -Folders (Get-FrivoBuiltinAIFolders)
         if ($killed) {
             Add-Step ('Stopped {0} running instance(s)' -f $killed)
@@ -335,10 +335,10 @@ function Invoke-Removal {
         }
     }
 
-    # --- NEW (1.6.1): the built-in AI ---
+    # --- NEW (1.7.0): the built-in AI ---
     # Gigabytes of engine and models, not settings: always removed, even
     # when settings are kept. Setting it up again is one click.
-    # CHANGED (1.6.1): including a folder picked in Settings > Storage. Only
+    # CHANGED (1.7.0): including a folder picked in Settings > Storage. Only
     # its builtin_ai subfolder: never anything else in the folder you picked.
     foreach ($folder in @(Get-FrivoBuiltinAIFolders | ForEach-Object { Join-Path $_ 'builtin_ai' })) {
         if (Test-Path -LiteralPath $folder) {
@@ -355,7 +355,7 @@ function Invoke-Removal {
     if ($PreserveSettings) {
         if (Test-Path -LiteralPath $DataDir) { Add-Step ('Kept settings in {0}' -f $DataDir) }
     } elseif (Test-Path -LiteralPath $DataDir) {
-        # NEW (1.6.1): folders picked in Settings > Storage go too, but only
+        # NEW (1.7.0): folders picked in Settings > Storage go too, but only
         # Frivo's own subfolder in each (voices, saved, audio_cache).
         try {
             $config = Join-Path $DataDir 'config.json'

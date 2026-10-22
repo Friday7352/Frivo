@@ -2574,7 +2574,7 @@ html[data-theme="light"] .rail-theme .rail-sun { display: block; }
 }
 .turn.is-you .turn-flag { align-self: flex-end; }
 
-/* NEW (1.6.1): what happened to a reply: a small mark by the time, and a
+/* NEW (1.7.0): what happened to a reply: a small mark by the time, and a
    word in the hover line (details on hover). Replaces the pills. */
 .bubble-note {
   display: inline-block;
@@ -2807,7 +2807,7 @@ html[data-theme="light"] .rail-theme .rail-sun { display: block; }
 .radio-row--cards .radio-pill.is-compact .radio-label { flex: none; }
 @media (max-width: 760px) { .radio-row.radio-row--cards { grid-template-columns: minmax(0, 1fr); } }
 
-/* NEW (1.6.1): Storage */
+/* NEW (1.7.0): Storage */
 .st-list { display: flex; flex-direction: column; }
 .st-empty { margin: 8px 0; color: var(--ink-dim); font-size: var(--text-footnote); }
 .st-row { display: flex; gap: 12px; align-items: flex-start; padding: 12px 0; border-top: 1px solid var(--rule-soft); }
@@ -4905,7 +4905,7 @@ html.motion-ready .stage { transition: transform var(--dur-smooth) var(--spring-
 
 
 /* ============================================================
-   NEW (1.6.1): a cleaner message box
+   NEW (1.7.0): a cleaner message box
    ============================================================ */
 
 /* The placeholder sits behind the caret instead of before it, so the
@@ -4980,7 +4980,7 @@ html.motion-ready .stage { transition: transform var(--dur-smooth) var(--spring-
 /* On: the icon and the name in the accent colour, and a small dot. */
 .under-toggle:has(input:checked) { color: var(--ink); }
 .under-toggle input:checked ~ .under-toggle-track { background: transparent; color: var(--accent); }
-/* CHANGED (1.6.1): no dot beside a switch that's on; the switch says it. */
+/* CHANGED (1.7.0): no dot beside a switch that's on; the switch says it. */
 .under-toggle:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 1px; }
 .under-toggle.is-paused { opacity: 0.55; }
 .under-toggle.is-paused .under-toggle-track { outline: 0; }
@@ -5012,7 +5012,7 @@ html.motion-ready .stage { transition: transform var(--dur-smooth) var(--spring-
 }
 
 
-/* NEW (1.6.1): the voice list, straightened. Each row: the mark, the name
+/* NEW (1.7.0): the voice list, straightened. Each row: the mark, the name
    with "language · gender" under it, the tag label in its own column, then
    the cost, the sample and the menu, all on fixed tracks. */
 .voice-pick {
@@ -5047,7 +5047,7 @@ html.motion-ready .stage { transition: transform var(--dur-smooth) var(--spring-
 }
 
 
-/* NEW (1.6.1): a tag's menu: type any tag, or pick a suggestion. */
+/* NEW (1.7.0): a tag's menu: type any tag, or pick a suggestion. */
 .rich-chip-menu { width: 230px; gap: 2px; }
 .rich-chip-menu-form { padding: 4px 4px 2px; }
 .rich-chip-menu-form input {
@@ -5065,7 +5065,7 @@ html.motion-ready .stage { transition: transform var(--dur-smooth) var(--spring-
 
 
 /* ============================================================
-   NEW (1.6.1): the message panel. One card: who's speaking on the left
+   NEW (1.7.0): the message panel. One card: who's speaking on the left
    and how replies are made and heard on the right (each a group with thin
    dividers), the box, and the switches under it.
    ============================================================ */
@@ -5211,7 +5211,7 @@ html.motion-ready .stage { transition: transform var(--dur-smooth) var(--spring-
 }
 
 /* ============================================================
-   NEW (1.6.1): the voice menu, redesigned
+   NEW (1.7.0): the voice menu, redesigned
    ============================================================
    Search, one Filters menu and reload on top; All / Favorites / Free tabs
    with sort; Recent chips; rows of name, free dot, star, play and "…",
@@ -5485,7 +5485,7 @@ html.motion-ready .stage { transition: transform var(--dur-smooth) var(--spring-
   #voicePop .vm-legend { display: none; }
 }
 
-/* NEW (1.6.1): the length and volume chips keep their width, so "125 words"
+/* NEW (1.7.0): the length and volume chips keep their width, so "125 words"
    or "150%" doesn't push the chips beside them over. */
 #lengthValue, #masterVolumeValue {
   display: inline-block;

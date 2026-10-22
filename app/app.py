@@ -2729,7 +2729,7 @@ def builtin_ai_download():
     data = request.get_json(silent=True) or {}
     model_id = data.get("model") or "small"
     use = data.get("use") is not False
-    again = data.get("again") is True   # NEW (1.6.1): Download again
+    again = data.get("again") is True   # NEW (1.7.0): Download again
     try:
         if BUILTIN_AI.engine_path() and BUILTIN_AI.model_path(model_id) and not again:
             _builtin_ai_ready(model_id, use)   # already here: just use it
@@ -2771,7 +2771,7 @@ def builtin_ai_remove(model_id=None):
         return jsonify({"ok": True})
     try:
         BUILTIN_AI.remove(model_id if model_id in ("small", "better") else None)
-    except BUILTIN_AI_MODULE.BuiltinAIError as e:   # NEW (1.6.1): say so, don't claim it's gone
+    except BUILTIN_AI_MODULE.BuiltinAIError as e:   # NEW (1.7.0): say so, don't claim it's gone
         return jsonify({"error": str(e)}), 409
     # Nothing left to answer with: replies go back to OpenAI (Clean up still
     # works without AI).
@@ -9984,7 +9984,7 @@ BACKUP_FORMAT = 1
 BACKUP_MAX_BYTES = 2 * 1024 ** 3
 # Settings that belong to this server, not to you: kept as they are here.
 BACKUP_KEEP_HERE = {"ollama_url", "whisper_url", "_moved_to_v4", "_evora_idle_off",
-                    # NEW (1.6.1): folders on this PC, not the one the backup came from
+                    # NEW (1.7.0): folders on this PC, not the one the backup came from
                     "storage_builtin_ai", "storage_voices", "storage_saved", "storage_audio"}
 BACKUP_SECRET_KEYS = {"openai_api_key", "elevenlabs_api_key"}
 # What the page keeps in the browser that's worth carrying over.
@@ -10800,7 +10800,7 @@ def serve(host, port, cert_path, key_path):
 
 
 # ---------------------------------------------------------------------------
-# NEW (1.6.1): where Frivo keeps its big things (Settings > Storage)
+# NEW (1.7.0): where Frivo keeps its big things (Settings > Storage)
 #
 # The built-in AI, voices you add, saved replies and reply audio can each
 # live in a folder you pick on the PC Frivo runs on, say a bigger drive.

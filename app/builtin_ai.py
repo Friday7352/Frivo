@@ -113,9 +113,9 @@ class BuiltinAI:
         self._last_used = 0.0
         self._log_file = None
         self.on_ready = None                  # called after a download finishes
-        self._job_object = None               # NEW (1.6.1): Windows: the engine dies with Frivo
+        self._job_object = None               # NEW (1.7.0): Windows: the engine dies with Frivo
         threading.Thread(target=self._idle_loop, daemon=True).start()
-        # NEW (1.6.1): an engine left running by a Frivo that was closed
+        # NEW (1.7.0): an engine left running by a Frivo that was closed
         # (or killed by an update) still holds its files: stop it.
         threading.Thread(target=self.kill_strays, daemon=True).start()
 
@@ -212,7 +212,7 @@ class BuiltinAI:
     def start_download(self, model_id, again=False):
         """Downloads the engine (if needed) and this model, in the
         background. Raises BuiltinAIError when it can't begin.
-        CHANGED (1.6.1): again=True replaces what's there (Download again)."""
+        CHANGED (1.7.0): again=True replaces what's there (Download again)."""
         model = MODELS_BY_ID.get(model_id)
         if not model:
             raise BuiltinAIError("Pick Small or Better.")
@@ -246,7 +246,7 @@ class BuiltinAI:
 
     def _download(self, model, again=False):
         try:
-            if again:   # NEW (1.6.1): Download again: the old copies go first
+            if again:   # NEW (1.7.0): Download again: the old copies go first
                 self.stop()
                 self.kill_strays()
                 if not _rmtree(self.engine_dir):
@@ -336,7 +336,7 @@ class BuiltinAI:
             if sys.platform != "win32":
                 os.chmod(os.path.join(found, ENGINE_EXE), 0o755)
             self.stop()
-            self.kill_strays()   # NEW (1.6.1): a running engine would hold the old files
+            self.kill_strays()   # NEW (1.7.0): a running engine would hold the old files
             if not _rmtree(self.engine_dir):
                 raise BuiltinAIError("The old engine is still in use by another program. Restart the PC Frivo "
                                      "runs on, then try again.")
@@ -372,7 +372,7 @@ class BuiltinAI:
 
     def remove(self, model_id=None):
         """Removes one model, or everything (engine and models).
-        CHANGED (1.6.1): stops a stray engine first, and raises
+        CHANGED (1.7.0): stops a stray engine first, and raises
         BuiltinAIError if something couldn't be deleted, instead of
         saying "Removed" with the files still there."""
         self.stop()
@@ -406,7 +406,7 @@ class BuiltinAI:
                 self._last_used = time.time()
                 return self._port
             self._stop_locked()
-            self.kill_strays()   # NEW (1.6.1)
+            self.kill_strays()   # NEW (1.7.0)
             port = _free_port()
             exe = self.engine_path()
             args = [exe, "-m", self.model_path(model_id), "--host", "127.0.0.1", "--port", str(port),
@@ -429,7 +429,7 @@ class BuiltinAI:
                 self._log_file = None
                 raise BuiltinAIError(f"The built-in AI couldn't start ({e}). If your antivirus blocked it, "
                                      f"allow {exe}.")
-            self._attach_to_job(self._proc)   # NEW (1.6.1): it dies with Frivo
+            self._attach_to_job(self._proc)   # NEW (1.7.0): it dies with Frivo
             self._port = port
             self._model_id = model_id
             self._last_used = time.time()
@@ -477,7 +477,7 @@ class BuiltinAI:
         with self._lock:
             self._stop_locked()
 
-    # NEW (1.6.1) ------------------------------------------------- strays
+    # NEW (1.7.0) ------------------------------------------------- strays
 
     def kill_strays(self):
         """Stops any llama-server running from this folder that isn't the
@@ -606,7 +606,7 @@ def _remove(path):
 
 
 def _rmtree(path, tries=6):
-    """NEW (1.6.1): deletes a folder, trying again for a few seconds while
+    """NEW (1.7.0): deletes a folder, trying again for a few seconds while
     Windows lets go of files. True when it's gone."""
     for attempt in range(tries):
         shutil.rmtree(path, ignore_errors=True)
@@ -626,7 +626,7 @@ def _inside(path, folder):
 
 
 def _engine_processes():
-    """NEW (1.6.1): (pid, executable path) of every running llama-server."""
+    """NEW (1.7.0): (pid, executable path) of every running llama-server."""
     found = []
     if sys.platform == "win32":
         try:

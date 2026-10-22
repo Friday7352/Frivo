@@ -51,7 +51,7 @@ $IconPath     = [System.IO.Path]::Combine($InstallDir, 'static', 'Frivo.ico')
 $PythonW      = [System.IO.Path]::Combine($InstallDir, '.venv', 'Scripts', 'pythonw.exe')
 $ShimPath     = [System.IO.Path]::Combine($InstallDir, 'Frivo.vbs')
 $RunKey       = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
-# NEW (1.6.1): the in-app updater's progress, which the launcher now follows
+# NEW (1.7.0): the in-app updater's progress, which the launcher now follows
 # itself (see Watch-UpdateStatus).
 $UpdateStatusPath = [System.IO.Path]::Combine($(if ($env:ProgramData) { $env:ProgramData } else { 'C:\ProgramData' }),
                                                'Frivo', 'Updates', 'status.json')
@@ -235,7 +235,7 @@ function Stop-Server {
             Where-Object { $_.ExecutablePath -and (Test-PathWithinDirectory -Path $_.ExecutablePath -Directory $InstallDir) } |
             ForEach-Object { try { Stop-Process -Id $_.ProcessId -Force -ErrorAction Stop } catch { } }
     } catch { }
-    # NEW (1.6.1): and the built-in AI's engine, if it outlived Frivo.
+    # NEW (1.7.0): and the built-in AI's engine, if it outlived Frivo.
     [void] (Stop-FrivoBuiltinAI -Folders @($DataDir, $InstallDir))
     $script:serverProc = $null
     $script:state = 'stopped'
@@ -898,7 +898,7 @@ $form.Add_FormClosed({
     if ($script:quitting) { [System.Windows.Forms.Application]::Exit() }
 })
 
-# NEW (1.6.1): follows an in-app update itself. The update watcher asks the
+# NEW (1.7.0): follows an in-app update itself. The update watcher asks the
 # launcher to close (Local\FrivoLauncherQuit), but when that didn't reach
 # it, the launcher stayed open saying "Stopped" after setup stopped the
 # server, and because a launcher was still running, nothing started Frivo
@@ -942,7 +942,7 @@ $timer = New-Object System.Windows.Forms.Timer
 $timer.Interval = 1200
 $timer.Add_Tick({
     Update-Status
-    try { Watch-UpdateStatus } catch { }   # NEW (1.6.1)
+    try { Watch-UpdateStatus } catch { }   # NEW (1.7.0)
     if ($copy1.Text -eq 'Copied') { $copy1.Text = 'Copy' }
     if ($copy2 -and $copy2.Text -eq 'Copied') { $copy2.Text = 'Copy' }
     # A second launcher was started — bring this one forward instead.

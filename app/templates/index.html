@@ -54,7 +54,7 @@
               stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
         <path d="M21 13A9 9 0 1 1 11 3a7 7 0 0 0 10 10z"/>
       </symbol>
-      <!-- NEW (1.6.1): the voice menu -->
+      <!-- NEW (1.7.0): the voice menu -->
       <symbol id="i-star" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round">
         <path d="M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.9l-5.2 2.7 1-5.8-4.3-4.1 5.9-.9z"/>
       </symbol>
@@ -363,11 +363,11 @@
           </section>
 
           <div class="composer-wrap">
-          <div class="composer-panel-card">   <!-- NEW (1.6.1): the panel -->
+          <div class="composer-panel-card">   <!-- NEW (1.7.0): the panel -->
 
             <!-- The session strip: what used to be the sidebar, as chips.
                  Each one opens exactly what it names. -->
-            <!-- CHANGED (1.6.1): one panel: who's speaking on the left, how
+            <!-- CHANGED (1.7.0): one panel: who's speaking on the left, how
                  replies are made and heard on the right, the box, and the
                  switches under it. -->
             <div class="session-strip">
@@ -404,7 +404,7 @@
               </div>
               <div class="strip-group strip-group--how">
 
-              <!-- CHANGED (1.6.1): no style chip; the profile decides how replies are written. -->
+              <!-- CHANGED (1.7.0): no style chip; the profile decides how replies are written. -->
 
               <!-- NEW (1.5.0): which of the three Ollama models writes replies.
                    Only shown while Chat replies is set to Ollama. -->
@@ -561,7 +561,7 @@
                    put in where the cursor is; Suggest asks the AI to add
                    some to what you've typed. -->
               <span class="chip-wrap voice-tag-wrap is-hidden" id="voiceTagWrap">
-                <!-- CHANGED (1.6.1): a small tag icon in the box, only for a voice
+                <!-- CHANGED (1.7.0): a small tag icon in the box, only for a voice
                      that acts tags out. It opens the menu (tags, Suggest, Auto
                      tags, Ideas). Suggest itself is in the row under the box. -->
                 <button id="voiceTagBtn" class="composer-icon composer-tag-btn" type="button" aria-haspopup="dialog"
@@ -647,7 +647,7 @@
               </button>
             </div>
 
-            <!-- CHANGED (1.6.1): Auto-send, Speak, Chatbox and Suggest live
+            <!-- CHANGED (1.7.0): Auto-send, Speak, Chatbox and Suggest live
                  under the box now, with their names, so the box is for
                  typing. -->
             <div class="composer-under" id="composerUnder">
@@ -793,7 +793,7 @@
             <button type="button" class="settings-nav-btn" data-settings-section="providers">
               <svg class="icon-16"><use href="#i-server"/></svg>Providers
             </button>
-            <!-- NEW (1.6.1) -->
+            <!-- NEW (1.7.0) -->
             <button type="button" class="settings-nav-btn" data-settings-section="storage">
               <svg class="icon-16"><use href="#i-db"/></svg>Storage
             </button>
@@ -1310,7 +1310,7 @@
                       <button type="button" class="btn" id="builtinGetBtn">Download and use</button>
                       <button type="button" class="btn-ghost btn-sm is-hidden" id="builtinCancelBtn">Cancel</button>
                       <button type="button" class="btn-ghost btn-sm is-hidden" id="builtinTestBtn">Test</button>
-                      <!-- NEW (1.6.1) -->
+                      <!-- NEW (1.7.0) -->
                       <button type="button" class="btn-ghost btn-sm is-hidden" id="builtinAgainBtn" title="Deletes the engine and this model and downloads them again">Download again</button>
                     </div>
                   </div>
@@ -1484,7 +1484,7 @@
                 </div>
               </section>
 
-              <!-- NEW (1.6.1): where the big things are kept -->
+              <!-- NEW (1.7.0): where the big things are kept -->
               <section class="settings-section" data-settings-section="storage" id="storageSection">
                 <h3 class="settings-section-title">Storage</h3>
                 <p class="settings-section-sub">Where Frivo keeps its big files, on the PC Frivo runs on (not the one you're browsing from). Pick a bigger drive for any of them; Frivo moves what's already there. Settings, profiles and keys stay in Frivo's own folder.</p>
@@ -1820,7 +1820,7 @@
           <input type="text" id="voiceSearch" class="voice-search" autocomplete="off"
                  placeholder="Search voices…" aria-label="Search voices">
         </span>
-        <!-- CHANGED (1.6.1): language, gender and type in one Filters menu -->
+        <!-- CHANGED (1.7.0): language, gender and type in one Filters menu -->
         <span class="vm-filter-wrap">
           <button id="voiceFilterBtn" class="vm-tool-btn" type="button" aria-haspopup="dialog" aria-expanded="false"
                   aria-controls="voiceFilterPop">
@@ -1845,7 +1845,7 @@
         </button>
       </div>
 
-      <!-- CHANGED (1.6.1): All / Favorites / Free tabs instead of long section headings -->
+      <!-- CHANGED (1.7.0): All / Favorites / Free tabs instead of long section headings -->
       <div class="vm-tabs-row">
         <div class="vm-tabs" role="tablist" aria-label="Show">
           <button type="button" class="vm-tab is-on" role="tab" data-tab="all" aria-selected="true">All</button>
@@ -1900,7 +1900,7 @@
   </div>
 
   <!-- ============================================================
-       NEW (1.6.1): Pick a folder on the PC Frivo runs on (Storage)
+       NEW (1.7.0): Pick a folder on the PC Frivo runs on (Storage)
        ============================================================ -->
   <div id="folderPop" class="overlay voice-overlay vlib-overlay is-hidden">
     <div class="voice-dialog st-dialog" role="dialog" aria-modal="true" aria-labelledby="folderTitle">

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""NEW (1.6.1): Settings > Storage.
+"""NEW (1.7.0): Settings > Storage.
 
   * by default everything is in Frivo's data folder
   * moving each kind (built-in AI, voices you add, saved replies, reply

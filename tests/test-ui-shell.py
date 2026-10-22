@@ -107,7 +107,7 @@ const base = 'http://127.0.0.1:5093';
   await p.click('#railVoices'); await wait(500);
   check('Voices opens the voice sheet', await vis('#voicePop'));
   check('which says whose voice it is', /for Default/.test(await text('#voiceDialogFor')), await text('#voiceDialogFor'));
-  // CHANGED (1.6.1): All / Favorites / Free tabs instead of a heading per engine.
+  // CHANGED (1.7.0): All / Favorites / Free tabs instead of a heading per engine.
   check('no section headings, tabs instead', await p.evaluate(() => !document.querySelector('#voiceList .voice-group') && document.querySelectorAll('#voicePop .vm-tab').length === 3));
   const freeDots = await p.evaluate(() => [...document.querySelectorAll('#voiceList .vm-row')].map(r => !!r.querySelector('.vm-free-dot')));
   check('every Windows voice shows the free dot', freeDots.length > 10 && freeDots.every(Boolean), freeDots.length);
@@ -126,7 +126,7 @@ const base = 'http://127.0.0.1:5093';
 
   console.log('--- the chips and the status pill ---');
   check('the voice chip names the voice, without the bracketed part', (await text('#voiceTriggerName')).trim() === 'Zira', await text('#voiceTriggerName'));
-  check('no style chip: the profile decides the style', !(await p.$('#styleChip')));   // CHANGED (1.6.1)
+  check('no style chip: the profile decides the style', !(await p.$('#styleChip')));   // CHANGED (1.7.0)
   await p.click('#lengthChip'); await wait(200);
   check('the length chip opens its popover', await vis('#lengthPop') && await vis('#lengthSlider'));
   await p.click('#volumeChip'); await wait(200);

@@ -655,7 +655,7 @@ function Reset-FrivoVoicePermissions {
 
 function Stop-FrivoBuiltinAI {
     <#
-        NEW (1.6.1): stops the built-in AI's engine (llama-server.exe) if it's
+        NEW (1.7.0): stops the built-in AI's engine (llama-server.exe) if it's
         running. It runs from Frivo's data folder, not the program folder, so
         stopping Frivo's Python alone could leave it behind, holding its
         files open: they then couldn't be deleted or downloaded again.
@@ -664,7 +664,7 @@ function Stop-FrivoBuiltinAI {
     #>
     param([string[]] $Folders = @())
     $stopped = 0
-    # CHANGED (1.6.1): and the folder picked in Settings > Storage, read from
+    # CHANGED (1.7.0): and the folder picked in Settings > Storage, read from
     # config.json in any of these folders.
     foreach ($folder in @($Folders)) {
         try {

@@ -1809,7 +1809,7 @@ function addTurn(who, text, opts = {}) {
   // a page at a time.
   if (opts.footer) stack.appendChild(opts.footer);
 
-  // CHANGED (1.6.1): what happened to a reply ("Cleaned up without AI",
+  // CHANGED (1.7.0): what happened to a reply ("Cleaned up without AI",
   // "Auto tags"...) used to be a pill under every bubble. Now it's one quiet
   // mark by the bubble's time, and the words are in the line that appears
   // when you point at the reply, with the details on hover.
@@ -2804,7 +2804,7 @@ const VOICE_RECENTS_MAX = 6;
 
 let voiceQuery = "";
 
-// CHANGED (1.6.1): `fav` and `free` are the All / Favorites / Free tabs; the
+// CHANGED (1.7.0): `fav` and `free` are the All / Favorites / Free tabs; the
 // rest are in the Filters menu.
 const voiceFacets = { fav: false, free: false, language: "", gender: "", category: "" };
 let voiceRows = [];          // rendered rows, in display order, for arrow keys
@@ -2972,7 +2972,7 @@ function voiceHaystack(v) {
 
 function voiceMatchesFacets(v, favs) {
   if (voiceFacets.fav && !favs.has(v.voice_id)) return false;
-  if (voiceFacets.free && voiceEngine(v) === "elevenlabs") return false;   // NEW (1.6.1)
+  if (voiceFacets.free && voiceEngine(v) === "elevenlabs") return false;   // NEW (1.7.0)
   if (
     voiceFacets.language &&
     !(v.languages || []).some((l) => l.name === voiceFacets.language)
@@ -3003,7 +3003,7 @@ function matchingVoices() {
   });
 }
 
-// CHANGED (1.6.1): only what's in the Filters menu; the tabs aren't filters.
+// CHANGED (1.7.0): only what's in the Filters menu; the tabs aren't filters.
 function activeFilterCount() {
   return [voiceFacets.language, voiceFacets.gender, voiceFacets.category].filter(Boolean).length;
 }
@@ -3050,7 +3050,7 @@ function voiceTab() {
 }
 
 function renderVoiceFilters() {
-  // NEW (1.6.1): the tabs, and how many filters are on.
+  // NEW (1.7.0): the tabs, and how many filters are on.
   const tab = voiceTab();
   document.querySelectorAll("#voicePop .vm-tab").forEach((b) => {
     const on = b.dataset.tab === tab;
@@ -3093,7 +3093,7 @@ function onFacetChange() {
   renderVoiceList();
 }
 
-// NEW (1.6.1): All / Favorites / Free.
+// NEW (1.7.0): All / Favorites / Free.
 document.querySelectorAll("#voicePop .vm-tab").forEach((b) => {
   b.addEventListener("click", () => {
     voiceFacets.fav = b.dataset.tab === "fav";
@@ -3121,7 +3121,7 @@ voiceFilterClear.addEventListener("click", () => {
   onFacetChange();
 });
 
-// NEW (1.6.1): the Filters menu and the sort menu, under their buttons.
+// NEW (1.7.0): the Filters menu and the sort menu, under their buttons.
 function setVoicePop(pop, btn, open) {
   if (!pop || !btn) return;
   pop.classList.toggle("is-hidden", !open);
@@ -3302,7 +3302,7 @@ function renderVoiceRecent() {
   host.innerHTML = "";
   const seen = new Set();
   const ids = [...voiceRecents(), ...voiceFavorites()].filter((id) => !seen.has(id) && seen.add(id)).slice(0, 6);
-  // NEW (1.6.1): labelled, so the chips don't read as filters.
+  // NEW (1.7.0): labelled, so the chips don't read as filters.
   if (ids.some((id) => voiceById(id))) {
     const label = document.createElement("span");
     label.className = "voice-recent-label";
@@ -3354,7 +3354,7 @@ const TAG_FIT_LABELS = {
   older: { label: "older", title: "A voice from before the expressive models. Tags work, but it may drift between accents with them." },
 };
 
-// NEW (1.6.1): who speaks a voice, for its details line.
+// NEW (1.7.0): who speaks a voice, for its details line.
 const VOICE_PROVIDER_LABELS = {
   elevenlabs: "ElevenLabs",
   piper: "Frivo",
@@ -3367,7 +3367,7 @@ function capitalize(text) {
   return t ? t[0].toUpperCase() + t.slice(1) : t;
 }
 
-// CHANGED (1.6.1): a row is the name, a green dot when it's free, a star,
+// CHANGED (1.7.0): a row is the name, a green dot when it's free, a star,
 // a play button and the "…" menu. The rest (language, gender, who speaks
 // it, credits, how it takes tags) opens under the name on the voice in use
 // and on the row picked with the arrow keys.
@@ -3540,7 +3540,7 @@ function openVoiceMenu(anchor, v) {
     menu.appendChild(b);
   };
 
-  // CHANGED (1.6.1): favorites are the star on the row.
+  // CHANGED (1.7.0): favorites are the star on the row.
   item("Voice details", "i-spark", () => showVoiceTip(anchor, v));
   // NEW (1.5.0): a voice you added can be renamed or removed.
   if (voiceEngine(v) === "custom") {
@@ -3642,7 +3642,7 @@ function voiceSections(matches) {
     return [...starts, ...ordered.filter((v) => !startIds.has(v.voice_id))];
   };
 
-  // CHANGED (1.6.1): one list. What it costs is the green dot on the row
+  // CHANGED (1.7.0): one list. What it costs is the green dot on the row
   // and the Free tab, instead of a heading over each group.
   return [[null, order(matches)]];
 }
@@ -3690,7 +3690,7 @@ voiceSort.addEventListener("change", () => {
 function renderVoiceList() {
   // The rows the tooltip was anchored to are about to be destroyed.
   cancelVoiceTip();
-  const keepScroll = voiceList.scrollTop;   // NEW (1.6.1): starring a voice doesn't jump the list
+  const keepScroll = voiceList.scrollTop;   // NEW (1.7.0): starring a voice doesn't jump the list
   const keepActive = voiceActiveIndex >= 0 && voiceRows[voiceActiveIndex] ? voiceRows[voiceActiveIndex].voice.voice_id : "";
   voiceList.innerHTML = "";
   voiceRows = [];
@@ -3709,7 +3709,7 @@ function renderVoiceList() {
   if (!matches.length) {
     const note = document.createElement("p");
     note.className = "voice-none";
-    // NEW (1.6.1): an empty tab says how to fill it.
+    // NEW (1.7.0): an empty tab says how to fill it.
     note.textContent = voiceQuery.trim() || anyFacetActive()
       ? "Nothing matches that."
       : voiceFacets.fav
@@ -3761,7 +3761,7 @@ function showHiddenCategoryNote() {
     return;
   }
   note.classList.remove("is-hidden");
-  // CHANGED (1.6.1): one short button; what's hidden is in its tooltip.
+  // CHANGED (1.7.0): one short button; what's hidden is in its tooltip.
   const label = note.querySelector("span");
   if (label) label.textContent = `Hidden (${hidden.length})`;
   else note.textContent = `Hidden (${hidden.length})`;
@@ -3930,7 +3930,7 @@ function setVoiceActiveIndex(next) {
 // so keys pressed while the search field has focus never reach the picker.
 voicePop.addEventListener("keydown", (e) => {
   if (!voicePopIsOpen()) return;
-  // NEW (1.6.1): arrows inside the Filters or sort menu belong to it.
+  // NEW (1.7.0): arrows inside the Filters or sort menu belong to it.
   if (e.key !== "Escape" && e.target.closest && e.target.closest("#voiceFilterPop, #voiceSortMenu")) return;
   if (e.key === "ArrowDown") {
     e.preventDefault();
@@ -3948,7 +3948,7 @@ voicePop.addEventListener("keydown", (e) => {
     }
   } else if (e.key === "Escape") {
     e.preventDefault();
-    // NEW (1.6.1): a menu that's open closes first.
+    // NEW (1.7.0): a menu that's open closes first.
     if (closeVoiceSubPops()) return;
     closeVoicePop();
     voiceTrigger.focus();
@@ -9004,7 +9004,7 @@ function fitSessionStrip() {
     // Two steps, the gentlest first: drop " words", then the style's name.
     strip.classList.remove("is-compact", "is-compact-more");
     strip.classList.add("is-measuring");   // every chip at its natural width
-    // CHANGED (1.6.1): measured from the chips' own widths. scrollWidth also
+    // CHANGED (1.7.0): measured from the chips' own widths. scrollWidth also
     // counted a closed popover sticking out past the right-hand group.
     const tooWide = () => {
       const kids = Array.from(strip.children).filter((c) => c.offsetParent !== null || getComputedStyle(c).display !== "none");
@@ -10070,7 +10070,7 @@ function updateVoiceTagButton() {
   const id = activeVoiceId();
   const eleven = Boolean(id) && voiceEngine({ voice_id: id }) === "elevenlabs";
   wrap.classList.toggle("is-hidden", !eleven);
-  if ($("tagSplit")) $("tagSplit").classList.toggle("is-hidden", !eleven);   // NEW (1.6.1): Suggest, under the box
+  if ($("tagSplit")) $("tagSplit").classList.toggle("is-hidden", !eleven);   // NEW (1.7.0): Suggest, under the box
   if (!eleven) {
     const pop = $("voiceTagPop");
     if (pop) pop.classList.add("is-hidden");
@@ -10982,7 +10982,7 @@ function showAutoTagsState() {
   const label = $("tagSplitLabel");
   const main = $("voiceTagSuggestQuick");
   if (split) split.classList.toggle("is-auto", on);
-  if (label) label.textContent = on ? "Auto tags on" : "Suggest tags";   // CHANGED (1.6.1)
+  if (label) label.textContent = on ? "Auto tags on" : "Suggest tags";   // CHANGED (1.7.0)
   if (main) main.title = on
     ? "Auto tags is on: the AI tags every message as it's spoken. Click for the options."
     : "The AI adds voice tags that fit what you've typed. Your words stay the same.";
@@ -12879,7 +12879,7 @@ function richCloseMenu() {
   if (rich.menu) { rich.menu.remove(); rich.menu = null; }
 }
 
-// CHANGED (1.6.1): a box at the top to type any tag of your own, with
+// CHANGED (1.7.0): a box at the top to type any tag of your own, with
 // matching tags listed as you type (the ones you use, Frivo's, yours);
 // otherwise suggestions that fit the one you clicked. Arrows choose, Enter
 // takes it, Esc closes.
@@ -13980,7 +13980,7 @@ async function checkElevenKey(force) {
     progress.classList.toggle("is-hidden", !busy);
     cancelBtn.classList.toggle("is-hidden", !busy);
     testBtn.classList.toggle("is-hidden", !ready || busy);
-    if ($("builtinAgainBtn")) $("builtinAgainBtn").classList.toggle("is-hidden", !ready || busy);   // NEW (1.6.1)
+    if ($("builtinAgainBtn")) $("builtinAgainBtn").classList.toggle("is-hidden", !ready || busy);   // NEW (1.7.0)
     getBtn.classList.toggle("is-hidden", busy || (ready && info.in_use));
     getBtn.textContent = ready ? "Use the built-in AI" : `Download and use (${gb(model.size || 0)})`;
     getBtn.disabled = !info.supported;
@@ -14042,7 +14042,7 @@ async function checkElevenKey(force) {
       setTimeout(() => { btn.dataset.armed = ""; btn.textContent = "Remove"; }, 3000);
       return;
     }
-    // CHANGED (1.6.1): says when something couldn't be deleted.
+    // CHANGED (1.7.0): says when something couldn't be deleted.
     const res = await fetch(`/api/builtin-ai/${encodeURIComponent(btn.dataset.remove)}`, { method: "DELETE" }).catch(() => null);
     const data = res ? await res.json().catch(() => ({})) : {};
     if (res && res.ok) say("Removed."); else say(data.error || "Couldn't remove it.", "error");
@@ -14070,7 +14070,7 @@ async function checkElevenKey(force) {
     refresh();
   }
   getBtn.addEventListener("click", () => startDownload(false));
-  // NEW (1.6.1): replaces the engine and the model, for when it won't start.
+  // NEW (1.7.0): replaces the engine and the model, for when it won't start.
   const againBtn = $("builtinAgainBtn");
   if (againBtn) againBtn.addEventListener("click", () => startDownload(true));
   cancelBtn.addEventListener("click", () => fetch("/api/builtin-ai/cancel", { method: "POST" }).then(refresh));
@@ -14152,7 +14152,7 @@ function omCardUses() {
 
 
 // ---------------------------------------------------------------------------
-// NEW (1.6.1): Settings > Storage: where the big files are kept, and a
+// NEW (1.7.0): Settings > Storage: where the big files are kept, and a
 // folder picker for the PC Frivo runs on.
 // ---------------------------------------------------------------------------
 (function initStorage() {
