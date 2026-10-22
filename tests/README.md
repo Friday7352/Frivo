@@ -458,7 +458,7 @@ Double-click `tests/check-windows-voices.bat` on a Windows PC. It runs the real 
 
 ## The Frivo app (desktop\)
 
-NEW (1.7.0). The app has its own tests, run from `desktop\` after `npm ci`:
+NEW (1.8.0). The app has its own tests, run from `desktop\` after `npm ci`:
 
     npm test             unit tests: addresses, GitHub releases and checked
                          downloads, certificate pinning, settings, and what

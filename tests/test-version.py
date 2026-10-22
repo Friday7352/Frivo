@@ -104,7 +104,7 @@ def main():
                 line for line in handle.read().splitlines()
                 if not line.lstrip().startswith(markers)
             )
-        # CHANGED (1.7.0): network ranges like 10.0.0.0/8 (the firewall
+        # CHANGED (1.8.0): network ranges like 10.0.0.0/8 (the firewall
         # rule's private networks) aren't versions either.
         found = [m.group(0) for m in literal.finditer(body)
                  if m.group(0) not in ("10.0",)      # MinVersion=10.0 is Windows

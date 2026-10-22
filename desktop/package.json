@@ -10,7 +10,7 @@
   "frivo": {
     "repository": "Friday7352/Frivo",
     "port": 5000,
-    "minimumFrivo": "1.7.0"
+    "minimumFrivo": "1.8.0"
   },
   "scripts": {
     "start": "electron .",

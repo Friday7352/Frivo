@@ -5496,7 +5496,7 @@ html.motion-ready .stage { transition: transform var(--dur-smooth) var(--spring-
 .session-strip.is-compact #lengthValue { min-width: 3ch; }
 #masterVolumeValue { min-width: 4ch; }
 
-/* NEW (1.7.0): the Frivo app. In a browser on Windows, Settings › Updates
+/* NEW (1.8.0): the Frivo app. In a browser on Windows, Settings › Updates
    offers it; inside it, Settings has an App section. */
 .app-offer { margin-top: 14px; }
 .app-offer .srow { gap: 12px; }

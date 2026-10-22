@@ -313,7 +313,7 @@ function Start-FrivoAsUser {
         and needs no password for exactly that reason. It is removed again
         straight away.
 
-        NEW (1.7.0): -Window opens Frivo's window (or the Frivo app, in app
+        NEW (1.8.0): -Window opens Frivo's window (or the Frivo app, in app
         mode) instead of starting in the tray. "Launch Frivo now" at the end
         of setup uses it, so Frivo doesn't run as administrator.
     #>
@@ -327,7 +327,7 @@ function Start-FrivoAsUser {
     $root = if ($env:SystemRoot) { $env:SystemRoot } else { 'C:\Windows' }
     $taskName = 'Frivo Restart'
     try {
-        $shimArgs = if ($Window) { '"{0}"' -f $shim } else { '"{0}" -Tray' -f $shim }   # CHANGED (1.7.0)
+        $shimArgs = if ($Window) { '"{0}"' -f $shim } else { '"{0}" -Tray' -f $shim }   # CHANGED (1.8.0)
         $action = New-ScheduledTaskAction -Execute ($root.TrimEnd('\') + '\System32\wscript.exe') `
             -Argument $shimArgs -WorkingDirectory $Target
         $principal = New-ScheduledTaskPrincipal -UserId $User -LogonType Interactive -RunLevel Limited
@@ -1337,9 +1337,9 @@ $btnNext.Add_Click({
     }
 
     if ($current.Panel -eq $pageDone) {
-        $startedAsUser = $false   # NEW (1.7.0)
+        $startedAsUser = $false   # NEW (1.8.0)
         if ($chkLaunch.Checked -and $script:launcherPath) {
-            # CHANGED (1.7.0): as the person signed in to this PC, not as
+            # CHANGED (1.8.0): as the person signed in to this PC, not as
             # administrator (setup's own rights). Frivo started from here used
             # to run as administrator: its files and settings were the same,
             # but nothing running as that person (the Frivo app, a new

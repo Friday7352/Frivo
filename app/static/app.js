@@ -14330,7 +14330,7 @@ function omCardUses() {
 
 
 // ============================================================
-// NEW (1.7.0): the Frivo app (desktop\ in the repo)
+// NEW (1.8.0): the Frivo app (desktop\ in the repo)
 // ============================================================
 // Inside the app, the page has window.frivoApp (desktop\src\preload.js) and
 // Settings gets an App section for the app's own settings. In a browser on

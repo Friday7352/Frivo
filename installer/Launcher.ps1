@@ -14,7 +14,7 @@
     (the server process, %APPDATA%\Frivo, HKCU's Run key) belongs to that
     user anyway.
 
-    NEW (1.7.0): app mode. When the Frivo app (desktop\ in the repo) is
+    NEW (1.8.0): app mode. When the Frivo app (desktop\ in the repo) is
     set to run Frivo on this PC, it writes its own path to launcher.json as
     appPath. The launcher then has no window and no tray icon: it starts
     and stops the server, follows updates, and opens the app wherever it
@@ -78,17 +78,17 @@ $createdMutex = $false
 $instanceLock = New-Object System.Threading.Mutex($true, 'Local\FrivoLauncher', [ref] $createdMutex)
 $showSignal   = New-Object System.Threading.EventWaitHandle($false,
     [System.Threading.EventResetMode]::ManualReset, 'Local\FrivoLauncherShow')
-# NEW (1.7.0): "make sure the server is running", without showing anything.
+# NEW (1.8.0): "make sure the server is running", without showing anything.
 # What a second launcher started in the background (-Tray: the sign-in
 # entry, or the Frivo app starting Frivo) asks for, so signing in or the
 # app's Start doesn't bring a window up.
 $startSignal  = New-Object System.Threading.EventWaitHandle($false,
     [System.Threading.EventResetMode]::ManualReset, 'Local\FrivoLauncherStart')
 if (-not $createdMutex) {
-    if ($Tray) { [void] $startSignal.Set() } else { [void] $showSignal.Set() }   # CHANGED (1.7.0)
+    if ($Tray) { [void] $startSignal.Set() } else { [void] $showSignal.Set() }   # CHANGED (1.8.0)
     exit
 }
-# NEW (1.7.0): a request left over from a launcher that has since closed
+# NEW (1.8.0): a request left over from a launcher that has since closed
 # isn't for this one.
 [void] $showSignal.Reset()
 [void] $startSignal.Reset()
@@ -101,7 +101,7 @@ $quitSignal = New-Object System.Threading.EventWaitHandle($false,
     [System.Threading.EventResetMode]::ManualReset, 'Local\FrivoLauncherQuit')
 [void] $quitSignal.Reset()
 
-# NEW (1.7.0): the Frivo app's Stop and Quit. Unlike the update's quit, this
+# NEW (1.8.0): the Frivo app's Stop and Quit. Unlike the update's quit, this
 # one stops the server too.
 $stopSignal = New-Object System.Threading.EventWaitHandle($false,
     [System.Threading.EventResetMode]::ManualReset, 'Local\FrivoLauncherStop')
@@ -115,7 +115,7 @@ $script:settings = @{
     closeAction = 'keep'    # keep | stop — what closing the window does
     openBrowser = $false    # open the dashboard once the server is up
     lastUpdateNotice = ''   # NEW (updates): the update result already announced
-    appPath = ''            # NEW (1.7.0): the Frivo app, when it runs Frivo on this PC
+    appPath = ''            # NEW (1.8.0): the Frivo app, when it runs Frivo on this PC
 }
 
 function Read-LauncherSettings {
@@ -131,7 +131,7 @@ function Read-LauncherSettings {
         if ($raw.PSObject.Properties['lastUpdateNotice']) {   # NEW (updates)
             $script:settings.lastUpdateNotice = [string] $raw.lastUpdateNotice
         }
-        # NEW (1.7.0): written by the Frivo app; cleared by it when it stops
+        # NEW (1.8.0): written by the Frivo app; cleared by it when it stops
         # running Frivo on this PC.
         $script:settings.appPath = if ($raw.PSObject.Properties['appPath']) { [string] $raw.appPath } else { '' }
     } catch { }
@@ -175,7 +175,7 @@ function Set-StartupEnabled {
 
 Read-LauncherSettings
 
-# NEW (1.7.0): app mode, while the app that asked for it is still installed.
+# NEW (1.8.0): app mode, while the app that asked for it is still installed.
 # Never as administrator: the app (an ordinary program) couldn't stop a
 # launcher running as administrator, so one with no window or tray icon
 # would be a Frivo nobody can stop. That happens when setup's "Launch Frivo
@@ -691,7 +691,7 @@ $miShow  = $trayMenu.Items.Add('Show launcher')
 [void] $trayMenu.Items.Add('-')
 $miQuit  = $trayMenu.Items.Add(('Stop {0} and quit' -f $AppName))
 $notify.ContextMenuStrip = $trayMenu
-# CHANGED (1.7.0): no tray icon in app mode; the app has its own.
+# CHANGED (1.8.0): no tray icon in app mode; the app has its own.
 $notify.Visible = -not $script:appMode
 
 $script:quitting     = $false
@@ -706,7 +706,7 @@ function Open-Dashboard {
     try { Start-Process $localUrl } catch { }
 }
 
-# NEW (1.7.0): app mode opens the app instead of this window.
+# NEW (1.8.0): app mode opens the app instead of this window.
 function Test-AppRunning {
     $path = [string] $script:settings.appPath
     if (-not $path) { return $false }
@@ -735,7 +735,7 @@ function Open-App {
 }
 
 function Show-Launcher {
-    if ($script:appMode) {   # NEW (1.7.0)
+    if ($script:appMode) {   # NEW (1.8.0)
         if ($script:state -notin @('running', 'starting')) { Start-Server }
         Open-App
         return
@@ -766,7 +766,7 @@ function Show-UpdateResult {
         so a failed one says why, in the one place still on screen when the
         browser could not reconnect.
     #>
-    if ($script:appMode) { return }   # NEW (1.7.0): the app says it instead
+    if ($script:appMode) { return }   # NEW (1.8.0): the app says it instead
     try {
         $programData = if ($env:ProgramData) { $env:ProgramData } else { 'C:\ProgramData' }
         $path = [System.IO.Path]::Combine($programData, 'Frivo', 'Updates', 'status.json')
@@ -836,7 +836,7 @@ function Update-Status {
         }
     }
 
-    # CHANGED (1.7.0): never in app mode, where the app is the window.
+    # CHANGED (1.8.0): never in app mode, where the app is the window.
     if ($script:state -eq 'running' -and $script:settings.openBrowser -and -not $script:appMode -and -not $script:autoOpenDone) {
         $script:autoOpenDone = $true
         Open-Dashboard
@@ -1021,7 +1021,7 @@ function Watch-UpdateStatus {
 }
 
 # Reset the Copy buttons and poll the server.
-$script:appModeTick = 0   # NEW (1.7.0)
+$script:appModeTick = 0   # NEW (1.8.0)
 $timer = New-Object System.Windows.Forms.Timer
 $timer.Interval = 1200
 $timer.Add_Tick({
@@ -1034,13 +1034,13 @@ $timer.Add_Tick({
         [void] $showSignal.Reset()
         Show-Launcher
     }
-    # NEW (1.7.0): a second launcher started in the background: just make
+    # NEW (1.8.0): a second launcher started in the background: just make
     # sure the server is running.
     if ($startSignal.WaitOne(0)) {
         [void] $startSignal.Reset()
         if ($script:state -notin @('running', 'starting')) { Start-Server; Update-Status }
     }
-    # NEW (1.7.0): the Frivo app's Stop or Quit: stop the server and leave.
+    # NEW (1.8.0): the Frivo app's Stop or Quit: stop the server and leave.
     if ($stopSignal.WaitOne(0)) {
         [void] $stopSignal.Reset()
         try { Add-Content -LiteralPath $LauncherLog -Value ('{0} stop asked for by the Frivo app' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')) } catch { }
@@ -1052,7 +1052,7 @@ $timer.Add_Tick({
         [System.Windows.Forms.Application]::Exit()
         return
     }
-    # NEW (1.7.0): the app was set to another PC, or uninstalled, while this
+    # NEW (1.8.0): the app was set to another PC, or uninstalled, while this
     # launcher ran without a tray icon. Bring the icon back so this Frivo can
     # still be found and stopped.
     $script:appModeTick++
@@ -1091,7 +1091,7 @@ Update-Status
 Show-UpdateResult   # NEW (updates)
 
 if ($script:appMode) {
-    # NEW (1.7.0): no window and no tray icon. Opens the app unless it's
+    # NEW (1.8.0): no window and no tray icon. Opens the app unless it's
     # already open (it usually is: it's what started this launcher). From
     # the sign-in entry or after an update it opens in the tray, not on top
     # of everything.
