@@ -1811,53 +1811,44 @@ function addTurn(who, text, opts = {}) {
   // a page at a time.
   if (opts.footer) stack.appendChild(opts.footer);
 
+  // CHANGED (1.6.1): what happened to a reply ("Cleaned up without AI",
+  // "Auto tags"...) used to be a pill under every bubble. Now it's one quiet
+  // mark by the bubble's time, and the words are in the line that appears
+  // when you point at the reply, with the details on hover.
+  const notes = [];
   if (opts.condensed) {
-    const flag = document.createElement("span");
-    flag.className = "turn-flag";
-    flag.textContent = "Shortened to fit the reply length";  // CHANGED (1.5.0)
-    stack.appendChild(flag);
+    notes.push({ text: "Shortened to fit", title: "Shortened to fit the reply length." });
   } else if (opts.repaired) {
-    const flag = document.createElement("span");
-    flag.className = "turn-flag";
-    flag.textContent = "Trimmed to last full sentence";
-    stack.appendChild(flag);
+    notes.push({ text: "Trimmed", title: "Trimmed to the last full sentence." });
   } else if (opts.ruleCleanup) {
-    // NEW (1.6.0): no AI to ask, so Frivo's rules cleaned it up.
-    const flag = document.createElement("span");
-    flag.className = "turn-flag";
-    flag.textContent = "Cleaned up without AI";
-    flag.title = "Spelling, capitals and punctuation fixed by Frivo's rules"
+    notes.push({ text: "No AI", title: "Cleaned up without AI: spelling, capitals and punctuation fixed by Frivo's rules"
       + (opts.ruleCleanupReason ? ` (${opts.ruleCleanupReason})` : "")
-      + ". The AI does the rest: misheard words and garbled sentences.";
-    stack.appendChild(flag);
+      + ". The AI does the rest: misheard words and garbled sentences." });
   } else if (opts.keptExact) {
-    // NEW (1.5.0): Echo tried to reword it, so your own words were used.
-    const flag = document.createElement("span");
-    flag.className = "turn-flag";
-    flag.textContent = "Kept to your words";
-    flag.title = "The clean-up added things you didn't say, so Frivo used your own wording instead.";
-    stack.appendChild(flag);
+    notes.push({ text: "Your words", title: "Kept to your words: the clean-up added things you didn't say, so Frivo used your own wording." });
   }
   if (!isYou && opts.tagShaped) {
-    // NEW (1.5.0): Shape words for tags changed words next to the tags.
-    const flag = document.createElement("span");
-    flag.className = "turn-flag";
-    flag.textContent = "Shaped for tags";
-    flag.title = "Clean up added voice tags and lightly adjusted the words next to them (Shape words for tags).";
-    stack.appendChild(flag);
+    notes.push({ text: "Shaped for tags", title: "Clean up added voice tags and lightly adjusted the words next to them (Shape words for tags)." });
   } else if (!isYou && opts.retaken) {
-    // NEW (1.5.0): spoken again with Retake.
-    const flag = document.createElement("span");
-    flag.className = "turn-flag";
-    flag.textContent = { same: "Said again", plain: "Said again, without tags", fresh: "Said again, different tags" }[opts.retaken] || "Said again";
-    stack.appendChild(flag);
+    notes.push({ text: { same: "Said again", plain: "Said again, no tags", fresh: "Said again, new tags" }[opts.retaken] || "Said again",
+      title: "Spoken again with Retake." });
   } else if (!isYou && opts.autoTagged) {
-    // NEW (1.5.0): Auto tags added the voice tags shown in the bubble.
-    const flag = document.createElement("span");
-    flag.className = "turn-flag";
-    flag.textContent = "Auto tags";
-    flag.title = "The AI added the voice tags, because Auto tags is on (✦ menu).";
-    stack.appendChild(flag);
+    notes.push({ text: "Auto tags", title: "The AI added the voice tags, because Auto tags is on." });
+  }
+  if (notes.length) {
+    notes.forEach((n) => {
+      const el = document.createElement("span");
+      el.className = "turn-note";
+      el.textContent = n.text;
+      el.title = n.title;
+      meta.insertBefore(el, meta.firstChild);
+    });
+    const mark = document.createElement("span");
+    mark.className = "bubble-note";
+    mark.setAttribute("role", "img");
+    mark.setAttribute("aria-label", notes.map((n) => n.title).join(" "));
+    mark.title = notes.map((n) => n.title).join("\n");
+    stamp.insertBefore(mark, stamp.firstChild);
   }
 
   // Under the bubble, in the margin — present when you look for it, out of
@@ -3294,44 +3285,45 @@ function voiceRowNode(v) {
   pick.type = "button";
   pick.className = "voice-pick";
 
+  // CHANGED (1.6.1): the name, with its language and gender quietly
+  // underneath, and the tag label in a column of its own, so every row
+  // lines up and names aren't cut short by a label beside them.
   const name = document.createElement("span");
   name.className = "voice-name";
+  const nameText = document.createElement("span");
+  nameText.className = "voice-name-text";
+  nameText.textContent = voiceShortName(v);
+  nameText.title = voiceShortName(v);
+  const sub = document.createElement("span");
+  sub.className = "voice-sub";
+  const langLabel = voiceLanguageLabel(v);
+  const lang = document.createElement("span");
+  lang.className = "voice-lang";
+  if (langLabel) {
+    // A language worked out from the accent rather than stated by the voice
+    // is marked, so a wrong guess is explicable instead of baffling.
+    if (v.language_source === "accent") { lang.classList.add("is-guess"); lang.title = "Worked out from the accent"; }
+    lang.textContent = langLabel;
+  }
+  const gender = document.createElement("span");
+  gender.className = "voice-gender";
+  gender.textContent = v.gender || "";
+  sub.append(lang, gender);
+  name.append(nameText, sub);
+
   // NEW (1.5.0): how well it takes voice tags, from what ElevenLabs reports.
-  // The name shortens before the label does.
+  const fitCell = document.createElement("span");
+  fitCell.className = "voice-fit-cell";
   const fit = TAG_FIT_LABELS[v.tag_fit];
   if (fit) {
-    const text = document.createElement("span");
-    text.className = "voice-name-text";
-    text.textContent = voiceShortName(v);
     const badge = document.createElement("span");
     badge.className = `voice-fit is-${v.tag_fit}`;
     badge.textContent = fit.label;
     badge.title = fit.title;
-    name.classList.add("has-fit");
-    name.append(text, badge);
-  } else {
-    name.textContent = voiceShortName(v);
+    fitCell.appendChild(badge);
   }
 
-  const lang = document.createElement("span");
-  lang.className = "voice-lang";
-  const langLabel = voiceLanguageLabel(v);
-  if (langLabel) {
-    // A language worked out from the accent rather than stated by the voice
-    // is marked, so a wrong guess is explicable instead of baffling.
-    if (v.language_source === "accent") lang.classList.add("is-guess");
-    lang.textContent = langLabel;
-  } else {
-    // Kept in the DOM even when empty so the gender column stays aligned
-    // with the rows above and below it.
-    lang.classList.add("is-blank");
-  }
-
-  const gender = document.createElement("span");
-  gender.className = "voice-gender";
-  gender.textContent = v.gender || "";
-
-  pick.append(name, lang, gender);
+  pick.append(name, fitCell);
   pick.addEventListener("click", () => chooseVoice(v));
 
   row.append(mark, pick);
@@ -9944,6 +9936,7 @@ function updateVoiceTagButton() {
   const id = activeVoiceId();
   const eleven = Boolean(id) && voiceEngine({ voice_id: id }) === "elevenlabs";
   wrap.classList.toggle("is-hidden", !eleven);
+  if ($("tagSplit")) $("tagSplit").classList.toggle("is-hidden", !eleven);   // NEW (1.6.1): Suggest, under the box
   if (!eleven) {
     const pop = $("voiceTagPop");
     if (pop) pop.classList.add("is-hidden");
@@ -10855,7 +10848,7 @@ function showAutoTagsState() {
   const label = $("tagSplitLabel");
   const main = $("voiceTagSuggestQuick");
   if (split) split.classList.toggle("is-auto", on);
-  if (label) label.textContent = on ? "Auto" : "Suggest";
+  if (label) label.textContent = on ? "Auto tags on" : "Suggest tags";   // CHANGED (1.6.1)
   if (main) main.title = on
     ? "Auto tags is on: the AI tags every message as it's spoken. Click for the options."
     : "The AI adds voice tags that fit what you've typed. Your words stay the same.";
@@ -12752,16 +12745,19 @@ function richCloseMenu() {
   if (rich.menu) { rich.menu.remove(); rich.menu = null; }
 }
 
+// CHANGED (1.6.1): a box at the top to type any tag of your own, with
+// matching tags listed as you type (the ones you use, Frivo's, yours);
+// otherwise suggestions that fit the one you clicked. Arrows choose, Enter
+// takes it, Esc closes.
 function richOpenMenu(chip) {
   richCloseMenu();
   const composer = rich.el.closest(".composer");
+  const current = chip.dataset.tag || "";
   const menu = document.createElement("div");
   menu.className = "rich-chip-menu";
-  menu.setAttribute("role", "menu");
-  const label = document.createElement("span");
-  label.className = "rich-chip-menu-label";
-  label.textContent = "Swap for";
-  menu.append(label);
+  menu.setAttribute("role", "dialog");
+  menu.setAttribute("aria-label", `Change [${current}]`);
+
   const replaceWith = (tag) => {
     const segs = richSegments();
     const seg = segs.find((s) => s.n === chip);
@@ -12777,30 +12773,101 @@ function richOpenMenu(chip) {
     richCloseMenu();
     rich.el.focus();
   };
-  (typeof tagSwaps === "function" ? tagSwaps(chip.dataset.tag) : []).forEach((t) => {
-    const b = document.createElement("button");
-    b.type = "button";
-    b.setAttribute("role", "menuitem");
-    b.textContent = t;
-    b.addEventListener("mousedown", (e) => e.preventDefault());
-    b.addEventListener("click", () => replaceWith(t));
-    menu.append(b);
-  });
+
+  const form = document.createElement("form");
+  form.className = "rich-chip-menu-form";
+  form.setAttribute("autocomplete", "off");
+  const input = document.createElement("input");
+  input.type = "text";
+  input.maxLength = 38;
+  input.placeholder = "Type any tag…";
+  input.setAttribute("aria-label", "Type a tag");
+  input.spellcheck = false;
+  form.append(input);
+  const label = document.createElement("span");
+  label.className = "rich-chip-menu-label";
+  const list = document.createElement("div");
+  list.className = "rich-chip-menu-list";
+  list.setAttribute("role", "listbox");
   const remove = document.createElement("button");
   remove.type = "button";
   remove.className = "is-remove";
-  remove.setAttribute("role", "menuitem");
-  remove.textContent = "Remove";
+  remove.textContent = "Remove this tag";
   remove.addEventListener("mousedown", (e) => e.preventDefault());
   remove.addEventListener("click", () => replaceWith(null));
-  menu.append(remove);
+  menu.append(form, label, list, remove);
+
+  const VALID = /^[A-Za-z][A-Za-z' \-]{0,37}$/;
+  const everyTag = () => Array.from(new Set([
+    ...((typeof bracketState === "object" && bracketState.likes) || []),
+    ...(typeof yourTags === "function" ? yourTags() : []),
+    ...(audioTagGroups || []).flatMap((g) => g.tags || []),
+  ]));
+  let items = [];
+  let active = 0;
+  const paint = () => {
+    list.querySelectorAll("button").forEach((b, i) => b.classList.toggle("is-active", i === active));
+  };
+  const fill = () => {
+    const q = input.value.trim().toLowerCase().replace(/^\[|\]$/g, "");
+    if (q) {
+      const matches = everyTag().filter((t) => t !== current && t.toLowerCase().includes(q))
+        .sort((a, b) => (a.toLowerCase().startsWith(q) ? 0 : 1) - (b.toLowerCase().startsWith(q) ? 0 : 1));
+      items = matches.slice(0, 6).map((t) => ({ tag: t }));
+      if (VALID.test(q) && !matches.some((t) => t.toLowerCase() === q)) items.push({ tag: q, custom: true });
+      label.textContent = !items.length ? "Letters, spaces, ' and - only"
+        : items.every((i) => i.custom) ? "Your own tag" : "Matches";
+    } else {
+      items = (typeof tagSwaps === "function" ? tagSwaps(current) : []).map((t) => ({ tag: t }));
+      label.textContent = "Swap for";
+    }
+    active = 0;
+    list.replaceChildren(...items.map((item, i) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.setAttribute("role", "option");
+      if (item.custom) {
+        b.classList.add("is-custom");
+        b.innerHTML = `Use <span class="rich-chip-menu-tag"></span>`;
+        b.querySelector("span").textContent = `[${item.tag}]`;
+      } else {
+        b.textContent = item.tag;
+      }
+      b.addEventListener("mousedown", (e) => e.preventDefault());
+      b.addEventListener("mouseenter", () => { active = i; paint(); });
+      b.addEventListener("click", () => take(item));
+      return b;
+    }));
+    paint();
+  };
+  const take = (item) => {
+    if (!item) return;
+    if (item.custom && typeof rememberYourTag === "function") rememberYourTag(item.tag);
+    replaceWith(item.tag);
+  };
+  input.addEventListener("input", fill);
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "ArrowDown") { e.preventDefault(); active = Math.min(items.length - 1, active + 1); paint(); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); active = Math.max(0, active - 1); paint(); }
+    else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); richCloseMenu(); rich.el.focus(); }
+  });
+  form.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const q = input.value.trim().replace(/^\[|\]$/g, "");
+    if (items[active]) take(items[active]);
+    else if (VALID.test(q)) take({ tag: q, custom: true });
+  });
+  fill();
+
   composer.append(menu);
   const c = chip.getBoundingClientRect();
   const box = composer.getBoundingClientRect();
-  const width = menu.offsetWidth || 180;
+  const width = menu.offsetWidth || 220;
   menu.style.left = `${Math.max(8, Math.min(c.left - box.left, box.width - width - 8))}px`;
   menu.style.bottom = `${box.bottom - c.top + 6}px`;
   rich.menu = menu;
+  // Typing goes straight into the box; the message keeps its place.
+  setTimeout(() => input.focus(), 0);
 }
 
 // ---- dragging a chip: lift, follow, magnify, settle ----

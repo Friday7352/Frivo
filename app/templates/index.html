@@ -537,19 +537,14 @@
                    put in where the cursor is; Suggest asks the AI to add
                    some to what you've typed. -->
               <span class="chip-wrap voice-tag-wrap is-hidden" id="voiceTagWrap">
-                <!-- CHANGED (1.5.0): one split pill. The main part is Suggest;
-                     the small arrow opens the menu (tags, Auto tags, Ideas). -->
-                <span class="tag-split" id="tagSplit">
-                  <button id="voiceTagSuggestQuick" class="tag-split-main" type="button"
-                          title="The AI adds voice tags that fit what you've typed. Your words stay the same.">
-                    <svg class="icon-14" aria-hidden="true"><use href="#i-sparkle"/></svg><span id="tagSplitLabel">Suggest</span>
-                  </button>
-                  <button id="voiceTagBtn" class="tag-split-more" type="button" aria-haspopup="dialog"
-                          aria-expanded="false" aria-controls="voiceTagPop"
-                          aria-label="Voice tag options" title="Voice tags: pick one, Auto tags, Ideas as I type">
-                    <svg class="icon-14" aria-hidden="true"><use href="#i-chevron"/></svg>
-                  </button>
-                </span>
+                <!-- CHANGED (1.6.1): a small tag icon in the box, only for a voice
+                     that acts tags out. It opens the menu (tags, Suggest, Auto
+                     tags, Ideas). Suggest itself is in the row under the box. -->
+                <button id="voiceTagBtn" class="composer-icon composer-tag-btn" type="button" aria-haspopup="dialog"
+                        aria-expanded="false" aria-controls="voiceTagPop"
+                        aria-label="Voice tags" title="Voice tags: this voice acts them out. Pick one, Suggest, Auto tags">
+                  <svg class="icon-18" aria-hidden="true"><use href="#i-sparkle"/></svg>
+                </button>
                 <div id="voiceTagPop" class="popover voice-tag-pop is-hidden" role="dialog" aria-label="Voice tags">
                   <div class="voice-tag-head">
                     <div>
@@ -618,37 +613,6 @@
                 </div>
               </span>
 
-              <label class="switch icon-switch" title="Send the message automatically once you stop talking">
-                <span class="switch-label">Auto</span>
-                <input type="checkbox" id="autoSendToggle">
-                <span class="switch-track icon-switch-track" aria-hidden="true">
-                  <svg class="icon-16"><use href="#i-bolt"/></svg>
-                </span>
-              </label>
-
-              <!-- Speak and Chatbox: the two switches that decide what a
-                   message costs and where it goes. -->
-              <span class="composer-toggles" id="composerToggles">
-                <label class="switch icon-switch" id="speakSwitch"
-                       title="Speak the reply. Off = text only, costs nothing.">
-                  <input type="checkbox" id="speakToggle" checked>
-                  <span class="switch-track icon-switch-track" aria-hidden="true">
-                    <svg class="icon-16"><use href="#i-speaker"/></svg>
-                  </span>
-                  <span class="switch-label is-hidden">Speak</span>
-                </label>
-                <label class="switch icon-switch" id="oscSwitch"
-                       title="Show the reply in your VRChat chatbox as it plays">
-                  <input type="checkbox" id="oscToggle">
-                  <span class="switch-track icon-switch-track" aria-hidden="true">
-                    <svg class="icon-16"><use href="#i-chat"/></svg>
-                  </span>
-                  <span class="switch-label is-hidden">Chatbox</span>
-                </label>
-              </span>
-
-              <span class="composer-sep" aria-hidden="true"></span>
-
               <button id="dictateBtn" class="btn-mic" type="button" aria-label="Dictate"
                       title="Click to start dictation, click again to stop">
                 <svg class="icon-18"><use href="#i-mic"/></svg>
@@ -659,7 +623,45 @@
               </button>
             </div>
 
-            <p id="status" class="status composer-status" role="status"></p>
+            <!-- CHANGED (1.6.1): Auto-send, Speak, Chatbox and Suggest live
+                 under the box now, with their names, so the box is for
+                 typing. -->
+            <div class="composer-under" id="composerUnder">
+              <label class="switch under-toggle" title="Send the message automatically once you stop talking">
+                <input type="checkbox" id="autoSendToggle">
+                <span class="switch-track under-toggle-track" aria-hidden="true">
+                  <svg class="icon-14"><use href="#i-bolt"/></svg>
+                </span>
+                <span class="switch-label under-toggle-label">Auto-send</span>
+              </label>
+              <!-- Speak and Chatbox: the two switches that decide what a
+                   message costs and where it goes. -->
+              <span class="composer-toggles" id="composerToggles">
+                <label class="switch under-toggle" id="speakSwitch"
+                       title="Speak the reply. Off = text only, costs nothing.">
+                  <input type="checkbox" id="speakToggle" checked>
+                  <span class="switch-track under-toggle-track" aria-hidden="true">
+                    <svg class="icon-14"><use href="#i-speaker"/></svg>
+                  </span>
+                  <span class="switch-label under-toggle-label">Speak</span>
+                </label>
+                <label class="switch under-toggle" id="oscSwitch"
+                       title="Show the reply in your VRChat chatbox as it plays">
+                  <input type="checkbox" id="oscToggle">
+                  <span class="switch-track under-toggle-track" aria-hidden="true">
+                    <svg class="icon-14"><use href="#i-chat"/></svg>
+                  </span>
+                  <span class="switch-label under-toggle-label">Chatbox</span>
+                </label>
+              </span>
+              <span class="tag-split under-tags is-hidden" id="tagSplit">
+                <button id="voiceTagSuggestQuick" class="under-btn" type="button"
+                        title="The AI adds voice tags that fit what you've typed. Your words stay the same.">
+                  <svg class="icon-14" aria-hidden="true"><use href="#i-sparkle"/></svg><span id="tagSplitLabel">Suggest tags</span>
+                </button>
+              </span>
+              <p id="status" class="status composer-status" role="status"></p>
+            </div>
           </div>
         </main>
 

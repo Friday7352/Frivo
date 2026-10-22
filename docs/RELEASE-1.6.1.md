@@ -39,3 +39,13 @@ How it works:
 The launcher could stay open saying **Stopped** after an update, and Frivo wasn't started again. The update watcher asks the launcher to close before setup replaces the files. When that request didn't reach it, the launcher stayed open, and because a launcher was still running, nothing restarted Frivo.
 
 The launcher now follows the update itself. It closes when the update starts installing, and if it's somehow still open when the update finishes, it starts the server again.
+
+
+## A cleaner message box
+
+- **Only typing in the box.** The box has the mic and Send, plus a small tag icon when the voice acts tags out. Auto-send, Speak, Chatbox and **Suggest tags** are in a row underneath, with their names; one that's on is lit, with a small dot.
+- **The cursor starts at the beginning.** It no longer appears after "Say something…".
+- **Quieter chips.** The voice, language, style, length and volume chips above the box have no outlines.
+- **No more labels under replies.** "Cleaned up without AI", "Auto tags" and the like are a small dot by the reply's time. The words show in the line that appears when you point at the reply, with the details on hover.
+- **A straighter voice list.** Each voice shows its name, with its language and gender underneath. The tag label (v4 ready, tags) has its own column, so names aren't cut short and every row lines up.
+- **Changing a tag.** Click a tag in your message to get suggestions and a box to type any tag of your own; matching tags are listed as you type. Arrows choose, Enter takes it, and a new tag is kept with your tags.

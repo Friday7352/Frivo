@@ -2574,6 +2574,22 @@ html[data-theme="light"] .rail-theme .rail-sun { display: block; }
 }
 .turn.is-you .turn-flag { align-self: flex-end; }
 
+/* NEW (1.6.1): what happened to a reply: a small mark by the time, and a
+   word in the hover line (details on hover). Replaces the pills. */
+.bubble-note {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.75;
+  vertical-align: 1px;
+  cursor: help;
+}
+.turn-note { flex: none; color: var(--ink-dim); cursor: help; }
+.turn-note + .turn-note::before, .turn-note + :not(.turn-note)::before { content: none; }
+
 /* ============================================================
    Listening — a drawer beside the chat
    ============================================================ */
@@ -4888,3 +4904,171 @@ html.motion-ready .stage { transition: transform var(--dur-smooth) var(--spring-
 .key-check-line.is-ok { color: var(--signal); }
 .key-check-line.is-bad { color: var(--alert); }
 .lamp.is-warn { background: var(--alert); box-shadow: 0 0 6px var(--alert); }
+
+
+/* ============================================================
+   NEW (1.6.1): a cleaner message box
+   ============================================================ */
+
+/* The placeholder sits behind the caret instead of before it, so the
+   caret is at the start of the box, not after "Say something...". */
+.composer.has-rich .rich-input { position: relative; }
+.rich-input.is-empty::before {
+  position: absolute;
+  left: 4px;
+  top: 8px;
+  right: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* In the box: typing, the tag icon (voices that act tags out), the mic
+   and Send. */
+.composer-icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--ink-faint);
+  cursor: pointer;
+  transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+.composer-icon:hover, .composer-icon[aria-expanded="true"] { background: var(--fill); color: var(--accent); }
+.composer-tag-btn { color: color-mix(in srgb, var(--accent) 70%, var(--ink-faint)); }
+.voice-tag-wrap.is-thinking .composer-tag-btn svg { animation: pm-breathe 1.2s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .voice-tag-wrap.is-thinking .composer-tag-btn svg { animation: none; } }
+
+/* Under the box: the switches, with their names, and Suggest. */
+.composer-under {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px 4px;
+  margin: 8px 2px 0;
+  min-height: 28px;
+}
+.composer-under .composer-toggles { display: inline-flex; gap: 4px; }
+.composer-under .composer-toggles.is-hidden { display: none; }
+.under-toggle, .under-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px 0 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink-faint);
+  font: inherit;
+  font-size: var(--text-caption);
+  cursor: pointer;
+  transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+.under-toggle:hover, .under-btn:hover { background: var(--fill); color: var(--ink); }
+.under-toggle .under-toggle-track {
+  width: auto; height: auto;
+  display: grid; place-items: center;
+  background: transparent;
+  border-radius: 0;
+  color: inherit;
+}
+.under-toggle .under-toggle-track::after { display: none; }
+.under-toggle .under-toggle-label { position: static; width: auto; height: auto; overflow: visible; clip: auto; }
+/* On: the icon and the name in the accent colour, and a small dot. */
+.under-toggle:has(input:checked) { color: var(--ink); }
+.under-toggle input:checked ~ .under-toggle-track { background: transparent; color: var(--accent); }
+.under-toggle:has(input:checked) .under-toggle-label::after {
+  content: "";
+  display: inline-block;
+  width: 5px; height: 5px;
+  margin-left: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  vertical-align: 2px;
+}
+.under-toggle:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 1px; }
+.under-toggle.is-paused { opacity: 0.55; }
+.under-toggle.is-paused .under-toggle-track { outline: 0; }
+.under-tags.tag-split {   /* was a pill in the box */
+  height: auto; border: 0; background: transparent; color: inherit; overflow: visible; border-radius: 0;
+}
+.under-tags.is-hidden { display: none; }
+.under-tags .under-btn { color: color-mix(in srgb, var(--accent) 80%, var(--ink-dim)); }
+.under-tags .under-btn:hover { background: var(--accent-soft); color: var(--accent); }
+.under-tags.is-auto .under-btn { color: var(--accent); font-weight: 600; }
+.under-tags.is-auto .under-btn:hover { background: var(--accent-soft); }
+.under-btn.is-busy svg { animation: pm-breathe 1.2s ease-in-out infinite; }
+.composer-under .composer-status {
+  flex: 1 1 160px;
+  min-width: 0;
+  margin: 0 0 0 auto;
+  text-align: right;
+}
+
+/* The chips above the box: no outlines, just the words and their icons,
+   with a soft background where you point. */
+.session-strip { gap: 2px; margin-bottom: 8px; }
+.session-strip .chip { border-color: transparent; padding: 0 9px; border-radius: 8px; }
+.session-strip .chip:hover, .session-strip .chip[aria-expanded="true"] { background: var(--fill); border-color: transparent; }
+.session-strip .chip--suggest { border-color: transparent; }
+@media (max-width: 640px) {
+  .composer-under .composer-status { flex-basis: 100%; text-align: left; margin-left: 4px; }
+  .under-toggle .under-toggle-label { font-size: var(--text-caption2); }
+}
+
+
+/* NEW (1.6.1): the voice list, straightened. Each row: the mark, the name
+   with "language · gender" under it, the tag label in its own column, then
+   the cost, the sample and the menu, all on fixed tracks. */
+.voice-pick {
+  grid-template-columns: minmax(0, 1fr) 76px;
+  gap: 10px;
+  padding: 9px 6px 9px 8px;
+}
+.voice-name { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.voice-name-text { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.voice-sub {
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+  font-size: var(--text-caption);
+  font-weight: 400;
+  color: var(--ink-faint);
+  white-space: nowrap;
+  overflow: hidden;
+}
+.voice-sub .voice-lang {
+  padding: 0; border-radius: 0; background: none; box-shadow: none;
+  font-size: inherit; color: inherit; overflow: hidden; text-overflow: ellipsis; min-width: 0;
+}
+.voice-sub .voice-lang.is-guess { font-style: italic; box-shadow: none; }
+.voice-sub .voice-gender { font-size: inherit; color: inherit; flex: none; }
+.voice-sub .voice-lang:not(:empty) + .voice-gender:not(:empty)::before { content: "·"; margin-right: 6px; }
+.voice-row.is-current .voice-sub { color: color-mix(in srgb, var(--accent) 60%, var(--ink-faint)); }
+.voice-fit-cell { justify-self: end; display: flex; justify-content: flex-end; }
+.voice-cost { width: 44px; }
+@media (max-width: 720px) {
+  .voice-pick { grid-template-columns: minmax(0, 1fr) 70px; }
+}
+
+
+/* NEW (1.6.1): a tag's menu: type any tag, or pick a suggestion. */
+.rich-chip-menu { width: 230px; gap: 2px; }
+.rich-chip-menu-form { padding: 4px 4px 2px; }
+.rich-chip-menu-form input {
+  width: 100%;
+  height: 32px;
+  padding: 0 10px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  border-radius: 8px;
+}
+.rich-chip-menu-list { display: flex; flex-direction: column; max-height: 220px; overflow-y: auto; }
+.rich-chip-menu button.is-active { background: var(--accent-soft); }
+.rich-chip-menu button.is-custom { font-family: var(--font-body); color: var(--ink-dim); }
+.rich-chip-menu-tag { font-family: var(--font-mono); color: var(--accent); }
