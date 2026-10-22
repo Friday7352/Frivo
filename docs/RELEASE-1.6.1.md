@@ -33,3 +33,9 @@ How it works:
 - **What stays put:** settings, profiles and keys stay in Frivo's own folder. Backups never bring another PC's folders with them.
 - **Uninstalling** also removes the built-in AI from a picked folder. If you delete your settings, it removes Frivo's subfolders there too, never anything else in the folder.
 - **Ollama's models:** Storage explains how to move them on the Ollama PC (OLLAMA_MODELS).
+
+## Frivo comes back after an in-app update
+
+The launcher could stay open saying **Stopped** after an update, and Frivo wasn't started again. The update watcher asks the launcher to close before setup replaces the files. When that request didn't reach it, the launcher stayed open, and because a launcher was still running, nothing restarted Frivo.
+
+The launcher now follows the update itself. It closes when the update starts installing, and if it's somehow still open when the update finishes, it starts the server again.
