@@ -226,6 +226,28 @@ virtual cable to send Frivo's voice into VRChat's microphone, and another so
 Frivo hears only the game or app you choose, not your own mic. Frivo doesn't
 install or set up Voicemeeter.
 
+## The Frivo app (Windows)
+
+The Frivo app is Frivo in its own window, with a tray icon and no browser tab.
+Download `FrivoApp-Setup-<version>.exe` from the
+[app's releases](https://github.com/Friday7352/Frivo/releases?q=app-v&expanded=true).
+The first time it opens, it asks where Frivo runs:
+
+- **On this PC.** Frivo's server runs in the background and the app is its
+  window, so there's only one thing to open. Frivo's launcher stays out of
+  sight, and the Frivo shortcuts and starting with Windows open the app. If
+  Frivo isn't installed yet, the app downloads its setup from GitHub, checks
+  it, and runs it.
+- **On another PC.** Type the address shown in Frivo's launcher on that PC.
+  The first time, the app shows that Frivo's certificate and asks you to
+  trust it, then remembers it.
+
+The app shows Frivo's own pages, so every Frivo update shows up in it with no
+app update needed. The app updates itself when its own parts change. Its
+settings (where Frivo runs, starting with Windows, what closing the window
+does) are under **Settings › App** and on the tray icon's menu. Phones and
+browsers keep working as before.
+
 ## Use Frivo on your phone or another PC
 
 During setup you can allow other devices on your home network. The Frivo
@@ -323,6 +345,11 @@ repository. Everything else — the installer, Apps & features,
 
 Installed copies offer it within six hours. The release notes appear in the
 update dialog.
+
+**The Frivo app.** Its code is in `desktop\`. Run `Build-App.bat` (needs
+[Node.js](https://nodejs.org)) to make `desktop\dist\FrivoApp-Setup-<version>.exe`.
+See [`desktop/README.md`](desktop/README.md) for how it works and how to
+publish an app update.
 
 **Tests.** See [`tests/README.md`](tests/README.md).
 

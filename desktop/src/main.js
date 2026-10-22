@@ -1,0 +1,1035 @@
+'use strict';
+/*
+  Frivo App: Frivo in its own window.
+
+  Frivo itself is a web app served by Frivo's server (Python, app\app.py).
+  This app shows it, the way a browser tab does, and adds what a tab can't:
+  a window and a tray icon of its own, starting with Windows, and running
+  Frivo on this PC without a separate launcher window.
+
+    On this PC       Frivo's launcher runs Frivo's server in the background
+                     (app mode, see frivo-local.js); this app is the window.
+    On another PC    connects to Frivo's address there, like a phone does.
+
+  Frivo's pages come from Frivo's server, so a Frivo update changes what's
+  shown here with no update to this app. This app updates itself only when
+  its own parts change (updater below), from its own releases on GitHub.
+*/
+
+const {
+  app, BrowserWindow, Tray, Menu, ipcMain, session, shell, net, nativeImage,
+  clipboard, Notification, dialog, screen,
+} = require('electron');
+const path = require('path');
+const fs = require('fs');
+const { pathToFileURL } = require('url');
+const { spawn } = require('child_process');
+
+const pkg = require('../package.json');
+const { Settings } = require('./settings');
+const { normalizeAddress } = require('./address');
+const trust = require('./trust');
+const gh = require('./github');
+const { FrivoLocal, lanAddress } = require('./frivo-local');
+
+const REPOSITORY = pkg.frivo.repository;
+const PORT = pkg.frivo.port;
+const MINIMUM_FRIVO = gh.parseVersion(pkg.frivo.minimumFrivo);
+const APP_ID = pkg.build.appId;
+const IS_WINDOWS = process.platform === 'win32';
+const UPDATE_EVERY_MS = 6 * 60 * 60 * 1000;
+const PROBE_EVERY_MS = 4000;
+
+// For tests and for working on the app away from Windows: "Frivo on this
+// PC" is this address, with none of the Windows parts (launcher, registry).
+const TEST_LOCAL_ORIGIN = process.env.FRIVO_APP_LOCAL_ORIGIN || '';
+
+// The app's own folder. Never %APPDATA%\Frivo, which is Frivo's: Electron
+// would otherwise pick a folder named after the app, right next to it.
+app.setPath('userData', process.env.FRIVO_APP_USER_DATA || path.join(app.getPath('appData'), 'Frivo App'));
+if (IS_WINDOWS) app.setAppUserModelId(APP_ID);
+
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  start();
+}
+
+function start() {
+  const settings = new Settings(path.join(app.getPath('userData'), 'app-settings.json'));
+  const local = new FrivoLocal({ appData: app.getPath('appData'), execPath: process.execPath });
+  const hiddenStart = process.argv.includes('--hidden');
+
+  const state = {
+    win: null,
+    tray: null,
+    // What's in the window: 'shell' (the app's own screens) or 'frivo'.
+    showing: null,
+    view: null,             // the shell screen showing, or to show
+    origin: null,           // the Frivo being shown, once it answers
+    pendingLoad: false,     // started hidden: Frivo's page loads on first show
+    everShown: false,
+    connected: false,
+    misses: 0,
+    probeTimer: null,
+    install: null,          // Frivo on this PC, as found
+    lanUrl: null,
+    userStopped: false,
+    quitting: false,
+    localPins: {},          // hostname -> { fingerprint, pem }, for Frivo on this PC
+    pendingTrust: null,     // the certificate the trust screen is asking about
+    connectSeq: 0,          // a newer connect makes older ones give up
+    update: { state: 'idle', version: '', error: '', file: '', percent: 0 },
+    busy: false,            // install or start in progress: no double clicks
+  };
+
+  const iconPath = path.join(__dirname, '..', 'build', IS_WINDOWS ? 'icon.ico' : 'icon.png');
+
+  // ---------------------------------------------------------------- helpers
+
+  function originOf(url) {
+    try { return new URL(url).origin; } catch { return null; }
+  }
+
+  function hostOf(url) {
+    try { return new URL(url).host; } catch { return url; }
+  }
+
+  // Exactly the app's own screens, nothing else that happens to be a file.
+  const SHELL_URL = pathToFileURL(path.join(__dirname, 'ui', 'shell.html')).href;
+  function isShellUrl(url) {
+    return String(url || '').split(/[?#]/)[0] === SHELL_URL;
+  }
+
+  function fromShell(event) {
+    return isShellUrl(event.senderFrame && event.senderFrame.url);
+  }
+
+  function fromFrivo(event) {
+    return Boolean(state.origin) && originOf(event.senderFrame && event.senderFrame.url) === state.origin;
+  }
+
+  function notify(title, body) {
+    try {
+      if (Notification.isSupported()) new Notification({ title, body, icon: iconPath, silent: true }).show();
+    } catch { /* no notifications: nothing lost */ }
+  }
+
+  async function probe(origin, timeoutMs = 3500) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const response = await net.fetch(`${origin}/static/icon.png`, {
+        method: 'HEAD', cache: 'no-store', signal: controller.signal, bypassCustomProtocolHandlers: true,
+      });
+      return response.ok;
+    } catch {
+      return false;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  function sleep(ms) {
+    return new Promise((r) => setTimeout(r, ms));
+  }
+
+  function frivoOutdated() {
+    if (!state.install || !state.install.version) return false;
+    const v = gh.parseVersion(state.install.version);
+    return Boolean(v && gh.compareVersions(v, MINIMUM_FRIVO) < 0);
+  }
+
+  // ---------------------------------------------------------------- window
+
+  function restoreBounds() {
+    const b = settings.get('bounds');
+    if (!b || typeof b.width !== 'number') return { width: 1280, height: 860 };
+    const area = screen.getDisplayMatching(b).workArea;
+    const visible = b.x < area.x + area.width - 80 && b.x + b.width > area.x + 80 &&
+                    b.y < area.y + area.height - 80 && b.y + b.height > area.y;
+    return visible ? b : { width: b.width, height: b.height };
+  }
+
+  function createWindow() {
+    const bounds = restoreBounds();
+    const win = new BrowserWindow({
+      ...bounds,
+      minWidth: 380,
+      minHeight: 520,
+      show: false,
+      title: 'Frivo',
+      icon: iconPath,
+      backgroundColor: '#0f1013',
+      autoHideMenuBar: true,
+      webPreferences: {
+        preload: path.join(__dirname, 'preload.js'),
+        contextIsolation: true,
+        sandbox: true,
+        nodeIntegration: false,
+        spellcheck: true,
+      },
+    });
+    win.setMenuBarVisibility(false);
+    if (settings.get('bounds') && settings.get('bounds').maximized) win.maximize();
+
+    // The page's own <title> would replace "Frivo" with whatever it says.
+    win.on('page-title-updated', (e) => e.preventDefault());
+
+    let saveTimer = null;
+    const saveBounds = () => {
+      clearTimeout(saveTimer);
+      saveTimer = setTimeout(() => {
+        if (win.isDestroyed()) return;
+        settings.set('bounds', { ...win.getNormalBounds(), maximized: win.isMaximized() });
+      }, 400);
+    };
+    win.on('resize', saveBounds);
+    win.on('move', saveBounds);
+
+    win.on('close', (e) => {
+      if (state.quitting) return;
+      e.preventDefault();
+      if (settings.get('closeAction') === 'quit') {
+        quitApp();
+        return;
+      }
+      win.hide();
+      if (!settings.get('trayNoticeShown')) {
+        settings.set('trayNoticeShown', true);
+        notify('Frivo is still running', 'Frivo keeps running in the tray. Right-click its icon to quit.');
+      }
+    });
+
+    win.on('show', () => {
+      state.everShown = true;
+      if (state.pendingLoad && state.origin) {
+        state.pendingLoad = false;
+        loadFrivoPage(state.origin);
+      }
+    });
+
+    const wc = win.webContents;
+
+    // Keys a browser would have: reload, zoom, and the developer tools for
+    // looking into a problem.
+    wc.on('before-input-event', (event, input) => {
+      if (input.type !== 'keyDown') return;
+      const ctrl = input.control || input.meta;
+      const key = String(input.key || '').toLowerCase();
+      if (key === 'f5' || (ctrl && key === 'r')) { event.preventDefault(); reload(); }
+      else if (ctrl && (key === '=' || key === '+')) { event.preventDefault(); wc.setZoomLevel(Math.min(wc.getZoomLevel() + 0.5, 4)); }
+      else if (ctrl && key === '-') { event.preventDefault(); wc.setZoomLevel(Math.max(wc.getZoomLevel() - 0.5, -3)); }
+      else if (ctrl && key === '0') { event.preventDefault(); wc.setZoomLevel(0); }
+      else if (key === 'f12' || (ctrl && input.shift && key === 'i')) { event.preventDefault(); wc.toggleDevTools(); }
+    });
+
+    // Links to anywhere but Frivo open in the browser.
+    wc.on('will-navigate', (event, url) => {
+      if (isShellUrl(url)) return;
+      if (state.origin && originOf(url) === state.origin) return;
+      event.preventDefault();
+      if (/^https?:/i.test(url)) shell.openExternal(url);
+    });
+    wc.setWindowOpenHandler(({ url }) => {
+      if (state.origin && originOf(url) === state.origin) {
+        return {
+          action: 'allow',
+          overrideBrowserWindowOptions: { icon: iconPath, autoHideMenuBar: true, backgroundColor: '#0f1013' },
+        };
+      }
+      if (/^https?:/i.test(url)) shell.openExternal(url);
+      return { action: 'deny' };
+    });
+
+    // Frivo's page failed to load (it went away between the check and the
+    // load): treat it like losing the connection.
+    wc.on('did-fail-load', (event, code, description, url, isMainFrame) => {
+      if (!isMainFrame || code === -3 /* aborted: a newer load */) return;
+      if (state.showing === 'frivo') connectionLost();
+    });
+
+    wc.on('render-process-gone', () => {
+      if (!state.quitting) setTimeout(reload, 500);
+    });
+
+    return win;
+  }
+
+  function showWindow() {
+    const win = state.win;
+    if (!win) return;
+    if (win.isMinimized()) win.restore();
+    win.show();
+    win.focus();
+  }
+
+  function reload() {
+    if (state.showing === 'frivo' && state.origin) loadFrivoPage(state.origin);
+    else if (state.showing === 'shell') sendView();
+  }
+
+  // ---------------------------------------------------------------- shell screens
+
+  function showView(view) {
+    state.view = { ...view, appVersion: app.getVersion() };
+    if (state.showing !== 'shell') {
+      state.showing = 'shell';
+      state.win.loadFile(path.join(__dirname, 'ui', 'shell.html')).catch(() => {});
+      // The page asks for the view once it's ready (shell:ready).
+    } else {
+      sendView();
+    }
+    rebuildTray();
+  }
+
+  function sendView() {
+    if (state.win && !state.win.isDestroyed() && state.showing === 'shell') {
+      state.win.webContents.send('shell:view', state.view);
+    }
+  }
+
+  function busyView(title, detail, actions = [], extra = {}) {
+    showView({ name: 'status', spinner: true, title, detail, actions, ...extra });
+  }
+
+  function errorView(title, detail, actions = [], extra = {}) {
+    showView({ name: 'status', spinner: false, tone: 'error', title, detail, actions, ...extra });
+  }
+
+  async function welcomeView(extra = {}) {
+    // Whatever was connecting or being watched stops: the choice is open again.
+    ++state.connectSeq;
+    stopProbing();
+    const install = IS_WINDOWS ? await local.findInstall() : null;
+    state.install = install || state.install;
+    showView({
+      name: 'welcome',
+      local: {
+        supported: IS_WINDOWS || Boolean(TEST_LOCAL_ORIGIN),
+        installed: Boolean(install) || Boolean(TEST_LOCAL_ORIGIN),
+        version: install ? install.version : '',
+      },
+      remoteUrl: settings.get('remoteUrl') || '',
+      current: settings.get('mode'),
+      canGoBack: Boolean(settings.get('mode')),
+      ...extra,
+    });
+  }
+
+  // ---------------------------------------------------------------- connecting
+
+  async function connect() {
+    const mode = settings.get('mode');
+    if (mode === 'local') return connectLocal();
+    if (mode === 'remote') return connectRemote();
+    return welcomeView();
+  }
+
+  function stopProbing() {
+    clearInterval(state.probeTimer);
+    state.probeTimer = null;
+    state.connected = false;
+    state.misses = 0;
+    state.pendingLoad = false;
+  }
+
+  // Frivo answers at `origin`: show it, and keep checking it's still there.
+  function frivoReady(origin) {
+    state.origin = origin;
+    state.connected = true;
+    state.userStopped = false;   // it's running, whoever started it
+    state.misses = 0;
+    clearInterval(state.probeTimer);
+    state.probeTimer = setInterval(async () => {
+      if (!state.connected || !state.origin) return;
+      if (await probe(state.origin)) { state.misses = 0; return; }
+      state.misses += 1;
+      if (state.misses >= 2) connectionLost();
+    }, PROBE_EVERY_MS);
+
+    if (!state.everShown && !state.win.isVisible()) {
+      // Started at sign-in, in the tray: Frivo's page waits until the window
+      // is first opened, so nothing in it (listening, say) runs unseen.
+      state.pendingLoad = true;
+      state.showing = null;
+    } else {
+      loadFrivoPage(origin);
+    }
+    rebuildTray();
+    pushState();
+  }
+
+  function loadFrivoPage(origin) {
+    state.showing = 'frivo';
+    state.win.loadURL(`${origin}/`).catch(() => {});
+  }
+
+  async function waitForFrivo(origins, { seq, timeoutMs, onWait } = {}) {
+    const until = Date.now() + (timeoutMs || 120000);
+    while (Date.now() < until) {
+      if (seq !== undefined && seq !== state.connectSeq) return null;
+      for (const origin of origins) {
+        if (await probe(origin)) return origin;
+      }
+      if (onWait) onWait();
+      await sleep(1500);
+    }
+    return null;
+  }
+
+  async function connectLocal() {
+    const seq = ++state.connectSeq;
+    stopProbing();
+    state.origin = null;
+
+    if (TEST_LOCAL_ORIGIN) {
+      busyView('Starting Frivo…', '');
+      const origin = await waitForFrivo([TEST_LOCAL_ORIGIN], { seq, timeoutMs: 60000 });
+      if (seq !== state.connectSeq) return;
+      if (origin) frivoReady(origin);
+      else errorView("Frivo didn't start", '', [{ id: 'retry', label: 'Try again', primary: true }, { id: 'change', label: 'Change where Frivo runs' }]);
+      return;
+    }
+
+    const install = await local.findInstall();
+    if (seq !== state.connectSeq) return;
+    state.install = install;
+    if (!install) {
+      local.setAppMode(false);
+      await syncShortcuts();
+      welcomeView({ notice: "Frivo isn't installed on this PC. Install it, or connect to Frivo on another PC." });
+      return;
+    }
+
+    // From here the launcher keeps to the background and opens this app. A
+    // Frivo too old to have app mode keeps its launcher as it was, and the
+    // app keeps its own shortcuts.
+    const outdated = frivoOutdated();
+    if (!local.setAppMode(!outdated)) {
+      notify("Frivo's settings couldn't be updated", "The launcher may still show its own window. Try again from the tray icon.");
+    }
+    await syncShortcuts();
+
+    // Frivo's own certificate authority, from its data folder: trusted for
+    // this PC's own addresses even if setup couldn't add it to Windows.
+    const pin = trust.localAuthorityPin(local.authorityCert);
+    state.localPins = pin ? { localhost: pin, '127.0.0.1': pin } : {};
+
+    lanAddress().then((ip) => { state.lanUrl = ip ? `https://${ip}:${PORT}` : null; rebuildTray(); pushState(); });
+
+    if (outdated) {
+      notify('Update Frivo', `Frivo ${install.version} runs fine here, but update it to ${pkg.frivo.minimumFrivo} or newer so its launcher stays in the background.`);
+    }
+
+    const origins = [`https://localhost:${PORT}`, `http://localhost:${PORT}`];
+    for (const origin of origins) {
+      if (await probe(origin)) {
+        if (seq === state.connectSeq) frivoReady(origin);
+        return;
+      }
+    }
+    if (seq !== state.connectSeq) return;
+
+    state.userStopped = false;
+    local.startLauncher(install);
+    busyView('Starting Frivo…', 'The first start after installing or updating can take a little longer.');
+    const origin = await waitForFrivo(origins, {
+      seq,
+      timeoutMs: 150000,
+      onWait: () => {
+        const update = local.updateStatus();
+        if (update && /install|download|queue|stopp/i.test(update.state)) {
+          busyView('Updating Frivo…', update.message || 'Frivo starts again when the update finishes.');
+        }
+      },
+    });
+    if (seq !== state.connectSeq) return;
+    if (origin) {
+      frivoReady(origin);
+    } else {
+      errorView("Frivo didn't start", 'The server log usually says why.', [
+        { id: 'retry', label: 'Try again', primary: true },
+        { id: 'log', label: 'View server log' },
+        { id: 'change', label: 'Change where Frivo runs' },
+      ]);
+    }
+  }
+
+  /*
+    Whether Frivo at `url` can be shown: 'up', 'down' (nothing answers), or
+    { trust: info } when it answers with a certificate not trusted yet.
+
+    The certificate is read here first, outside Chromium, and Chromium only
+    connects once it's one that will be accepted. Chromium remembers a
+    certificate it turned down (for half an hour), so letting it try one
+    before the person had trusted it would keep the address failing after
+    they did.
+  */
+  async function remoteCheck(url, timeoutMs = 6000) {
+    const u = new URL(url);
+    if (u.protocol === 'https:') {
+      let info = null;
+      try { info = await trust.inspectServer(url, timeoutMs); } catch { info = null; }
+      if (!info) return 'down';
+      if (!info.trustedBySystem) {
+        const pin = settings.get('trusted')[trust.pinKey(u.hostname)];
+        const pinOk = pin && typeof pin === 'object' && trust.leafTrustedBy(info.leafRaw, pin);
+        if (!pinOk) return { trust: info, pinned: pin && pin.fingerprint };
+      }
+    }
+    return (await probe(url, timeoutMs)) ? 'up' : 'down';
+  }
+
+  function trustView(url, info, pinned) {
+    // The same authority as before, but it didn't sign what was sent (or
+    // what it signed is out of date): not something to offer to trust.
+    if (pinned && pinned === info.fingerprint) {
+      state.pendingTrust = null;
+      errorView(`Frivo at ${hostOf(url)} didn't prove who it is`,
+        "It sent the certificate you trusted, but not one signed by it, or one that's out of date. That isn't what Frivo does, so the app won't connect. If you just reinstalled Frivo on that PC, restart it there and try again.",
+        [{ id: 'retry', label: 'Try again', primary: true }, { id: 'change', label: 'Change where Frivo runs' }]);
+      return;
+    }
+    // A chain that doesn't hold together can't be trusted at all.
+    const pin = { fingerprint: info.fingerprint, pem: info.authorityPem };
+    if (!trust.leafTrustedBy(info.leafRaw, pin)) {
+      state.pendingTrust = null;
+      errorView(`Frivo at ${hostOf(url)} sent a certificate that doesn't check out`,
+        "Its certificate isn't signed by the authority it came with, or it's out of date, so the app won't connect.",
+        [{ id: 'retry', label: 'Try again', primary: true }, { id: 'change', label: 'Change where Frivo runs' }]);
+      return;
+    }
+    state.pendingTrust = { key: trust.pinKey(new URL(url).hostname), pin };
+    showView({
+      name: 'trust',
+      host: hostOf(url),
+      changed: Boolean(pinned),
+      authority: info.authority,
+      server: info.server,
+      names: info.names,
+      fingerprint: trust.formatFingerprint(info.fingerprint),
+      fullFingerprint: info.fingerprint,
+    });
+  }
+
+  // Keeps checking until Frivo at `url` is back (resolves 'up'), needs its
+  // certificate trusted ({ trust }), or a newer connect takes over (null).
+  async function waitForRemote(url, seq) {
+    for (;;) {
+      if (seq !== state.connectSeq) return null;
+      const result = await remoteCheck(url, 4000);
+      if (seq !== state.connectSeq) return null;
+      if (result !== 'down') return result;
+      await sleep(2500);
+    }
+  }
+
+  async function connectRemote() {
+    const seq = ++state.connectSeq;
+    stopProbing();
+    state.origin = null;
+    const url = settings.get('remoteUrl');
+    if (!url) { welcomeView(); return; }
+    const host = hostOf(url);
+
+    busyView(`Connecting to ${host}…`, '');
+    let result = await remoteCheck(url);
+    if (seq !== state.connectSeq) return;
+    if (result === 'down') {
+      errorView(`Can't reach Frivo at ${host}`,
+        'Check that Frivo is running on that PC and that this PC is on the same network. Trying again every few seconds.',
+        [{ id: 'retry', label: 'Try again', primary: true }, { id: 'change', label: 'Change where Frivo runs' }],
+        { waiting: true });
+      result = await waitForRemote(url, seq);
+      if (!result) return;
+    }
+    if (result === 'up') frivoReady(url);
+    else trustView(url, result.trust, result.pinned);
+  }
+
+  // Frivo stopped answering while it was shown.
+  async function connectionLost() {
+    if (!state.connected) return;
+    stopProbing();
+    const seq = ++state.connectSeq;
+    const origin = state.origin;
+    const mode = settings.get('mode');
+
+    if (mode === 'local' && state.userStopped) {
+      stoppedView();
+      return;
+    }
+    if (mode === 'local') {
+      const update = local.updateStatus();
+      if (update && /install|download|queue|stopp|done/i.test(update.state)) {
+        busyView('Updating Frivo…', update.message || 'Frivo starts again when the update finishes.');
+      } else {
+        busyView('Frivo stopped responding', 'Waiting for it to come back…', [
+          { id: 'retry', label: 'Start Frivo', primary: true },
+          { id: 'log', label: 'View server log' },
+        ]);
+      }
+      const back = await waitForFrivo([origin], {
+        seq,
+        timeoutMs: 10 * 60 * 1000,
+        onWait: () => {
+          const u = local.updateStatus();
+          if (u && /install|download|queue|stopp/i.test(u.state) && state.view && state.view.title !== 'Updating Frivo…') {
+            busyView('Updating Frivo…', u.message || 'Frivo starts again when the update finishes.');
+          }
+        },
+      });
+      if (seq !== state.connectSeq) return;
+      if (back) frivoReady(back);
+      else connectLocal();
+      return;
+    }
+
+    busyView(`Reconnecting to ${hostOf(origin)}…`, 'Frivo on that PC stopped answering. This reconnects as soon as it\'s back.', [
+      { id: 'change', label: 'Change where Frivo runs' },
+    ]);
+    const result = await waitForRemote(origin, seq);
+    if (!result || seq !== state.connectSeq) return;
+    if (result === 'up') frivoReady(origin);
+    else trustView(origin, result.trust, result.pinned);
+  }
+
+  function stoppedView() {
+    showView({
+      name: 'status',
+      spinner: false,
+      title: 'Frivo is stopped',
+      detail: "Phones and other devices can't reach it until it's started again.",
+      actions: [{ id: 'start', label: 'Start Frivo', primary: true }, { id: 'change', label: 'Change where Frivo runs' }],
+    });
+  }
+
+  // ---------------------------------------------------------------- choosing
+
+  async function chooseLocal() {
+    const previous = settings.get('mode');
+    settings.update({ mode: 'local' });
+    if (previous === 'remote') applyRemoteLoginItem(false);
+    await connectLocal();
+  }
+
+  async function chooseRemote(text) {
+    const parsed = normalizeAddress(text, PORT);
+    if (!parsed.ok) return parsed;
+    const previous = settings.get('mode');
+    if (previous === 'local' && IS_WINDOWS && state.install) {
+      const { response } = await dialog.showMessageBox(state.win, {
+        type: 'question',
+        title: 'Frivo',
+        message: 'Keep Frivo running on this PC?',
+        detail: "This PC's Frivo goes back to its own launcher, in the tray. Stop it if you only use Frivo on the other PC; it then also stops starting with Windows here.",
+        buttons: ['Stop it', 'Keep it running'],
+        defaultId: 0,
+        cancelId: 1,
+        noLink: true,
+      });
+      if (response === 0) {
+        local.setAppMode(false);
+        const result = await local.stopFrivo(state.install);
+        await local.setStartAtLogin(false, state.install);
+        if (result === 'running') await explainCantStop();
+      }
+    }
+    if (IS_WINDOWS) local.setAppMode(false);
+    settings.update({ mode: 'remote', remoteUrl: parsed.url });
+    await syncShortcuts();
+    applyRemoteLoginItem(settings.get('remoteStartAtLogin'));
+    connectRemote();
+    return { ok: true };
+  }
+
+  // ---------------------------------------------------------------- start / stop / quit
+
+  // Frivo started by its setup, as administrator, can't be stopped from an
+  // ordinary app. Its launcher keeps its own window and tray icon then (it
+  // won't go into app mode as administrator), so that's where to stop it.
+  async function explainCantStop() {
+    await dialog.showMessageBox(state.win, {
+      type: 'warning',
+      title: 'Frivo',
+      message: "Frivo couldn't be stopped from here",
+      detail: "It was started as administrator, most likely by its setup. Stop it from its own launcher (the Frivo icon in the tray), then start it again from this app.",
+      noLink: true,
+    });
+  }
+
+  async function stopFrivo() {
+    if (settings.get('mode') !== 'local') return;
+    state.userStopped = true;
+    stopProbing();
+    const seq = ++state.connectSeq;
+    busyView('Stopping Frivo…', '');
+    const result = state.install ? await local.stopFrivo(state.install) : 'stopped';
+    if (seq !== state.connectSeq) return;
+    if (result === 'running') {
+      state.userStopped = false;
+      await explainCantStop();
+      connectLocal();
+      return;
+    }
+    stoppedView();
+    pushState();
+  }
+
+  async function startFrivo() {
+    state.userStopped = false;
+    await connectLocal();
+  }
+
+  let quittingPromise = null;
+  function quitApp({ keepFrivo = false } = {}) {
+    if (quittingPromise) return quittingPromise;
+    quittingPromise = (async () => {
+      state.quitting = true;
+      stopProbing();
+      if (!keepFrivo && settings.get('mode') === 'local' && state.install) {
+        try { await local.stopFrivo(state.install); } catch { /* quitting anyway */ }
+      }
+      if (state.tray) state.tray.destroy();
+      app.exit(0);
+    })();
+    return quittingPromise;
+  }
+
+  // ---------------------------------------------------------------- start with Windows
+
+  function applyRemoteLoginItem(on) {
+    if (!IS_WINDOWS) return;
+    app.setLoginItemSettings({ openAtLogin: Boolean(on), path: process.execPath, args: ['--hidden'], name: 'Frivo App' });
+  }
+
+  async function getStartAtLogin() {
+    if (!IS_WINDOWS) return false;
+    if (settings.get('mode') === 'local') return local.getStartAtLogin();
+    return Boolean(settings.get('remoteStartAtLogin'));
+  }
+
+  async function setStartAtLogin(on) {
+    if (!IS_WINDOWS) return false;
+    if (settings.get('mode') === 'local') {
+      if (!state.install) return false;
+      return local.setStartAtLogin(Boolean(on), state.install);
+    }
+    settings.set('remoteStartAtLogin', Boolean(on));
+    applyRemoteLoginItem(on);
+    return true;
+  }
+
+  // ---------------------------------------------------------------- shortcuts
+
+  /*
+    Frivo's setup makes "Frivo" shortcuts for everyone on the PC, and in app
+    mode they open this app. This app's installer makes its own "Frivo"
+    shortcuts too, for people who connect to another PC. Both on one desktop
+    would be two identical icons, so this app's own step aside while
+    Frivo's do the job, and come back if that stops being true.
+  */
+  async function syncShortcuts() {
+    if (!IS_WINDOWS || !app.isPackaged) return;
+    const mine = [
+      path.join(app.getPath('desktop'), 'Frivo.lnk'),
+      path.join(app.getPath('appData'), 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Frivo.lnk'),
+    ];
+    const isMine = (p) => {
+      try { return shell.readShortcutLink(p).target.toLowerCase() === process.execPath.toLowerCase(); } catch { return false; }
+    };
+    const removed = new Set(settings.get('removedShortcuts'));
+    const frivosDoIt = settings.get('mode') === 'local' && local.isAppMode() && local.frivoShortcutsExist();
+    for (const p of mine) {
+      if (frivosDoIt) {
+        if (fs.existsSync(p) && isMine(p)) {
+          try { fs.unlinkSync(p); removed.add(p); } catch { /* in use: leave it */ }
+        }
+      } else if (removed.has(p)) {
+        if (!fs.existsSync(p)) {
+          shell.writeShortcutLink(p, 'create', {
+            target: process.execPath, icon: process.execPath, iconIndex: 0, appUserModelId: APP_ID, description: 'Frivo',
+          });
+        }
+        removed.delete(p);
+      }
+    }
+    settings.set('removedShortcuts', [...removed]);
+  }
+
+  // ---------------------------------------------------------------- installing Frivo here
+
+  async function installFrivo() {
+    if (state.busy || !IS_WINDOWS) return;
+    state.busy = true;
+    const seq = ++state.connectSeq;
+    try {
+      showView({ name: 'install', stage: 'download', percent: 0 });
+      const releases = await gh.listReleases(net.fetch, REPOSITORY, `FrivoApp/${app.getVersion()}`);
+      const setup = gh.latestFrivo(releases, REPOSITORY);
+      if (!setup) throw new Error("No Frivo release with a checkable setup file was found on GitHub.");
+      const file = path.join(app.getPath('temp'), 'FrivoApp', gh.FRIVO_ASSET);
+      let last = 0;
+      await gh.downloadVerified(net.fetch, setup, file, REPOSITORY, (received, total) => {
+        const percent = total ? Math.floor((received / total) * 100) : 0;
+        if (percent !== last) { last = percent; showView({ name: 'install', stage: 'download', percent, version: setup.version }); }
+      });
+      if (seq !== state.connectSeq) return;
+      showView({ name: 'install', stage: 'setup', version: setup.version });
+      const code = await local.runSetup(file);
+      try { fs.unlinkSync(file); } catch { /* temp folder: Windows tidies it */ }
+      if (code === 1223) throw new Error('Setup needs administrator approval to install Frivo. Try again and choose Yes.');
+      if (code !== 0) throw new Error(`Setup didn't finish (code ${code}).`);
+      state.busy = false;
+      await chooseLocal();
+    } catch (err) {
+      errorView("Frivo couldn't be installed", err.message || String(err), [
+        { id: 'install', label: 'Try again', primary: true },
+        { id: 'change', label: 'Back' },
+      ]);
+    } finally {
+      state.busy = false;
+    }
+  }
+
+  // ---------------------------------------------------------------- the app's own updates
+
+  async function checkForAppUpdate({ manual = false } = {}) {
+    if (!app.isPackaged && !process.env.FRIVO_APP_UPDATE_TEST) {
+      if (manual) { state.update = { ...state.update, state: 'error', error: 'Updates work in the installed app.' }; pushState(); rebuildTray(); }
+      return;
+    }
+    if (['checking', 'downloading', 'ready'].includes(state.update.state)) return;
+    state.update = { ...state.update, state: 'checking', error: '' };
+    pushState();
+    try {
+      const releases = await gh.listReleases(net.fetch, REPOSITORY, `FrivoApp/${app.getVersion()}`);
+      const found = gh.newerApp(releases, app.getVersion(), REPOSITORY);
+      if (!found) {
+        state.update = { state: manual ? 'current' : 'idle', version: '', error: '', file: '', percent: 0 };
+        pushState();
+        rebuildTray();
+        return;
+      }
+      state.update = { state: 'downloading', version: found.version, error: '', file: '', percent: 0 };
+      pushState();
+      const file = path.join(app.getPath('userData'), 'updates', found.name);
+      await gh.downloadVerified(net.fetch, found, file, REPOSITORY, (received, total) => {
+        state.update.percent = total ? Math.floor((received / total) * 100) : 0;
+      });
+      state.update = { state: 'ready', version: found.version, error: '', file, percent: 100 };
+      notify('Frivo App update ready', `Version ${found.version} installs when you restart the app.`);
+    } catch (err) {
+      state.update = { state: 'error', version: '', error: err.message || String(err), file: '', percent: 0 };
+    }
+    pushState();
+    rebuildTray();
+  }
+
+  function installAppUpdate() {
+    if (state.update.state !== 'ready' || !fs.existsSync(state.update.file)) return;
+    // Silent install of the new version, which starts the app again. Frivo
+    // itself keeps running: this updates the app, not Frivo.
+    const child = spawn(state.update.file, ['/S', '--updated', '--force-run'], { detached: true, stdio: 'ignore' });
+    child.on('error', () => {});
+    child.unref();
+    quitApp({ keepFrivo: true });
+  }
+
+  // ---------------------------------------------------------------- tray
+
+  function rebuildTray() {
+    if (!state.tray) return;
+    const mode = settings.get('mode');
+    const items = [{ label: 'Open Frivo', click: showWindow }];
+
+    if (mode === 'local') {
+      const running = state.connected;
+      items.push({ type: 'separator' });
+      items.push({ label: running ? 'Frivo is running on this PC' : 'Frivo is stopped', enabled: false });
+      if (running) items.push({ label: 'Stop Frivo', click: stopFrivo });
+      else items.push({ label: 'Start Frivo', click: () => { showWindow(); startFrivo(); } });
+      if (state.lanUrl) {
+        items.push({ label: `Copy network address (${state.lanUrl})`, click: () => clipboard.writeText(state.lanUrl) });
+      }
+    } else if (mode === 'remote') {
+      items.push({ type: 'separator' });
+      items.push({ label: `Connected to ${hostOf(settings.get('remoteUrl'))}`, enabled: false });
+    }
+
+    items.push({ type: 'separator' });
+    items.push({
+      label: 'When I close the window',
+      submenu: [
+        { label: 'Keep Frivo running in the tray', type: 'radio', checked: settings.get('closeAction') === 'tray', click: () => setCloseAction('tray') },
+        { label: mode === 'local' ? 'Stop Frivo and quit' : 'Quit', type: 'radio', checked: settings.get('closeAction') === 'quit', click: () => setCloseAction('quit') },
+      ],
+    });
+    if (IS_WINDOWS && mode) {
+      items.push({
+        label: 'Start with Windows',
+        type: 'checkbox',
+        checked: Boolean(state.startAtLoginCache),
+        click: async (item) => { await setStartAtLogin(item.checked); await refreshStartAtLogin(); },
+      });
+    }
+    items.push({ label: 'Change where Frivo runs…', click: () => { showWindow(); welcomeView(); } });
+    if (state.update.state === 'ready') {
+      items.push({ type: 'separator' });
+      items.push({ label: `Restart to update the app (${state.update.version})`, click: installAppUpdate });
+    }
+    items.push({ type: 'separator' });
+    items.push({ label: mode === 'local' ? 'Stop Frivo and quit' : 'Quit Frivo', click: () => quitApp() });
+
+    state.tray.setContextMenu(Menu.buildFromTemplate(items));
+    state.tray.setToolTip(mode === 'local' ? (state.connected ? 'Frivo: running' : 'Frivo: stopped') : 'Frivo');
+  }
+
+  async function refreshStartAtLogin() {
+    state.startAtLoginCache = await getStartAtLogin().catch(() => false);
+    rebuildTray();
+    pushState();
+  }
+
+  function setCloseAction(action) {
+    if (!['tray', 'quit'].includes(action)) return;
+    settings.set('closeAction', action);
+    rebuildTray();
+    pushState();
+  }
+
+  // ---------------------------------------------------------------- Frivo's page <-> app
+
+  async function appState() {
+    const mode = settings.get('mode');
+    return {
+      version: app.getVersion(),
+      platform: process.platform,
+      mode,
+      host: mode === 'remote' ? hostOf(settings.get('remoteUrl')) : 'this PC',
+      local: mode === 'local' ? {
+        running: state.connected,
+        version: state.install ? state.install.version : '',
+        lanUrl: state.lanUrl,
+        outdated: frivoOutdated(),
+        minimum: pkg.frivo.minimumFrivo,
+      } : null,
+      closeAction: settings.get('closeAction'),
+      startAtLogin: Boolean(state.startAtLoginCache),
+      startAtLoginAvailable: IS_WINDOWS,
+      update: { state: state.update.state, version: state.update.version, error: state.update.error, percent: state.update.percent },
+    };
+  }
+
+  async function pushState() {
+    if (state.showing !== 'frivo' || !state.win || state.win.isDestroyed()) return;
+    try { state.win.webContents.send('app:state', await appState()); } catch { /* page gone */ }
+  }
+
+  function handle(channel, guard, fn) {
+    ipcMain.handle(channel, async (event, ...args) => {
+      if (!guard(event)) throw new Error('Not allowed from this page.');
+      return fn(...args);
+    });
+  }
+
+  handle('app:get-state', fromFrivo, () => appState());
+  handle('app:set-close-action', fromFrivo, (a) => { setCloseAction(String(a)); return appState(); });
+  handle('app:set-start-at-login', fromFrivo, async (on) => { await setStartAtLogin(Boolean(on)); await refreshStartAtLogin(); return appState(); });
+  handle('app:stop-frivo', fromFrivo, () => { stopFrivo(); return true; });
+  handle('app:copy', fromFrivo, (text) => { clipboard.writeText(String(text || '').slice(0, 2000)); return true; });
+  handle('app:change-connection', fromFrivo, () => { welcomeView(); return true; });
+  handle('app:check-update', fromFrivo, async () => { await checkForAppUpdate({ manual: true }); return appState(); });
+  handle('app:install-update', fromFrivo, () => { installAppUpdate(); return true; });
+
+  handle('shell:ready', fromShell, () => state.view);
+  handle('shell:choose-local', fromShell, () => { chooseLocal(); return true; });
+  handle('shell:choose-remote', fromShell, (text) => chooseRemote(text));
+  handle('shell:trust', fromShell, async (accept, fingerprint) => {
+    const view = state.view;
+    const pending = state.pendingTrust;
+    if (!view || view.name !== 'trust' || !pending) return false;
+    state.pendingTrust = null;
+    if (!accept) { welcomeView(); return true; }
+    if (fingerprint !== pending.pin.fingerprint) return false;
+    settings.set('trusted', { ...settings.get('trusted'), [pending.key]: pending.pin });
+    connectRemote();
+    return true;
+  });
+  handle('shell:action', fromShell, async (id) => {
+    switch (id) {
+      case 'retry': connect(); break;
+      case 'start': startFrivo(); break;
+      case 'change': welcomeView(); break;
+      case 'back': connect(); break;
+      case 'install': installFrivo(); break;
+      case 'log': if (fs.existsSync(local.serverLog)) shell.openPath(local.serverLog); break;
+      default: return false;
+    }
+    return true;
+  });
+
+  // ---------------------------------------------------------------- session
+
+  function setUpSession() {
+    const ses = session.defaultSession;
+    ses.setUserAgent(`${ses.getUserAgent()} FrivoApp/${app.getVersion()}`);
+    ses.setCertificateVerifyProc(trust.makeVerifier(() => ({ ...settings.get('trusted'), ...state.localPins })));
+
+    // Frivo asks for the microphone (dictation, listening) and the clipboard;
+    // anything else, and anything from another site, is turned down.
+    const allowed = new Set(['media', 'clipboard-read', 'clipboard-sanitized-write', 'notifications', 'fullscreen', 'speaker-selection']);
+    const fromFrivoPage = (url) => Boolean(state.origin) && originOf(url) === state.origin;
+    ses.setPermissionRequestHandler((wc, permission, callback, details) => {
+      callback(allowed.has(permission) && fromFrivoPage(details.requestingUrl || wc.getURL()));
+    });
+    ses.setPermissionCheckHandler((wc, permission, requestingOrigin) => {
+      return allowed.has(permission) && fromFrivoPage(requestingOrigin || (wc && wc.getURL()));
+    });
+  }
+
+  // ---------------------------------------------------------------- go
+
+  app.on('second-instance', (event, argv) => {
+    if (argv.includes('--hidden')) return;
+    showWindow();
+    // Opened from a Frivo shortcut while showing "Frivo is stopped": that
+    // shortcut has just started Frivo, so go and find it.
+    if (settings.get('mode') === 'local' && !state.connected && state.view && state.view.title === 'Frivo is stopped') {
+      connect();
+    }
+  });
+
+  app.on('window-all-closed', () => { /* the tray keeps the app running */ });
+
+  // Windows shutting down or signing out, or anything else that quits the
+  // app as a whole: let the window close instead of hiding it in the tray.
+  // (Frivo itself stops with Windows anyway.)
+  app.on('before-quit', () => {
+    state.quitting = true;
+    stopProbing();
+  });
+
+  app.whenReady().then(async () => {
+    setUpSession();
+    state.win = createWindow();
+
+    state.tray = new Tray(nativeImage.createFromPath(iconPath).resize({ width: 16, height: 16 }));
+    state.tray.on('click', showWindow);
+    state.tray.on('double-click', showWindow);
+    rebuildTray();
+
+    // Something to see straight away, while the app works out where Frivo is.
+    if (settings.get('mode')) busyView('Opening Frivo…', '');
+    if (!hiddenStart) showWindow();
+    await refreshStartAtLogin();
+    await connect();
+
+    setTimeout(() => checkForAppUpdate(), 20000);
+    setInterval(() => checkForAppUpdate(), UPDATE_EVERY_MS);
+  });
+
+  // Exposed for the tests, which drive the app from outside.
+  global.__frivoApp = { state, settings, connect, chooseRemote, chooseLocal, quitApp, appState };
+}

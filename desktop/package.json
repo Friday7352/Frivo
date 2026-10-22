@@ -1,0 +1,66 @@
+{
+  "name": "frivo-app",
+  "productName": "Frivo App",
+  "version": "1.0.0",
+  "description": "Frivo in its own window: runs Frivo on this PC, or connects to Frivo on another PC on your network.",
+  "author": "Friday",
+  "license": "MIT",
+  "private": true,
+  "main": "src/main.js",
+  "frivo": {
+    "repository": "Friday7352/Frivo",
+    "port": 5000,
+    "minimumFrivo": "1.7.0"
+  },
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test test/units.test.js",
+    "dist": "electron-builder --win --x64 --publish never",
+    "test:e2e": "node test/e2e.cjs"
+  },
+  "devDependencies": {
+    "electron": "44.5.1",
+    "electron-builder": "26.16.1",
+    "playwright-core": "1.63.0"
+  },
+  "build": {
+    "appId": "com.friday7352.frivo.app",
+    "productName": "Frivo App",
+    "executableName": "FrivoApp",
+    "copyright": "Copyright (c) 2026 Friday",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "src/**/*",
+      "build/icon.png",
+      "build/icon.ico",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.ico",
+      "artifactName": "FrivoApp-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "shortcutName": "Frivo",
+      "uninstallDisplayName": "Frivo App",
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "runAfterFinish": true,
+      "deleteAppDataOnUninstall": false,
+      "include": "build/installer.nsh"
+    },
+    "publish": null
+  }
+}

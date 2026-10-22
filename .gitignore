@@ -53,6 +53,14 @@ app/voices/
 *.onnx.json
 *.tar.bz2
 
+# NEW (1.7.0): the Frivo app's packages and builds (desktop\). npm ci and
+# Build-App.bat make them again from package-lock.json.
+desktop/node_modules/
+desktop/dist/
+# The app's test certificates: public certificates only, no private keys
+# (desktop/test/fixtures/README.md). Kept, despite *.pem above.
+!desktop/test/fixtures/*.pem
+
 # NEW (1.5.0): files set aside for deleting by hand; never committed
 _to_delete/
 

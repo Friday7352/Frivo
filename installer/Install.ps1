@@ -312,8 +312,12 @@ function Start-FrivoAsUser {
         an Interactive logon runs in the session the user already has open,
         and needs no password for exactly that reason. It is removed again
         straight away.
+
+        NEW (1.7.0): -Window opens Frivo's window (or the Frivo app, in app
+        mode) instead of starting in the tray. "Launch Frivo now" at the end
+        of setup uses it, so Frivo doesn't run as administrator.
     #>
-    param([string] $Target, [string] $User)
+    param([string] $Target, [string] $User, [switch] $Window)
 
     $shim = Join-Path $Target 'Frivo.vbs'
     if (-not (Test-Path -LiteralPath $shim -PathType Leaf)) {
@@ -323,8 +327,9 @@ function Start-FrivoAsUser {
     $root = if ($env:SystemRoot) { $env:SystemRoot } else { 'C:\Windows' }
     $taskName = 'Frivo Restart'
     try {
+        $shimArgs = if ($Window) { '"{0}"' -f $shim } else { '"{0}" -Tray' -f $shim }   # CHANGED (1.7.0)
         $action = New-ScheduledTaskAction -Execute ($root.TrimEnd('\') + '\System32\wscript.exe') `
-            -Argument ('"{0}" -Tray' -f $shim) -WorkingDirectory $Target
+            -Argument $shimArgs -WorkingDirectory $Target
         $principal = New-ScheduledTaskPrincipal -UserId $User -LogonType Interactive -RunLevel Limited
         # No time limit: Task Scheduler's default would end what it started
         # after three days.
@@ -1332,7 +1337,22 @@ $btnNext.Add_Click({
     }
 
     if ($current.Panel -eq $pageDone) {
+        $startedAsUser = $false   # NEW (1.7.0)
         if ($chkLaunch.Checked -and $script:launcherPath) {
+            # CHANGED (1.7.0): as the person signed in to this PC, not as
+            # administrator (setup's own rights). Frivo started from here used
+            # to run as administrator: its files and settings were the same,
+            # but nothing running as that person (the Frivo app, a new
+            # launcher) could stop it. Falls back to the old way.
+            try {
+                $desktopUser = [string] (Get-CimInstance Win32_ComputerSystem -ErrorAction Stop).UserName
+                if ($desktopUser) {
+                    $form.Cursor = [System.Windows.Forms.Cursors]::WaitCursor
+                    $startedAsUser = Start-FrivoAsUser -Target $txtPath.Text -User $desktopUser -Window
+                }
+            } catch { $startedAsUser = $false }
+        }
+        if ($chkLaunch.Checked -and $script:launcherPath -and -not $startedAsUser) {
             # Launch directly through the native host. The VBScript shim is
             # reserved for optional sign-in startup, where -Tray is desired.
             $nativeLauncher = Join-Path $txtPath.Text 'installer\FrivoHost.exe'

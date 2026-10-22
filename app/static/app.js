@@ -14327,3 +14327,114 @@ function omCardUses() {
   });
   refresh();
 })();
+
+
+// ============================================================
+// NEW (1.7.0): the Frivo app (desktop\ in the repo)
+// ============================================================
+// Inside the app, the page has window.frivoApp (desktop\src\preload.js) and
+// Settings gets an App section for the app's own settings. In a browser on
+// Windows, Settings › Updates offers the app instead.
+(function initDesktopApp() {
+  const api = window.frivoApp;
+  const offer = $("appOffer");
+
+  if (!api) {
+    if (!offer) return;
+    const DISMISS_KEY = "frivo_app_offer_dismissed";
+    const windows = /Windows/i.test(navigator.userAgent) && !/Windows Phone/i.test(navigator.userAgent);
+    let dismissed = false;
+    try { dismissed = localStorage.getItem(DISMISS_KEY) === "1"; } catch { /* private window */ }
+    if (!windows || dismissed) return;
+    offer.classList.remove("is-hidden");
+    $("appOfferClose").addEventListener("click", () => {
+      offer.classList.add("is-hidden");
+      try { localStorage.setItem(DISMISS_KEY, "1"); } catch { /* not remembered */ }
+    });
+    // The releases page Frivo updates from, so a fork links to its own app.
+    fetch("/api/updates").then((r) => r.json()).then((d) => {
+      if (d && d.releases_page) $("appOfferLink").href = `${d.releases_page}?q=app-v&expanded=true`;
+    }).catch(() => {});
+    return;
+  }
+
+  document.documentElement.classList.add("in-frivo-app");
+  if (offer) offer.remove();
+  $("appNavBtn").classList.remove("is-hidden");
+
+  const closeSelect = $("appCloseSelect");
+  const loginToggle = $("appLoginToggle");
+  let current = null;
+
+  function updateLabel(u) {
+    switch (u && u.state) {
+      case "checking": return "Checking…";
+      case "downloading": return `Downloading ${u.version}… ${u.percent || 0}%`;
+      case "ready": return `Restart to update to ${u.version}`;
+      case "current": return "Up to date";
+      case "error": return u.error || "Couldn't check";
+      default: return "";
+    }
+  }
+
+  function render(s) {
+    if (!s) return;
+    current = s;
+    const local = s.mode === "local";
+    $("appWhereValue").textContent = local ? "This PC" : (s.host || "—");
+    $("appWhereSub").textContent = local
+      ? "Frivo's server runs in the background here, and this window is Frivo."
+      : "Frivo runs on another PC; this window connects to it like a phone does.";
+
+    const lan = local && s.local && s.local.lanUrl;
+    $("appLanRow").classList.toggle("is-hidden", !lan);
+    if (lan) $("appLanValue").textContent = s.local.lanUrl;
+    $("appRunRow").classList.toggle("is-hidden", !local);
+
+    $("appLoginRow").classList.toggle("is-hidden", !s.startAtLoginAvailable);
+    loginToggle.checked = Boolean(s.startAtLogin);
+    $("appLoginSub").textContent = local
+      ? "Starts Frivo when you sign in, with the app in the tray. The same setting as Frivo's launcher."
+      : "Opens the app in the tray when you sign in.";
+
+    closeSelect.value = s.closeAction === "quit" ? "quit" : "tray";
+    closeSelect.options[1].textContent = local ? "Stop Frivo and quit" : "Quit";
+    $("appCloseSub").textContent = s.closeAction === "quit"
+      ? (local ? "Closing the window stops Frivo on this PC." : "Closing the window quits the app.")
+      : "Frivo keeps running. Right-click the tray icon to quit.";
+
+    $("appVersionValue").textContent = s.version || "—";
+    $("appUpdateValue").textContent = updateLabel(s.update);
+
+    const note = $("appOutdatedNote");
+    const outdated = local && s.local && s.local.outdated;
+    note.classList.toggle("is-hidden", !outdated);
+    if (outdated) {
+      note.textContent = `Frivo ${s.local.version} runs fine in the app, but update it to ${s.local.minimum} or newer (Updates, above) so its launcher stays in the background.`;
+    }
+  }
+
+  const refresh = () => api.getState().then(render).catch(() => {});
+
+  $("appChangeBtn").addEventListener("click", () => api.changeConnection());
+  $("appLanCopy").addEventListener("click", async () => {
+    if (!current || !current.local || !current.local.lanUrl) return;
+    await api.copy(current.local.lanUrl);
+    const btn = $("appLanCopy");
+    btn.textContent = "Copied";
+    setTimeout(() => { btn.textContent = "Copy"; }, 1500);
+  });
+  $("appStopBtn").addEventListener("click", () => {
+    if (window.confirm("Stop Frivo on this PC? Phones and other devices are disconnected until it's started again.")) api.stopFrivo();
+  });
+  loginToggle.addEventListener("change", () => api.setStartAtLogin(loginToggle.checked).then(render));
+  closeSelect.addEventListener("change", () => api.setCloseAction(closeSelect.value).then(render));
+  $("appUpdateRow").addEventListener("click", () => {
+    if (current && current.update && current.update.state === "ready") { api.installUpdate(); return; }
+    $("appUpdateValue").textContent = "Checking…";
+    api.checkForUpdate().then(render).catch(() => {});
+  });
+
+  api.onState(render);
+  refresh();
+})();

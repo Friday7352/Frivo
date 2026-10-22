@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Frivo</title>
+  <link rel="stylesheet" href="shell.css">
+</head>
+<body>
+  <!-- The app's own screens: where Frivo runs, starting it, trusting a
+       certificate, installing Frivo. Frivo's pages replace this once Frivo
+       answers. Filled in by shell.js from what the app sends. -->
+  <main class="shell" id="shell" aria-live="polite">
+    <header class="brand">
+      <img src="../../build/icon.png" alt="" width="40" height="40">
+      <span class="brand-name">Frivo</span>
+    </header>
+    <section id="view"></section>
+  </main>
+  <footer class="foot" id="foot"></footer>
+  <script src="shell.js"></script>
+</body>
+</html>

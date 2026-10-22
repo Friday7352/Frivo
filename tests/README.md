@@ -455,3 +455,23 @@ Double-click `tests/check-windows-voices.bat` on a Windows PC. It runs the real 
 - `test-personality-maker.py`: the personality maker. What the AI is asked for Create, Ideas to add and Add all; that answers are cleaned up and checked; that turned-down and already-written ideas aren't offered; that the conversation is used; and that a merge that loses your text falls back to adding at the end.
 
 - `test-voice-remove.py`: removing a voice from your ElevenLabs voices. Refused while a profile uses it, refused for free voices and bad ids, its anchors go with it, and ElevenLabs refusing is reported.
+
+## The Frivo app (desktop\)
+
+NEW (1.7.0). The app has its own tests, run from `desktop\` after `npm ci`:
+
+    npm test             unit tests: addresses, GitHub releases and checked
+                         downloads, certificate pinning, settings, and what
+                         the app writes to Frivo's launcher.json
+    npm run test:e2e     the app itself against a real Frivo (started from
+                         ../app by desktop/test/serve-frivo.py, which needs
+                         Frivo's Python packages). On Linux, under a display:
+                         xvfb-run -a npm run test:e2e
+
+The end-to-end test covers the first run, trusting Frivo's certificate on
+another PC, Frivo's page with the app bridge and Settings › App, losing and
+getting back the connection, the trusted certificate remembered and a changed
+one caught, an address with nothing there, and "this PC" with a stand-in
+address. The Windows-only parts (the launcher's app mode, the registry, the
+shortcuts, installing Frivo) are checked from source by
+`test-update-logic.ps1`, and need trying on Windows.

@@ -1,4 +1,4 @@
-<#
+﻿<#
     NEW (updates): the updater's decisions, run for real against a sample of
     GitHub's release list (tests/fixtures/github-releases.json).
 
@@ -203,6 +203,20 @@ $launcher = Strip-PsComments (Read-Source 'installer/Launcher.ps1')
 Check 'the launcher closes when the watcher asks' ($launcher -match 'Local\\FrivoLauncherQuit' -and $launcher -match 'quitSignal\.WaitOne\(0\)')
 $watch = Read-Source 'installer/Update-Watch.ps1'
 Check 'the watcher asks with the same name' ($watch -match "OpenExisting\('Local\\FrivoLauncherQuit'\)")
+
+# NEW (1.7.0): the Frivo app (desktop\) and the launcher's app mode agree.
+$appLocal = Read-Source 'desktop/src/frivo-local.js'
+Check 'the launcher stops Frivo when the app asks' ($launcher -match 'Local\\FrivoLauncherStop' -and $launcher -match 'stopSignal\.WaitOne\(0\)')
+Check 'the app asks with the same name' ($appLocal -match "OpenExisting\('Local\\\\FrivoLauncherStop'\)")
+Check 'the app writes appPath, which the launcher reads' ($appLocal -match 'settings\.appPath = want' -and $launcher -match "raw\.PSObject\.Properties\['appPath'\]")
+Check 'no tray icon in app mode' ($launcher -match '\$notify\.Visible = -not \$script:appMode')
+Check 'app mode never opens the browser' ($launcher -match 'openBrowser -and -not \$script:appMode')
+Check 'never app mode as administrator: nobody could stop it' ($launcher -match 'if \(\$script:elevated\) \{ return \$false \}')
+Check 'a second launcher in the background starts the server without showing anything' ($launcher -match 'if \(\$Tray\) \{ \[void\] \$startSignal\.Set\(\) \} else \{ \[void\] \$showSignal\.Set\(\) \}')
+Check 'old show and start requests are cleared' ($launcher -match '\[void\] \$showSignal\.Reset\(\)\s+\[void\] \$startSignal\.Reset\(\)')
+$install = Strip-PsComments (Read-Source 'installer/Install.ps1')
+Check 'Launch Frivo now starts it as the signed-in person' ($install -match 'Start-FrivoAsUser -Target \$txtPath\.Text -User \$desktopUser -Window')
+Check 'the app waits for a stop to finish' ($appLocal -match 'Mutex\]::TryOpenExisting' -and $appLocal -match 'Test-Port')
 
 $uninstall = Strip-PsComments (Read-Source 'installer/Uninstall.ps1')
 Check 'uninstall removes the updater task' ($uninstall -match 'Unregister-FrivoUpdaterTask -InstallDir \$InstallDir')

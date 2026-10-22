@@ -5495,3 +5495,24 @@ html.motion-ready .stage { transition: transform var(--dur-smooth) var(--spring-
 #lengthValue { min-width: 9ch; }
 .session-strip.is-compact #lengthValue { min-width: 3ch; }
 #masterVolumeValue { min-width: 4ch; }
+
+/* NEW (1.7.0): the Frivo app. In a browser on Windows, Settings › Updates
+   offers it; inside it, Settings has an App section. */
+.app-offer { margin-top: 14px; }
+.app-offer .srow { gap: 12px; }
+.app-offer-link { display: inline-flex; align-items: center; gap: 6px; flex: none; text-decoration: none; }
+.app-offer-close {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--ink-faint);
+  cursor: pointer;
+}
+.app-offer-close:hover { background: var(--fill); color: var(--ink); }
+#appSection .srow > .btn-ghost { flex: none; }
+#appSection .srow-value { max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

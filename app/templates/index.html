@@ -797,6 +797,10 @@
             <button type="button" class="settings-nav-btn" data-settings-section="storage">
               <svg class="icon-16"><use href="#i-db"/></svg>Storage
             </button>
+            <!-- NEW (1.7.0): only in the Frivo app (desktop\ in the repo), never in a browser -->
+            <button type="button" class="settings-nav-btn is-hidden" data-settings-section="app" id="appNavBtn">
+              <svg class="icon-16"><use href="#i-chip"/></svg>App
+            </button>
             <span class="rail-spacer"></span>
             <button type="button" class="settings-nav-btn" data-settings-section="about">
               <svg class="icon-16"><use href="#i-download"/></svg>Updates
@@ -1506,6 +1510,76 @@
                 </details>
               </section>
 
+              <!-- NEW (1.7.0): the Frivo app's own settings. Shown only when this page
+                   is open in the app, which gives it window.frivoApp (desktop\src\preload.js). -->
+              <section class="settings-section" data-settings-section="app" id="appSection">
+                <h3 class="settings-section-title">App</h3>
+                <p class="settings-section-sub">This window is the Frivo app. Frivo's settings are the same everywhere; these are the app's own.</p>
+                <div class="settings-card">
+                  <div class="srow">
+                    <span class="srow-main srow-main--flex">
+                      <span class="srow-label">Frivo runs on</span>
+                      <span class="srow-sub" id="appWhereSub"></span>
+                    </span>
+                    <span class="srow-value" id="appWhereValue">—</span>
+                    <button type="button" class="btn-ghost btn-sm" id="appChangeBtn">Change…</button>
+                  </div>
+                  <div class="srow is-hidden" id="appLanRow">
+                    <span class="srow-main srow-main--flex">
+                      <span class="srow-label">Network address</span>
+                      <span class="srow-sub">Open this on your phone or another PC to use Frivo there too.</span>
+                    </span>
+                    <span class="srow-value srow-value--mono" id="appLanValue"></span>
+                    <button type="button" class="btn-ghost btn-sm" id="appLanCopy">Copy</button>
+                  </div>
+                  <div class="srow is-hidden" id="appRunRow">
+                    <span class="srow-main srow-main--flex">
+                      <span class="srow-label">Frivo on this PC</span>
+                      <span class="srow-sub">Stopping it also disconnects phones and other devices.</span>
+                    </span>
+                    <span class="srow-value" id="appRunValue">Running</span>
+                    <button type="button" class="btn-ghost btn-sm" id="appStopBtn">Stop</button>
+                  </div>
+                  <label class="srow" id="appLoginRow">
+                    <span class="srow-main srow-main--flex">
+                      <span class="srow-label">Start with Windows</span>
+                      <span class="srow-sub" id="appLoginSub">Opens in the tray when you sign in.</span>
+                    </span>
+                    <span class="switch">
+                      <input type="checkbox" id="appLoginToggle">
+                      <span class="switch-track" aria-hidden="true"></span>
+                    </span>
+                  </label>
+                  <div class="srow">
+                    <label class="srow-main srow-main--flex" for="appCloseSelect">
+                      <span class="srow-label">When I close the window</span>
+                      <span class="srow-sub" id="appCloseSub">Right-click the tray icon to quit.</span>
+                    </label>
+                    <span class="srow-control">
+                      <select id="appCloseSelect">
+                        <option value="tray">Keep running in the tray</option>
+                        <option value="quit">Quit</option>
+                      </select>
+                    </span>
+                  </div>
+                </div>
+                <div class="settings-card">
+                  <div class="srow">
+                    <span class="srow-main srow-main--flex"><span class="srow-label">App version</span></span>
+                    <span class="srow-value srow-value--mono" id="appVersionValue">—</span>
+                  </div>
+                  <button class="srow" type="button" id="appUpdateRow">
+                    <span class="srow-main srow-main--flex">
+                      <span class="srow-label">Check for app updates</span>
+                      <span class="srow-sub">The app checks by itself every few hours. Frivo's own updates are under Updates.</span>
+                    </span>
+                    <span class="srow-value" id="appUpdateValue"></span>
+                    <span class="srow-chevron"><svg class="icon-16"><use href="#i-chevron"/></svg></span>
+                  </button>
+                </div>
+                <p class="settings-note is-hidden" id="appOutdatedNote"></p>
+              </section>
+
               <!-- Updates & about -->
               <section class="settings-section" data-settings-section="about" id="aboutSection">
                 <h3 class="settings-section-title">Updates, backup &amp; about</h3>
@@ -1539,6 +1613,23 @@
                   </button>
                 </div>
                 <p class="settings-note is-hidden" id="updateNote"></p>
+
+                <!-- NEW (1.7.0): the Frivo app, offered in a browser on Windows. -->
+                <div class="settings-card app-offer is-hidden" id="appOffer">
+                  <div class="srow">
+                    <span class="srow-main srow-main--flex">
+                      <span class="srow-label">Frivo app for Windows</span>
+                      <span class="srow-sub">Frivo in its own window, with a tray icon and no browser tab. It runs Frivo on this PC, or connects to Frivo on another PC on your network. Your settings stay where they are.</span>
+                    </span>
+                    <a class="btn-ghost btn-sm app-offer-link" id="appOfferLink" target="_blank" rel="noopener"
+                       href="https://github.com/Friday7352/Frivo/releases?q=app-v&amp;expanded=true">
+                      <svg class="icon-14" aria-hidden="true"><use href="#i-download"/></svg>Get the app
+                    </a>
+                    <button type="button" class="app-offer-close" id="appOfferClose" aria-label="Don't show this again" title="Don't show this again">
+                      <svg class="icon-14"><use href="#i-close"/></svg>
+                    </button>
+                  </div>
+                </div>
 
                 <!-- NEW (1.5.0): back up and restore, for moving to another PC. -->
                 <h3 class="settings-section-title backup-title">Back up &amp; restore</h3>
