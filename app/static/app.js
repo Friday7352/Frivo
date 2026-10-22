@@ -107,8 +107,6 @@ const voiceTriggerName = $("voiceTriggerName");
 const voiceTriggerTags = $("voiceTriggerTags");
 const voicePop = $("voicePop");
 const voiceSearch = $("voiceSearch");
-const voiceFilters = $("voiceFilters");
-const voiceFavFilter = $("voiceFavFilter");
 const voiceLangFilter = $("voiceLangFilter");
 const voiceGenderFilter = $("voiceGenderFilter");
 const voiceTypeFilter = $("voiceTypeFilter");
@@ -2806,7 +2804,9 @@ const VOICE_RECENTS_MAX = 6;
 
 let voiceQuery = "";
 
-const voiceFacets = { fav: false, language: "", gender: "", category: "" };
+// CHANGED (1.6.1): `fav` and `free` are the All / Favorites / Free tabs; the
+// rest are in the Filters menu.
+const voiceFacets = { fav: false, free: false, language: "", gender: "", category: "" };
 let voiceRows = [];          // rendered rows, in display order, for arrow keys
 let voiceActiveIndex = -1;
 let voicePreviewAudio = null;
@@ -2972,6 +2972,7 @@ function voiceHaystack(v) {
 
 function voiceMatchesFacets(v, favs) {
   if (voiceFacets.fav && !favs.has(v.voice_id)) return false;
+  if (voiceFacets.free && voiceEngine(v) === "elevenlabs") return false;   // NEW (1.6.1)
   if (
     voiceFacets.language &&
     !(v.languages || []).some((l) => l.name === voiceFacets.language)
@@ -3002,10 +3003,12 @@ function matchingVoices() {
   });
 }
 
+// CHANGED (1.6.1): only what's in the Filters menu; the tabs aren't filters.
+function activeFilterCount() {
+  return [voiceFacets.language, voiceFacets.gender, voiceFacets.category].filter(Boolean).length;
+}
 function anyFacetActive() {
-  return Boolean(
-    voiceFacets.fav || voiceFacets.language || voiceFacets.gender || voiceFacets.category
-  );
+  return activeFilterCount() > 0;
 }
 
 // Counts are of the whole library, not of what's currently showing. Live
@@ -3042,13 +3045,18 @@ function countBy(pick) {
   return [...counts.entries()].sort((a, b) => a[0].localeCompare(b[0]));
 }
 
+function voiceTab() {
+  return voiceFacets.fav ? "fav" : voiceFacets.free ? "free" : "all";
+}
+
 function renderVoiceFilters() {
-  const favCount = voiceFavorites().filter((id) => voiceById(id)).length;
-  voiceFavFilter.classList.toggle("is-on", voiceFacets.fav);
-  voiceFavFilter.disabled = !favCount;
-  voiceFavFilter.title = favCount
-    ? `${favCount} starred`
-    : "Star a voice to use this";
+  // NEW (1.6.1): the tabs, and how many filters are on.
+  const tab = voiceTab();
+  document.querySelectorAll("#voicePop .vm-tab").forEach((b) => {
+    const on = b.dataset.tab === tab;
+    b.classList.toggle("is-on", on);
+    b.setAttribute("aria-selected", String(on));
+  });
 
   voiceFacets.language = fillFacetSelect(
     voiceLangFilter,
@@ -3069,7 +3077,15 @@ function renderVoiceFilters() {
     voiceFacets.category
   );
 
-  voiceFilterClear.classList.toggle("is-hidden", !anyFacetActive());
+  const count = activeFilterCount();
+  voiceFilterClear.disabled = !count;
+  const badge = $("voiceFilterCount");
+  if (badge) {
+    badge.textContent = String(count);
+    badge.classList.toggle("is-hidden", !count);
+  }
+  const fbtn = $("voiceFilterBtn");
+  if (fbtn) fbtn.classList.toggle("is-on", count > 0);
 }
 
 function onFacetChange() {
@@ -3077,9 +3093,14 @@ function onFacetChange() {
   renderVoiceList();
 }
 
-voiceFavFilter.addEventListener("click", () => {
-  voiceFacets.fav = !voiceFacets.fav;
-  onFacetChange();
+// NEW (1.6.1): All / Favorites / Free.
+document.querySelectorAll("#voicePop .vm-tab").forEach((b) => {
+  b.addEventListener("click", () => {
+    voiceFacets.fav = b.dataset.tab === "fav";
+    voiceFacets.free = b.dataset.tab === "free";
+    onFacetChange();
+    voiceList.scrollTop = 0;
+  });
 });
 voiceLangFilter.addEventListener("change", () => {
   voiceFacets.language = voiceLangFilter.value;
@@ -3094,11 +3115,76 @@ voiceTypeFilter.addEventListener("change", () => {
   onFacetChange();
 });
 voiceFilterClear.addEventListener("click", () => {
-  voiceFacets.fav = false;
   voiceFacets.language = "";
   voiceFacets.gender = "";
   voiceFacets.category = "";
   onFacetChange();
+});
+
+// NEW (1.6.1): the Filters menu and the sort menu, under their buttons.
+function setVoicePop(pop, btn, open) {
+  if (!pop || !btn) return;
+  pop.classList.toggle("is-hidden", !open);
+  btn.setAttribute("aria-expanded", String(open));
+}
+
+function closeVoiceSubPops() {
+  const was = !$("voiceFilterPop").classList.contains("is-hidden")
+    || !$("voiceSortMenu").classList.contains("is-hidden");
+  setVoicePop($("voiceFilterPop"), $("voiceFilterBtn"), false);
+  setVoicePop($("voiceSortMenu"), $("voiceSortBtn"), false);
+  return was;
+}
+
+function renderVoiceSortMenu() {
+  const menu = $("voiceSortMenu");
+  menu.innerHTML = "";
+  const head = document.createElement("div");
+  head.className = "vm-pop-label";
+  head.textContent = "Sort by";
+  menu.appendChild(head);
+  [...voiceSort.options].filter((o) => !o.hidden).forEach((o) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.setAttribute("role", "menuitemradio");
+    const on = o.value === voiceSortMode;
+    b.setAttribute("aria-checked", String(on));
+    b.className = "vm-sort-item" + (on ? " is-on" : "");
+    const tick = document.createElement("span");
+    tick.className = "vm-sort-tick";
+    if (on) tick.appendChild(iconNode("i-check", "icon-14"));
+    b.append(tick, document.createTextNode(o.textContent));
+    b.addEventListener("click", () => {
+      voiceSort.value = o.value;
+      voiceSort.dispatchEvent(new Event("change"));
+      setVoicePop(menu, $("voiceSortBtn"), false);
+    });
+    menu.appendChild(b);
+  });
+}
+
+$("voiceFilterBtn").addEventListener("click", (e) => {
+  e.stopPropagation();
+  const pop = $("voiceFilterPop");
+  const open = pop.classList.contains("is-hidden");
+  closeVoiceSubPops();
+  closeVoiceMenu();
+  setVoicePop(pop, $("voiceFilterBtn"), open);
+});
+
+$("voiceSortBtn").addEventListener("click", (e) => {
+  e.stopPropagation();
+  const menu = $("voiceSortMenu");
+  const open = menu.classList.contains("is-hidden");
+  closeVoiceSubPops();
+  closeVoiceMenu();
+  if (open) renderVoiceSortMenu();
+  setVoicePop(menu, $("voiceSortBtn"), open);
+});
+
+document.addEventListener("click", (e) => {
+  if (e.target.closest("#voiceFilterPop, #voiceSortMenu, .pretty-select-pop")) return;
+  closeVoiceSubPops();
 });
 
 
@@ -3216,6 +3302,13 @@ function renderVoiceRecent() {
   host.innerHTML = "";
   const seen = new Set();
   const ids = [...voiceRecents(), ...voiceFavorites()].filter((id) => !seen.has(id) && seen.add(id)).slice(0, 6);
+  // NEW (1.6.1): labelled, so the chips don't read as filters.
+  if (ids.some((id) => voiceById(id))) {
+    const label = document.createElement("span");
+    label.className = "voice-recent-label";
+    label.textContent = "Recent";
+    host.appendChild(label);
+  }
   ids.forEach((id) => {
     const v = voiceById(id);
     if (!v) return;
@@ -3261,83 +3354,109 @@ const TAG_FIT_LABELS = {
   older: { label: "older", title: "A voice from before the expressive models. Tags work, but it may drift between accents with them." },
 };
 
+// NEW (1.6.1): who speaks a voice, for its details line.
+const VOICE_PROVIDER_LABELS = {
+  elevenlabs: "ElevenLabs",
+  piper: "Frivo",
+  custom: "Added by you",
+  windows: "Windows",
+};
+
+function capitalize(text) {
+  const t = String(text || "");
+  return t ? t[0].toUpperCase() + t.slice(1) : t;
+}
+
+// CHANGED (1.6.1): a row is the name, a green dot when it's free, a star,
+// a play button and the "…" menu. The rest (language, gender, who speaks
+// it, credits, how it takes tags) opens under the name on the voice in use
+// and on the row picked with the arrow keys.
 function voiceRowNode(v) {
   const isCurrent = v.voice_id === activeVoiceId();
+  const engine = voiceEngine(v);
+  const free = engine !== "elevenlabs";
+  const isFav = voiceFavorites().includes(v.voice_id);
 
   const row = document.createElement("div");
-  row.className = "voice-row";
+  row.className = "voice-row vm-row";
   row.setAttribute("role", "option");
   row.setAttribute("aria-selected", String(isCurrent));
   row.classList.toggle("is-current", isCurrent);
+  row.classList.toggle("is-free", free);
 
   const mark = document.createElement("span");
   mark.className = "voice-mark";
   mark.style.setProperty("--voice-color", voiceColor(v.voice_id));
-  // CHANGED (1.5.0): the voice in use shows its check here, so its "…"
-  // menu (Favorites and the rest) looks like every other row's.
   mark.appendChild(iconNode(isCurrent ? "i-check" : "i-wave", "icon-18"));
   if (isCurrent) mark.title = "The voice in use";
 
-  // Three fixed columns — name, language, gender — so the values line up
-  // down the list and can be compared by scanning rather than read one row
-  // at a time. Everything else about a voice is behind the row menu.
   const pick = document.createElement("button");
   pick.type = "button";
-  pick.className = "voice-pick";
+  pick.className = "voice-pick vm-pick";
 
-  // CHANGED (1.6.1): the name, with its language and gender quietly
-  // underneath, and the tag label in a column of its own, so every row
-  // lines up and names aren't cut short by a label beside them.
-  const name = document.createElement("span");
-  name.className = "voice-name";
+  const line = document.createElement("span");
+  line.className = "vm-line";
   const nameText = document.createElement("span");
-  nameText.className = "voice-name-text";
+  nameText.className = "voice-name voice-name-text";
   nameText.textContent = voiceShortName(v);
-  nameText.title = voiceShortName(v);
-  const sub = document.createElement("span");
-  sub.className = "voice-sub";
-  const langLabel = voiceLanguageLabel(v);
-  const lang = document.createElement("span");
-  lang.className = "voice-lang";
-  if (langLabel) {
-    // A language worked out from the accent rather than stated by the voice
-    // is marked, so a wrong guess is explicable instead of baffling.
-    if (v.language_source === "accent") { lang.classList.add("is-guess"); lang.title = "Worked out from the accent"; }
-    lang.textContent = langLabel;
+  nameText.title = v.name;
+  line.appendChild(nameText);
+  if (free) {
+    const dot = document.createElement("span");
+    dot.className = "vm-free-dot";
+    dot.title = "Free: no credits";
+    dot.setAttribute("aria-label", "Free");
+    line.appendChild(dot);
   }
-  const gender = document.createElement("span");
-  gender.className = "voice-gender";
-  gender.textContent = v.gender || "";
-  sub.append(lang, gender);
-  name.append(nameText, sub);
 
-  // NEW (1.5.0): how well it takes voice tags, from what ElevenLabs reports.
-  const fitCell = document.createElement("span");
-  fitCell.className = "voice-fit-cell";
+  const details = document.createElement("span");
+  details.className = "vm-details";
+  const meta = document.createElement("span");
+  meta.className = "vm-meta";
+  const langLabel = voiceLanguageLabel(v);
+  const parts = [
+    langLabel ? (v.language_source === "accent" ? `${langLabel} (from the accent)` : langLabel) : "",
+    capitalize(v.gender),
+    VOICE_PROVIDER_LABELS[engine] || "",
+  ].filter(Boolean);
+  meta.textContent = parts.join(" · ");
+  const cost = document.createElement("span");
+  cost.className = "vm-cost" + (free ? " is-free" : "");
+  cost.textContent = free ? "Free" : "Uses credits";
+  if (parts.length) meta.appendChild(document.createTextNode(" · "));
+  meta.appendChild(cost);
+  details.appendChild(meta);
   const fit = TAG_FIT_LABELS[v.tag_fit];
   if (fit) {
     const badge = document.createElement("span");
-    badge.className = `voice-fit is-${v.tag_fit}`;
-    badge.textContent = fit.label;
+    badge.className = `voice-fit vm-fit is-${v.tag_fit}`;
     badge.title = fit.title;
-    fitCell.appendChild(badge);
+    badge.append(iconNode("i-tag", "icon-12"), document.createTextNode(fit.label));
+    details.appendChild(badge);
   }
 
-  pick.append(name, fitCell);
+  pick.append(line, details);
   pick.addEventListener("click", () => chooseVoice(v));
 
-  row.append(mark, pick);
+  const star = document.createElement("button");
+  star.type = "button";
+  star.className = "vm-star" + (isFav ? " is-on" : "");
+  star.setAttribute("aria-pressed", String(isFav));
+  star.setAttribute("aria-label", isFav ? `Remove ${v.name} from favorites` : `Add ${v.name} to favorites`);
+  star.title = isFav ? "Remove from favorites" : "Add to favorites";
+  star.appendChild(iconNode("i-star", "icon-16"));
+  star.addEventListener("click", (e) => {
+    e.stopPropagation();
+    toggleFavorite(v.voice_id);
+    renderVoiceFilters();
+    renderVoiceList();
+    renderVoiceRecent();
+    // The row was redrawn: keep focus on its star, so the keys still work.
+    const again = voiceRows.find((r) => r.voice.voice_id === v.voice_id);
+    if (again) again.row.querySelector(".vm-star").focus();
+  });
 
-  // CHANGED (2.0): what a reply with this voice costs.
-  const cost = document.createElement("span");
-  cost.className = "voice-cost";
-  if (voiceEngine(v) === "elevenlabs") {
-    cost.textContent = "credits";
-  } else {
-    cost.classList.add("is-free");
-    cost.textContent = "free";
-  }
-  row.appendChild(cost);
+  row.append(mark, pick, star);
 
   if (v.preview_url) {
     const play = document.createElement("button");
@@ -3345,7 +3464,7 @@ function voiceRowNode(v) {
     play.className = "voice-preview";
     const playing = voicePreviewId === v.voice_id;
     play.classList.toggle("is-playing", playing);
-    play.appendChild(iconNode(playing ? "i-stop" : "i-play", "icon-16"));
+    play.appendChild(iconNode(playing ? "i-stop" : "i-play", "icon-14"));
     play.title = "Hear a sample — costs nothing";
     play.setAttribute("aria-label", playing ? "Stop sample" : "Play sample");
     play.addEventListener("click", (e) => {
@@ -3354,31 +3473,27 @@ function voiceRowNode(v) {
     });
     row.appendChild(play);
   } else {
-    // NEW (1.5.0): a voice with no sample keeps the column, so the buttons
-    // still line up down the list.
+    // A voice with no sample keeps the column, so the buttons line up.
     const spacer = document.createElement("span");
     spacer.className = "voice-preview-spacer";
     row.appendChild(spacer);
   }
 
-  // Keep the action menu on the voice in use too. It used to be replaced by
-  // a non-interactive checkmark, which meant the selected voice could not be
-  // added to or removed from Favorites.
   const menuBtn = document.createElement("button");
   menuBtn.type = "button";
   menuBtn.className = "voice-menu-btn";
-  menuBtn.title = "Favorites, details and more";
+  menuBtn.title = "Details and more";
   menuBtn.setAttribute("aria-label", `More options for ${v.name}${isCurrent ? " (selected)" : ""}`);
-  menuBtn.appendChild(iconNode("i-dots", "icon-18"));   // CHANGED (1.5.0): the same on every row
+  menuBtn.appendChild(iconNode("i-dots", "icon-18"));
   menuBtn.addEventListener("click", (e) => {
     e.stopPropagation();
+    closeVoiceSubPops();
     openVoiceMenu(menuBtn, v);
   });
   row.appendChild(menuBtn);
 
   return row;
 }
-
 
 let voiceMenuEl = null;
 
@@ -3425,11 +3540,7 @@ function openVoiceMenu(anchor, v) {
     menu.appendChild(b);
   };
 
-  item(isFav ? "Remove from favorites" : "Add to favorites", null, () => {
-    toggleFavorite(v.voice_id);
-    renderVoiceFilters();
-    renderVoiceList();
-  });
+  // CHANGED (1.6.1): favorites are the star on the row.
   item("Voice details", "i-spark", () => showVoiceTip(anchor, v));
   // NEW (1.5.0): a voice you added can be renamed or removed.
   if (voiceEngine(v) === "custom") {
@@ -3531,19 +3642,9 @@ function voiceSections(matches) {
     return [...starts, ...ordered.filter((v) => !startIds.has(v.voice_id))];
   };
 
-  const sections = [];
-  let rest = matches;
-  if (!query && voiceSortMode === "favorites") {
-    const favs = new Set(voiceFavorites());
-    const fav = matches.filter((v) => favs.has(v.voice_id)).sort(byVoiceName);
-    if (fav.length) sections.push(["Favorites", fav]);
-    rest = matches.filter((v) => !favs.has(v.voice_id));
-  }
-  VOICE_ENGINE_GROUPS.forEach(([engine, label, note, free]) => {
-    const list = rest.filter((v) => voiceEngine(v) === engine);
-    if (list.length) sections.push([label, order(list), note, free]);
-  });
-  return sections;
+  // CHANGED (1.6.1): one list. What it costs is the green dot on the row
+  // and the Free tab, instead of a heading over each group.
+  return [[null, order(matches)]];
 }
 
 function sortVoicesFlat(matches) {
@@ -3589,6 +3690,8 @@ voiceSort.addEventListener("change", () => {
 function renderVoiceList() {
   // The rows the tooltip was anchored to are about to be destroyed.
   cancelVoiceTip();
+  const keepScroll = voiceList.scrollTop;   // NEW (1.6.1): starring a voice doesn't jump the list
+  const keepActive = voiceActiveIndex >= 0 && voiceRows[voiceActiveIndex] ? voiceRows[voiceActiveIndex].voice.voice_id : "";
   voiceList.innerHTML = "";
   voiceRows = [];
   voiceActiveIndex = -1;
@@ -3606,9 +3709,17 @@ function renderVoiceList() {
   if (!matches.length) {
     const note = document.createElement("p");
     note.className = "voice-none";
-    note.textContent = "Nothing matches that.";
+    // NEW (1.6.1): an empty tab says how to fill it.
+    note.textContent = voiceQuery.trim() || anyFacetActive()
+      ? "Nothing matches that."
+      : voiceFacets.fav
+        ? "No favorites yet. Tap the star on a voice to keep it here."
+        : voiceFacets.free
+          ? "No free voices yet. Browse free to download some."
+          : "Nothing matches that.";
     voiceList.appendChild(note);
-    voiceFoot.textContent = `0 of ${allVoices.length}`;
+    voiceFoot.textContent = `0 / ${allVoices.length}`;
+    showHiddenCategoryNote();
     return;
   }
 
@@ -3628,8 +3739,14 @@ function renderVoiceList() {
   voiceFoot.textContent =
     matches.length === allVoices.length
       ? `${allVoices.length} voices`
-      : `${matches.length} of ${allVoices.length} voices`;
+      : `${matches.length} / ${allVoices.length}`;
+  voiceFoot.title = `${matches.length} of ${allVoices.length} voices showing`;
   showHiddenCategoryNote();
+  voiceList.scrollTop = keepScroll;
+  if (keepActive) {
+    const i = voiceRows.findIndex((r) => r.voice.voice_id === keepActive);
+    if (i >= 0) { voiceRows[i].row.classList.add("is-active"); voiceActiveIndex = i; }
+  }
 }
 
 // One quiet line in the footer rather than a banner: hidden categories are
@@ -3644,8 +3761,11 @@ function showHiddenCategoryNote() {
     return;
   }
   note.classList.remove("is-hidden");
-  note.textContent = `${hidden.map(categoryLabel).join(", ")} hidden — show`;
-  note.title = "Bring these categories back into the list";
+  // CHANGED (1.6.1): one short button; what's hidden is in its tooltip.
+  const label = note.querySelector("span");
+  if (label) label.textContent = `Hidden (${hidden.length})`;
+  else note.textContent = `Hidden (${hidden.length})`;
+  note.title = `${hidden.map(categoryLabel).join(", ")} hidden. Click to show them again.`;
 }
 
 // ---- preview playback ----
@@ -3752,9 +3872,11 @@ function openVoicePop() {
   voiceQuery = "";
   voiceSearch.value = "";
   voiceFacets.fav = false;
+  voiceFacets.free = false;
   voiceFacets.language = "";
   voiceFacets.gender = "";
   voiceFacets.category = "";
+  closeVoiceSubPops();
   renderVoiceFilters();
   renderVoiceList();
 
@@ -3775,6 +3897,7 @@ function closeVoicePop() {
   // with it — they would be left floating over the page on their own.
   cancelVoiceTip();
   closeVoiceMenu();
+  closeVoiceSubPops();
 }
 
 function voicePopIsOpen() {
@@ -3807,6 +3930,8 @@ function setVoiceActiveIndex(next) {
 // so keys pressed while the search field has focus never reach the picker.
 voicePop.addEventListener("keydown", (e) => {
   if (!voicePopIsOpen()) return;
+  // NEW (1.6.1): arrows inside the Filters or sort menu belong to it.
+  if (e.key !== "Escape" && e.target.closest && e.target.closest("#voiceFilterPop, #voiceSortMenu")) return;
   if (e.key === "ArrowDown") {
     e.preventDefault();
     setVoiceActiveIndex(voiceActiveIndex + 1);
@@ -3823,6 +3948,8 @@ voicePop.addEventListener("keydown", (e) => {
     }
   } else if (e.key === "Escape") {
     e.preventDefault();
+    // NEW (1.6.1): a menu that's open closes first.
+    if (closeVoiceSubPops()) return;
     closeVoicePop();
     voiceTrigger.focus();
   }

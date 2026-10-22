@@ -48,5 +48,13 @@ The launcher now follows the update itself. It closes when the update starts ins
 - **The cursor starts at the beginning.** It no longer appears after "Say something…".
 - **Quieter chips.** The voice, language, style, length and volume chips above the box have no outlines.
 - **No more labels under replies.** "Cleaned up without AI", "Auto tags" and the like are a small dot by the reply's time. The words show in the line that appears when you point at the reply, with the details on hover.
-- **A straighter voice list.** Each voice shows its name, with its language and gender underneath. The tag label (v4 ready, tags) has its own column, so names aren't cut short and every row lines up.
 - **Changing a tag.** Click a tag in your message to get suggestions and a box to type any tag of your own; matching tags are listed as you type. Arrows choose, Enter takes it, and a new tag is kept with your tags.
+
+
+## A new voice menu
+
+- **Short rows.** Each voice shows its name, a green dot when it's free, a star for Favorites, a play button for a sample, and the "…" menu.
+- **Details when selected.** The voice in use opens to show its language, gender, who speaks it (ElevenLabs, Frivo, Windows, or one you added), whether it uses credits, and how it takes voice tags (v4 ready, tags). Arrow keys open the details of the row they're on.
+- **One Filters menu.** Language, gender and type are in one Filters button, with a count of how many are on and a Clear button.
+- **Tabs instead of headings.** All, Favorites and Free replace the long section headings. Sorting is the small arrows icon beside the tabs.
+- **Tidier footer.** How many voices are showing, Hidden (when you've hidden a type), Browse free, and Add voice.

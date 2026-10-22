@@ -107,17 +107,26 @@ const base = 'http://127.0.0.1:5093';
   await p.click('#railVoices'); await wait(500);
   check('Voices opens the voice sheet', await vis('#voicePop'));
   check('which says whose voice it is', /for Default/.test(await text('#voiceDialogFor')), await text('#voiceDialogFor'));
-  const groups = await p.evaluate(() => [...document.querySelectorAll('#voiceList .voice-group')].map(g => g.firstChild.textContent.trim()));
-  // CHANGED (1.5.0): no Kokoro group any more; the free voices are Windows' own.
-  check('grouped by engine: built into Windows', groups.includes('Free · built into Windows') && !groups.includes('Free · on this PC'), groups);
-  const costs = await p.evaluate(() => [...document.querySelectorAll('#voiceList .voice-cost')].map(c => c.textContent));
-  check('every voice carries a cost tag', costs.length > 10 && costs.every(c => c === 'free' || c === 'credits'), costs.slice(0, 3));
+  // CHANGED (1.6.1): All / Favorites / Free tabs instead of a heading per engine.
+  check('no section headings, tabs instead', await p.evaluate(() => !document.querySelector('#voiceList .voice-group') && document.querySelectorAll('#voicePop .vm-tab').length === 3));
+  const freeDots = await p.evaluate(() => [...document.querySelectorAll('#voiceList .vm-row')].map(r => !!r.querySelector('.vm-free-dot')));
+  check('every Windows voice shows the free dot', freeDots.length > 10 && freeDots.every(Boolean), freeDots.length);
+  check('each row has a star and the menu', await p.evaluate(() => [...document.querySelectorAll('#voiceList .vm-row')].every(r => r.querySelector('.vm-star') && r.querySelector('.voice-menu-btn'))));
+  const cur = await p.evaluate(() => { const r = document.querySelector('#voiceList .vm-row.is-current'); return r ? r.innerText : ''; });
+  check('the voice in use opens its details', /Windows · Free/.test(cur), cur);
+  await p.click('#voicePop .vm-tab[data-tab="fav"]'); await wait(200);
+  check('Favorites with none starred says how', /Tap the star/.test(await text('#voiceList')));
+  await p.click('#voicePop .vm-tab[data-tab="all"]'); await wait(200);
+  await p.click('#voiceFilterBtn'); await wait(200);
+  check('Filters opens language, gender and type', await vis('#voiceFilterPop'));
+  await p.keyboard.press('Escape'); await wait(200);
+  check('Escape closes the Filters menu first', !(await vis('#voiceFilterPop')) && await vis('#voicePop'));
   await p.keyboard.press('Escape'); await wait(500);   // CHANGED (1.5.0): the sheet slides out (300 ms)
   check('Escape closes it', !(await vis('#voicePop')));
 
   console.log('--- the chips and the status pill ---');
   check('the voice chip names the voice, without the bracketed part', (await text('#voiceTriggerName')).trim() === 'Zira', await text('#voiceTriggerName'));
-  check('the style chip names the style', (await text('#styleChipText')) === 'Clean up', await text('#styleChipText'));
+  check('no style chip: the profile decides the style', !(await p.$('#styleChip')));   // CHANGED (1.6.1)
   await p.click('#lengthChip'); await wait(200);
   check('the length chip opens its popover', await vis('#lengthPop') && await vis('#lengthSlider'));
   await p.click('#volumeChip'); await wait(200);

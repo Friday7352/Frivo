@@ -3504,9 +3504,7 @@ html[data-theme="light"] { --bubble-lift: 0 8px 22px rgba(15, 23, 42, 0.13), 0 0
   .session-strip > #languagePicker .chip.voice-trigger { max-width: 100%; }
   .session-strip #languageTriggerName { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
   .session-strip.is-measuring > * { flex: none !important; min-width: max-content !important; }
-  .session-strip.is-compact .chip-unit,
-  .session-strip.is-compact-more #styleChipText { display: none; }
-  .session-strip.is-compact-more #styleChip { padding: 0 8px; }
+  .session-strip.is-compact .chip-unit { display: none; }
 }
 
 /* The "Use English" suggestion pops in rather than appearing. */
@@ -4982,15 +4980,7 @@ html.motion-ready .stage { transition: transform var(--dur-smooth) var(--spring-
 /* On: the icon and the name in the accent colour, and a small dot. */
 .under-toggle:has(input:checked) { color: var(--ink); }
 .under-toggle input:checked ~ .under-toggle-track { background: transparent; color: var(--accent); }
-.under-toggle:has(input:checked) .under-toggle-label::after {
-  content: "";
-  display: inline-block;
-  width: 5px; height: 5px;
-  margin-left: 6px;
-  border-radius: 50%;
-  background: var(--accent);
-  vertical-align: 2px;
-}
+/* CHANGED (1.6.1): no dot beside a switch that's on; the switch says it. */
 .under-toggle:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 1px; }
 .under-toggle.is-paused { opacity: 0.55; }
 .under-toggle.is-paused .under-toggle-track { outline: 0; }
@@ -5187,7 +5177,6 @@ html.motion-ready .stage { transition: transform var(--dur-smooth) var(--spring-
 .under-toggle input:checked ~ .under-toggle-track { background: var(--accent); }
 .under-toggle input:checked ~ .under-toggle-track::after { transform: translateX(14px); background: #fff; }
 .under-toggle:has(input:checked) { color: var(--ink); font-weight: 500; }
-.under-toggle:has(input:checked) .under-toggle-label::after { margin-left: 8px; width: 6px; height: 6px; }
 .under-toggle.is-paused .under-toggle-track { opacity: 0.5; }
 .under-tags .under-btn { color: var(--accent); font-weight: 600; gap: 8px; }
 .under-tags .under-btn:hover { background: transparent; color: color-mix(in srgb, var(--accent) 80%, #fff); }
@@ -5220,3 +5209,289 @@ html.motion-ready .stage { transition: transform var(--dur-smooth) var(--spring-
 @media (min-width: 761px) {
   .composer-wrap { max-width: min(960px, 100%); }
 }
+
+/* ============================================================
+   NEW (1.6.1): the voice menu, redesigned
+   ============================================================
+   Search, one Filters menu and reload on top; All / Favorites / Free tabs
+   with sort; Recent chips; rows of name, free dot, star, play and "…",
+   with the details opening under the voice in use. */
+#voicePop .vm-search-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 8px;
+  align-items: center;
+  padding: 0 22px 6px;
+}
+#voicePop .voice-search { padding-top: 10px; padding-bottom: 10px; }
+#voicePop .voice-refresh { width: 40px; height: 40px; }
+.vm-filter-wrap, .vm-sort-wrap { position: relative; display: inline-flex; }
+.vm-tool-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 40px;
+  padding: 0 14px;
+  border: 1px solid var(--rule-soft);
+  border-radius: var(--radius);
+  background: var(--field);
+  color: var(--ink);
+  font-family: var(--font-panel);
+  font-size: var(--text-subhead);
+  cursor: pointer;
+  transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease);
+}
+.vm-tool-btn:hover { background: var(--surface-3); }
+.vm-tool-btn.is-on { border-color: var(--accent-line); }
+.vm-tool-btn .icon-16 { color: var(--ink-dim); }
+.vm-badge {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+}
+.vm-pop {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 60;
+  min-width: 260px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  animation: pop-in 150ms var(--ease);
+}
+.vm-pop.is-hidden { display: none; }
+.vm-pop-field { display: flex; flex-direction: column; gap: 5px; }
+.vm-pop-label {
+  font-size: var(--text-caption2);
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+.vm-pop-foot { display: flex; justify-content: flex-end; }
+.vm-pop-foot .btn-ghost:disabled { opacity: 0.4; cursor: default; }
+.vm-sort-menu { min-width: 200px; padding: 8px; gap: 2px; }
+.vm-sort-menu .vm-pop-label { padding: 2px 8px 6px; }
+.vm-sort-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px;
+  border: 0;
+  border-radius: var(--radius);
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--text-subhead);
+  text-align: left;
+  cursor: pointer;
+}
+.vm-sort-item:hover { background: var(--fill); }
+.vm-sort-item.is-on { color: var(--accent); font-weight: 600; }
+.vm-sort-tick { width: 14px; display: inline-grid; place-items: center; }
+
+/* The tabs */
+.vm-tabs-row {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 4px 22px 10px;
+  border-bottom: 1px solid var(--rule-soft);
+}
+.vm-tabs { display: flex; gap: 22px; }
+.vm-tab {
+  position: relative;
+  padding: 10px 2px 11px;
+  border: 0;
+  background: none;
+  color: var(--ink-dim);
+  font-family: var(--font-panel);
+  font-size: var(--text-subhead);
+  font-weight: 500;
+  cursor: pointer;
+}
+.vm-tab:hover { color: var(--ink); }
+.vm-tab.is-on { color: var(--ink); font-weight: 600; }
+.vm-tab.is-on::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+.vm-icon-btn {
+  width: 32px;
+  height: 32px;
+  margin-bottom: 4px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--ink-dim);
+  cursor: pointer;
+}
+.vm-icon-btn:hover, .vm-icon-btn[aria-expanded="true"] { background: var(--fill); color: var(--ink); }
+
+/* Recent */
+#voicePop .voice-recent { align-items: center; padding: 0 22px 10px; }
+.voice-recent-label { margin-right: 4px; font-size: var(--text-footnote); color: var(--ink-faint); }
+
+/* The rows */
+#voicePop .voice-list { margin: 0 14px; border: 0; }
+#voicePop .vm-row {
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr) 32px 32px 32px;
+  align-items: start;
+  column-gap: 4px;
+  padding: 6px 8px 6px 10px;
+  border-radius: 10px;
+  box-shadow: none;
+}
+#voicePop .vm-row + .vm-row { margin-top: 1px; }
+#voicePop .vm-row > .voice-mark { height: 34px; }
+#voicePop .vm-row > .vm-star,
+#voicePop .vm-row > .voice-preview,
+#voicePop .vm-row > .voice-preview-spacer,
+#voicePop .vm-row > .voice-menu-btn { width: 32px; height: 32px; margin-top: 1px; }
+#voicePop .vm-row:hover, #voicePop .vm-row.is-active { background: var(--fill); }
+#voicePop .vm-row.is-current {
+  background: var(--accent-soft);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+#voicePop .vm-pick {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  min-width: 0;
+  padding: 0 6px;
+  min-height: 34px;
+  justify-content: center;
+}
+.vm-line { display: flex; align-items: center; gap: 8px; min-width: 0; height: 34px; }
+#voicePop .vm-line .voice-name {
+  display: block;
+  flex: 0 1 auto;
+  min-width: 0;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#voicePop .vm-row.is-current .voice-name { color: var(--ink); font-weight: 600; }
+.vm-free-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--signal);
+}
+.vm-details { display: none; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding-bottom: 6px; }
+#voicePop .vm-row.is-current .vm-details,
+#voicePop .vm-row.is-active .vm-details { display: flex; }
+.vm-meta { font-size: var(--text-footnote); color: var(--ink-dim); }
+.vm-cost { color: var(--ink-dim); }
+.vm-cost.is-free { color: var(--signal); }
+#voicePop .vm-fit {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  font-size: var(--text-caption);
+}
+#voicePop .vm-fit .icon-12 { width: 12px; height: 12px; }
+.vm-star {
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  color: var(--ink-faint);
+  cursor: pointer;
+  transition: color var(--dur) var(--ease), background var(--dur) var(--ease);
+}
+.vm-star:hover { color: var(--ink); background: var(--fill); }
+.vm-star.is-on { color: var(--warn); }
+.vm-star svg { fill: none; }
+.vm-star.is-on svg { fill: currentColor; }
+#voicePop .voice-preview { border-radius: 50%; }
+
+/* The footer */
+#voicePop .vm-foot { padding: 12px 22px 16px; border-top: 1px solid var(--rule-soft); margin-top: 8px; }
+.vm-count { font-family: var(--font-mono); font-size: var(--text-footnote); color: var(--ink-faint); }
+#voicePop .vm-foot .voice-foot-actions { gap: 14px; flex-wrap: wrap; justify-content: flex-end; }
+.vm-foot-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 2px;
+  border: 0;
+  background: none;
+  color: var(--ink-dim);
+  font: inherit;
+  font-size: var(--text-footnote);
+  cursor: pointer;
+}
+.vm-foot-link:hover { color: var(--ink); }
+.vm-foot-link.is-hidden { display: none; }
+.vm-legend { display: inline-flex; align-items: center; gap: 6px; font-size: var(--text-footnote); color: var(--ink-faint); }
+.vm-add-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: var(--radius);
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-family: var(--font-panel);
+  font-size: var(--text-footnote);
+  font-weight: 600;
+  cursor: pointer;
+}
+.vm-add-btn:hover:not(:disabled) { filter: brightness(1.08); }
+.vm-add-btn:disabled { opacity: 0.6; cursor: default; }
+
+@media (max-width: 720px) {
+  #voicePop .vm-search-row { grid-template-columns: minmax(0, 1fr) auto auto; padding: 0 16px 6px; }
+  #voicePop .vm-tool-btn span:not(.vm-badge) { display: none; }
+  #voicePop .vm-tool-btn { padding: 0 11px; }
+  .vm-tabs-row { margin: 4px 16px 8px; }
+  #voicePop .voice-recent { padding: 0 16px 8px; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+  #voicePop .voice-recent .chip { flex: none; }
+  #voicePop .voice-list { margin: 0 8px; }
+  #voicePop .vm-foot { padding: 10px 16px 14px; }
+  #voicePop .vm-legend { display: none; }
+}
+
+/* NEW (1.6.1): the length and volume chips keep their width, so "125 words"
+   or "150%" doesn't push the chips beside them over. */
+#lengthValue, #masterVolumeValue {
+  display: inline-block;
+  font-variant-numeric: tabular-nums;
+  text-align: left;
+}
+#lengthValue { min-width: 9ch; }
+.session-strip.is-compact #lengthValue { min-width: 3ch; }
+#masterVolumeValue { min-width: 4ch; }
