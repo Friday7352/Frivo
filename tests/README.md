@@ -456,6 +456,30 @@ Double-click `tests/check-windows-voices.bat` on a Windows PC. It runs the real 
 
 - `test-voice-remove.py`: removing a voice from your ElevenLabs voices. Refused while a profile uses it, refused for free voices and bad ids, its anchors go with it, and ElevenLabs refusing is reported.
 
+## test-app-setup.ps1
+
+NEW (1.8.0). Setup's part in the Frivo app, on Linux or Windows: picking the
+app's release from GitHub's list, the checked download (a wrong file is
+refused and deleted), app mode in `launcher.json`, telling the app Frivo runs
+here (in a form the app can read), the app's install folder agreeing with
+`desktop/package.json`, and setup's and the uninstaller's rules from source:
+a silent update never downloads the app, "Just the app" isn't offered over
+an existing Frivo, and a problem with the app never undoes installing Frivo.
+Also the "Frivo (at startup)" task (what it runs, no stored password, never
+as administrator, no time limit, removed only when it's this install's), and
+the launcher's pairing code and offline QR code.
+
+    pwsh -NoProfile -File tests/test-app-setup.ps1
+
+## test-devices.py
+
+NEW (1.8.0). Settings › Other devices and what the app uses: `/api/hello`,
+`/api/devices`, the QR code and the certificate download (never its key),
+and the pairing code worked out the same way by the server, the app and the
+launcher.
+
+    python3 tests/test-devices.py
+
 ## The Frivo app (desktop\)
 
 NEW (1.8.0). The app has its own tests, run from `desktop\` after `npm ci`:
@@ -468,8 +492,9 @@ NEW (1.8.0). The app has its own tests, run from `desktop\` after `npm ci`:
                          Frivo's Python packages). On Linux, under a display:
                          xvfb-run -a npm run test:e2e
 
-The end-to-end test covers the first run, trusting Frivo's certificate on
-another PC, Frivo's page with the app bridge and Settings › App, losing and
+The end-to-end test covers the first run, finding Frivo on the network,
+pairing with a code (a wrong one refused, the fingerprint as the fallback),
+shortcuts in Settings › App and a hotkey pressing Frivo's button, Frivo's page with the app bridge and Settings › App, losing and
 getting back the connection, the trusted certificate remembered and a changed
 one caught, an address with nothing there, and "this PC" with a stand-in
 address. The Windows-only parts (the launcher's app mode, the registry, the

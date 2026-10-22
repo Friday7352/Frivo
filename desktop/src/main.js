@@ -18,7 +18,7 @@
 
 const {
   app, BrowserWindow, Tray, Menu, ipcMain, session, shell, net, nativeImage,
-  clipboard, Notification, dialog, screen,
+  clipboard, Notification, dialog, screen, globalShortcut,
 } = require('electron');
 const path = require('path');
 const fs = require('fs');
@@ -31,11 +31,17 @@ const { normalizeAddress } = require('./address');
 const trust = require('./trust');
 const gh = require('./github');
 const { FrivoLocal, lanAddress } = require('./frivo-local');
+const pairing = require('./pairing');       // NEW: pairing codes
+const discovery = require('./discovery');   // NEW: finding Frivo on the network
 
 const REPOSITORY = pkg.frivo.repository;
 const PORT = pkg.frivo.port;
 const MINIMUM_FRIVO = gh.parseVersion(pkg.frivo.minimumFrivo);
-const APP_ID = pkg.build.appId;
+// FIXED: from "frivo", not "build": electron-builder takes the "build"
+// section out of package.json when it packages the app, so reading it there
+// crashed the installed app at start. Must match build.appId (the unit
+// tests check).
+const APP_ID = pkg.frivo.appId;
 const IS_WINDOWS = process.platform === 'win32';
 const UPDATE_EVERY_MS = 6 * 60 * 60 * 1000;
 const PROBE_EVERY_MS = 4000;
@@ -81,6 +87,10 @@ function start() {
     connectSeq: 0,          // a newer connect makes older ones give up
     update: { state: 'idle', version: '', error: '', file: '', percent: 0 },
     busy: false,            // install or start in progress: no double clicks
+    discovery: { searching: false, servers: [] },   // NEW: Frivo found on the network
+    discoverySeq: 0,
+    hotkeyErrors: {},       // NEW: shortcuts that couldn't be registered, and why
+    queuedHotkey: '',       // NEW: pressed before Frivo's page was loaded
   };
 
   const iconPath = path.join(__dirname, '..', 'build', IS_WINDOWS ? 'icon.ico' : 'icon.png');
@@ -168,6 +178,9 @@ function start() {
         sandbox: true,
         nodeIntegration: false,
         spellcheck: true,
+        // NEW: dictation started by a hotkey keeps going with the window
+        // hidden or behind VRChat.
+        backgroundThrottling: false,
       },
     });
     win.setMenuBarVisibility(false);
@@ -297,10 +310,37 @@ function start() {
     showView({ name: 'status', spinner: false, tone: 'error', title, detail, actions, ...extra });
   }
 
+  // NEW: looks for Frivo on the network while the welcome screen is up, and
+  // fills the list in as each one answers.
+  function startDiscovery() {
+    const run = ++state.discoverySeq;
+    state.discovery = { searching: true, servers: [] };
+    const push = () => {
+      if (run !== state.discoverySeq || !state.view || state.view.name !== 'welcome') return;
+      state.view = { ...state.view, discovery: { ...state.discovery, servers: [...state.discovery.servers] } };
+      sendView();
+    };
+    discovery.findFrivo({
+      port: PORT,
+      cancelled: () => run !== state.discoverySeq,
+      onFound: (server) => {
+        if (run !== state.discoverySeq) return;
+        state.discovery.servers.push(server);
+        state.discovery.servers.sort((a, b) => a.name.localeCompare(b.name));
+        push();
+      },
+    }).catch(() => {}).finally(() => {
+      if (run !== state.discoverySeq) return;
+      state.discovery.searching = false;
+      push();
+    });
+  }
+
   async function welcomeView(extra = {}) {
     // Whatever was connecting or being watched stops: the choice is open again.
     ++state.connectSeq;
     stopProbing();
+    startDiscovery();
     const install = IS_WINDOWS ? await local.findInstall() : null;
     state.install = install || state.install;
     showView({
@@ -311,6 +351,7 @@ function start() {
         version: install ? install.version : '',
       },
       remoteUrl: settings.get('remoteUrl') || '',
+      discovery: state.discovery,
       current: settings.get('mode'),
       canGoBack: Boolean(settings.get('mode')),
       ...extra,
@@ -382,6 +423,7 @@ function start() {
     const seq = ++state.connectSeq;
     stopProbing();
     state.origin = null;
+    state.queuedHotkey = '';   // NEW: not for another page
 
     if (TEST_LOCAL_ORIGIN) {
       busyView('Starting Frivo…', '');
@@ -500,16 +542,36 @@ function start() {
         [{ id: 'retry', label: 'Try again', primary: true }, { id: 'change', label: 'Change where Frivo runs' }]);
       return;
     }
-    state.pendingTrust = { key: trust.pinKey(new URL(url).hostname), pin };
+    // CHANGED: asks for the pairing code shown on that PC; comparing the
+    // certificate's fingerprint is still there as "No code?".
+    state.pendingTrust = { key: trust.pinKey(new URL(url).hostname), pin, code: info.pairingCode, url, info, changed: Boolean(pinned) };
+    pairView();
+  }
+
+  function pairView(error = '') {
+    const p = state.pendingTrust;
+    if (!p) return;
+    showView({
+      name: 'pair',
+      host: hostOf(p.url),
+      serverName: settings.get('remoteName') || '',
+      changed: p.changed,
+      error,
+    });
+  }
+
+  function fingerprintView() {
+    const p = state.pendingTrust;
+    if (!p) return;
     showView({
       name: 'trust',
-      host: hostOf(url),
-      changed: Boolean(pinned),
-      authority: info.authority,
-      server: info.server,
-      names: info.names,
-      fingerprint: trust.formatFingerprint(info.fingerprint),
-      fullFingerprint: info.fingerprint,
+      host: hostOf(p.url),
+      changed: p.changed,
+      authority: p.info.authority,
+      server: p.info.server,
+      names: p.info.names,
+      fingerprint: trust.formatFingerprint(p.info.fingerprint),
+      fullFingerprint: p.info.fingerprint,
     });
   }
 
@@ -529,6 +591,7 @@ function start() {
     const seq = ++state.connectSeq;
     stopProbing();
     state.origin = null;
+    state.queuedHotkey = '';   // NEW: not for another page
     const url = settings.get('remoteUrl');
     if (!url) { welcomeView(); return; }
     const host = hostOf(url);
@@ -614,9 +677,10 @@ function start() {
     await connectLocal();
   }
 
-  async function chooseRemote(text) {
+  async function chooseRemote(text, name = '') {
     const parsed = normalizeAddress(text, PORT);
     if (!parsed.ok) return parsed;
+    ++state.discoverySeq;   // the list is done with
     const previous = settings.get('mode');
     if (previous === 'local' && IS_WINDOWS && state.install) {
       const { response } = await dialog.showMessageBox(state.win, {
@@ -637,7 +701,7 @@ function start() {
       }
     }
     if (IS_WINDOWS) local.setAppMode(false);
-    settings.update({ mode: 'remote', remoteUrl: parsed.url });
+    settings.update({ mode: 'remote', remoteUrl: parsed.url, remoteName: String(name || '').slice(0, 64) });
     await syncShortcuts();
     applyRemoteLoginItem(settings.get('remoteStartAtLogin'));
     connectRemote();
@@ -837,6 +901,59 @@ function start() {
     quitApp({ keepFrivo: true });
   }
 
+  // ---------------------------------------------------------------- hotkeys
+
+  /*
+    NEW: keys that work anywhere, even with VRChat in front: start or stop
+    dictation, and send what's in the box. They press Frivo's own buttons in
+    its page (static/app.js listens through window.frivoApp.onHotkey).
+  */
+  const HOTKEY_ACTIONS = ['dictate', 'send'];
+
+  function registerHotkeys() {
+    globalShortcut.unregisterAll();
+    state.hotkeyErrors = {};
+    const keys = settings.get('hotkeys');
+    for (const action of HOTKEY_ACTIONS) {
+      const accel = keys[action];
+      if (!accel) continue;
+      let ok = false;
+      try { ok = globalShortcut.register(accel, () => fireHotkey(action)); } catch { ok = false; }
+      if (!ok) state.hotkeyErrors[action] = `${accel} is taken by another program, or isn't a key the app can use.`;
+    }
+  }
+
+  function fireHotkey(action) {
+    if (!state.connected || !state.origin) return;
+    const wc = state.win.webContents;
+    if (state.pendingLoad) {
+      // Started in the tray and never opened: load Frivo's page now, unseen.
+      // The key waits until the page says it's listening (app:hotkey-ready).
+      state.pendingLoad = false;
+      state.queuedHotkey = action;
+      loadFrivoPage(state.origin);
+      return;
+    }
+    if (state.showing === 'frivo') wc.send('app:hotkey', action);
+  }
+
+  // CHANGED: Ctrl, Alt or Win with a key, or an F key. Not Shift alone (it
+  // would stop capitals being typed anywhere), and not the combinations
+  // everything else relies on.
+  const RESERVED_HOTKEYS = new Set(['C', 'V', 'X', 'A', 'Z', 'Y'].map((k) => `CommandOrControl+${k}`)
+    .concat(['Alt+F4', 'Alt+Tab', 'CommandOrControl+Alt+Delete']));
+  function validAccelerator(accel) {
+    if (accel === '') return true;
+    if (typeof accel !== 'string' || accel.length > 60) return false;
+    const m = /^((?:(?:CommandOrControl|Alt|Shift|Super)\+)*)([A-Z0-9]|F(?:[1-9]|1\d|2[0-4])|Space|Enter|Tab|Backspace|Insert|Home|End|PageUp|PageDown|Up|Down|Left|Right|[`\-=\[\];',./\\])$/.exec(accel);
+    if (!m) return false;
+    const mods = m[1] ? m[1].slice(0, -1).split('+') : [];
+    if (new Set(mods).size !== mods.length) return false;
+    if (RESERVED_HOTKEYS.has(accel)) return false;
+    const fKey = /^F\d+$/.test(m[2]);
+    return fKey || mods.some((mod) => mod !== 'Shift');
+  }
+
   // ---------------------------------------------------------------- tray
 
   function rebuildTray() {
@@ -919,6 +1036,8 @@ function start() {
       startAtLogin: Boolean(state.startAtLoginCache),
       startAtLoginAvailable: IS_WINDOWS,
       update: { state: state.update.state, version: state.update.version, error: state.update.error, percent: state.update.percent },
+      hotkeys: { ...settings.get('hotkeys') },
+      hotkeyErrors: { ...state.hotkeyErrors },
     };
   }
 
@@ -942,16 +1061,58 @@ function start() {
   handle('app:change-connection', fromFrivo, () => { welcomeView(); return true; });
   handle('app:check-update', fromFrivo, async () => { await checkForAppUpdate({ manual: true }); return appState(); });
   handle('app:install-update', fromFrivo, () => { installAppUpdate(); return true; });
+  handle('app:hotkey-ready', fromFrivo, () => {
+    const action = state.queuedHotkey || '';
+    state.queuedHotkey = '';
+    return action;
+  });
+  // While Settings is waiting for keys: Windows would otherwise act on a
+  // shortcut that's already set before the page saw the keys.
+  handle('app:pause-hotkeys', fromFrivo, (paused) => {
+    if (paused) globalShortcut.unregisterAll();
+    else registerHotkeys();
+    return true;
+  });
+  handle('app:set-hotkey', fromFrivo, (action, accel) => {
+    if (!HOTKEY_ACTIONS.includes(action) || !validAccelerator(accel)) {
+      throw new Error("That isn't a key combination the app can use.");
+    }
+    const keys = { ...settings.get('hotkeys') };
+    const clash = HOTKEY_ACTIONS.find((other) => other !== action && accel && keys[other] === accel);
+    if (clash) keys[clash] = '';
+    keys[action] = accel;
+    settings.set('hotkeys', keys);
+    registerHotkeys();
+    return appState();
+  });
 
   handle('shell:ready', fromShell, () => state.view);
   handle('shell:choose-local', fromShell, () => { chooseLocal(); return true; });
-  handle('shell:choose-remote', fromShell, (text) => chooseRemote(text));
+  handle('shell:choose-remote', fromShell, (text, name) => chooseRemote(text, name));
+  // NEW: the pairing code typed from the other PC's screen.
+  handle('shell:pair', fromShell, async (typed) => {
+    const p = state.pendingTrust;
+    if (!p || !state.view || state.view.name !== 'pair') return { ok: false, error: 'Start again from "Change where Frivo runs".' };
+    const code = pairing.normalizeCode(typed);
+    if (!code) return { ok: false, error: 'A pairing code is twelve letters and numbers, like K7Q4-MD2X-9P3R.' };
+    if (code !== p.code) {
+      return { ok: false, error: "That isn't this Frivo's pairing code. Check it on that PC: Frivo's launcher, or Settings › Other devices." };
+    }
+    // A matching code only counts for a real authority (see trust.js).
+    if (!trust.isSelfSignedAuthority(p.pin.pem)) {
+      return { ok: false, error: "This server's certificate can't be paired with a code. Use \"Compare the certificate instead\"." };
+    }
+    state.pendingTrust = null;
+    settings.set('trusted', { ...settings.get('trusted'), [p.key]: p.pin });
+    connectRemote();
+    return { ok: true };
+  });
   handle('shell:trust', fromShell, async (accept, fingerprint) => {
     const view = state.view;
     const pending = state.pendingTrust;
     if (!view || view.name !== 'trust' || !pending) return false;
+    if (!accept) { state.pendingTrust = null; welcomeView(); return true; }
     state.pendingTrust = null;
-    if (!accept) { welcomeView(); return true; }
     if (fingerprint !== pending.pin.fingerprint) return false;
     settings.set('trusted', { ...settings.get('trusted'), [pending.key]: pending.pin });
     connectRemote();
@@ -961,9 +1122,12 @@ function start() {
     switch (id) {
       case 'retry': connect(); break;
       case 'start': startFrivo(); break;
-      case 'change': welcomeView(); break;
+      case 'change': state.pendingTrust = null; welcomeView(); break;
       case 'back': connect(); break;
       case 'install': installFrivo(); break;
+      case 'compare': fingerprintView(); break;     // NEW: no pairing code to hand
+      case 'pair': pairView(); break;
+      case 'rescan': if (state.view && state.view.name === 'welcome') { startDiscovery(); state.view = { ...state.view, discovery: state.discovery }; sendView(); } break;
       case 'log': if (fs.existsSync(local.serverLog)) shell.openPath(local.serverLog); break;
       default: return false;
     }
@@ -1002,6 +1166,7 @@ function start() {
   });
 
   app.on('window-all-closed', () => { /* the tray keeps the app running */ });
+  app.on('will-quit', () => { try { globalShortcut.unregisterAll(); } catch { /* quitting */ } });
 
   // Windows shutting down or signing out, or anything else that quits the
   // app as a whole: let the window close instead of hiding it in the tray.
@@ -1023,6 +1188,7 @@ function start() {
     // Something to see straight away, while the app works out where Frivo is.
     if (settings.get('mode')) busyView('Opening Frivo…', '');
     if (!hiddenStart) showWindow();
+    registerHotkeys();   // NEW
     await refreshStartAtLogin();
     await connect();
 

@@ -3841,7 +3841,7 @@ html.motion-ready .stage { transition: transform var(--dur-smooth) var(--spring-
 /* NEW (1.5.0): the volume and length chips keep one width while their
    sliders move ("95%" and "100%" take the same room), so nothing beside
    them shifts as you drag. */
-#masterVolumeValue { display: inline-block; min-width: 4.7ch; font-variant-numeric: tabular-nums; }
+#masterVolumeValue { display: inline-block; width: 2.8em; text-align: center; font-variant-numeric: tabular-nums; }
 #lengthValue { font-variant-numeric: tabular-nums; }
 
 /* NEW (1.5.0): adding a voice reports in the voice list's footer. */
@@ -5516,3 +5516,39 @@ html.motion-ready .stage { transition: transform var(--dur-smooth) var(--spring-
 .app-offer-close:hover { background: var(--fill); color: var(--ink); }
 #appSection .srow > .btn-ghost { flex: none; }
 #appSection .srow-value { max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* NEW (1.8.0): Settings › Other devices */
+.dev-qr-row { flex-direction: row; align-items: center; gap: 18px; }
+.dev-qr { flex: none; width: 168px; height: 168px; border-radius: 12px; background: #fff; image-rendering: pixelated; }
+.dev-urls { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.dev-url {
+  padding: 5px 10px;
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  background: none;
+  color: var(--ink-dim);
+  font-family: var(--font-mono);
+  font-size: var(--text-footnote);
+  cursor: pointer;
+}
+.dev-url.is-on { border-color: var(--accent-line); background: var(--accent-soft); color: var(--ink); }
+.dev-code { font-size: 17px; letter-spacing: 0.08em; color: var(--ink); user-select: all; }
+.dev-steps summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 8px; }
+.dev-steps summary::-webkit-details-marker { display: none; }
+.dev-steps summary::before { content: "›"; color: var(--ink-faint); font-size: 18px; line-height: 1; transition: transform var(--dur) var(--ease); }
+.dev-steps[open] summary::before { transform: rotate(90deg); }
+.dev-steps ol { margin: 8px 0 2px; padding-left: 20px; color: var(--ink-dim); font-size: var(--text-footnote); line-height: 1.6; }
+@media (max-width: 560px) {
+  .dev-qr-row { flex-direction: column; align-items: flex-start; }
+}
+
+/* NEW (1.8.0): Settings › App › Shortcuts */
+.settings-subhead {
+  margin: 26px 0 10px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+.srow-sub--error { color: var(--accent-hover, #ff5252); }

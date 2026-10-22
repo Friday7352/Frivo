@@ -16,7 +16,8 @@ if (location.protocol === 'file:') {
   contextBridge.exposeInMainWorld('frivoShell', {
     ready: () => ipcRenderer.invoke('shell:ready'),
     chooseLocal: () => ipcRenderer.invoke('shell:choose-local'),
-    chooseRemote: (address) => ipcRenderer.invoke('shell:choose-remote', String(address || '')),
+    chooseRemote: (address, name) => ipcRenderer.invoke('shell:choose-remote', String(address || ''), String(name || '')),
+    pair: (code) => ipcRenderer.invoke('shell:pair', String(code || '')),
     trust: (accept, fingerprint) => ipcRenderer.invoke('shell:trust', Boolean(accept), String(fingerprint || '')),
     action: (id) => ipcRenderer.invoke('shell:action', String(id || '')),
     onView: (callback) => {
@@ -33,6 +34,13 @@ if (location.protocol === 'file:') {
     changeConnection: () => ipcRenderer.invoke('app:change-connection'),
     checkForUpdate: () => ipcRenderer.invoke('app:check-update'),
     installUpdate: () => ipcRenderer.invoke('app:install-update'),
+    setHotkey: (action, accelerator) => ipcRenderer.invoke('app:set-hotkey', String(action || ''), String(accelerator || '')),
+    onHotkey: (callback) => {
+      ipcRenderer.on('app:hotkey', (event, action) => callback(String(action)));
+      // A hotkey that opened this page is waiting for it to be listening.
+      ipcRenderer.invoke('app:hotkey-ready').then((action) => { if (action) callback(String(action)); }).catch(() => {});
+    },
+    pauseHotkeys: (paused) => ipcRenderer.invoke('app:pause-hotkeys', Boolean(paused)),
     onState: (callback) => {
       ipcRenderer.on('app:state', (event, value) => callback(value));
     },

@@ -14435,6 +14435,188 @@ function omCardUses() {
     api.checkForUpdate().then(render).catch(() => {});
   });
 
+  // ---- NEW: shortcuts (global hotkeys) ----
+  const HOTKEY_ROWS = {
+    dictate: { value: "appHotkeyDictate", sub: "appHotkeyDictateSub", note: "Works anywhere, even with a game in front." },
+    send: { value: "appHotkeySend", sub: "appHotkeySendSub", note: "Speaks what's in the message box." },
+  };
+  let capturing = null;
+
+  const showKeys = (accel) => accel
+    ? accel.replace(/CommandOrControl|Control/g, "Ctrl").replace(/Super/g, "Win").split("+").join(" + ")
+    : "Off";
+
+  function renderHotkeys(s) {
+    if (!s || !s.hotkeys) return;
+    for (const [action, row] of Object.entries(HOTKEY_ROWS)) {
+      if (capturing && capturing.action === action) continue;
+      $(row.value).textContent = showKeys(s.hotkeys[action]);
+      const err = s.hotkeyErrors && s.hotkeyErrors[action];
+      $(row.sub).textContent = err || row.note;
+      $(row.sub).classList.toggle("srow-sub--error", Boolean(err));
+    }
+  }
+
+  const KEY_NAMES = {
+    Space: "Space", Enter: "Enter", Tab: "Tab", Backspace: "Backspace", Insert: "Insert", Delete: "Delete",
+    Home: "Home", End: "End", PageUp: "PageUp", PageDown: "PageDown",
+    ArrowUp: "Up", ArrowDown: "Down", ArrowLeft: "Left", ArrowRight: "Right",
+    Minus: "-", Equal: "=", BracketLeft: "[", BracketRight: "]", Semicolon: ";", Quote: "'",
+    Comma: ",", Period: ".", Slash: "/", Backslash: "\\", Backquote: "`",
+  };
+
+  // CHANGED: letters and digits as the keyboard layout names them (what
+  // Windows matches a shortcut on), so AZERTY and QWERTZ get the key they
+  // pressed.
+  const RESERVED = new Set(["C", "V", "X", "A", "Z", "Y"].map((k) => `CommandOrControl+${k}`)
+    .concat(["Alt+F4", "Alt+Tab", "CommandOrControl+Alt+Delete"]));
+  function acceleratorFor(e) {
+    let key = null;
+    const typed = e.key && e.key.length === 1 ? e.key.toUpperCase() : "";
+    if (/^[A-Z0-9]$/.test(typed)) key = typed;
+    else if (/^Key[A-Z]$/.test(e.code)) key = e.code.slice(3);   // Alt+letter can type a symbol
+    else if (/^Digit\d$/.test(e.code)) key = e.code.slice(5);
+    else if (/^F([1-9]|1\d|2[0-4])$/.test(e.code)) key = e.code;
+    else if (KEY_NAMES[e.code]) key = KEY_NAMES[e.code];
+    if (!key || key === "Delete") return null;
+    const mods = [];
+    if (e.ctrlKey) mods.push("CommandOrControl");
+    if (e.altKey) mods.push("Alt");
+    if (e.shiftKey) mods.push("Shift");
+    if (e.metaKey) mods.push("Super");
+    // Ctrl, Alt or Win with it, or an F key: Shift and a letter alone would
+    // stop that capital being typed anywhere.
+    if (!/^F\d+$/.test(key) && !mods.some((m) => m !== "Shift")) return null;
+    const accel = [...mods, key].join("+");
+    return RESERVED.has(accel) ? null : accel;
+  }
+
+  function stopCapture() {
+    if (!capturing) return;
+    document.removeEventListener("keydown", capturing.listener, true);
+    window.removeEventListener("blur", stopCapture);
+    capturing.button.textContent = "Change";
+    capturing = null;
+    if (api.pauseHotkeys) api.pauseHotkeys(false).catch(() => {});
+    if (current) renderHotkeys(current);
+  }
+
+  function startCapture(action, button) {
+    stopCapture();
+    const row = HOTKEY_ROWS[action];
+    $(row.value).textContent = "Press keys…";
+    $(row.sub).textContent = row.note;
+    $(row.sub).classList.remove("srow-sub--error");
+    button.textContent = "Cancel";
+    const listener = (e) => {
+      // Settings closed or another section opened: stop waiting, and let
+      // the key do what it normally does.
+      if (!$("appSection").offsetParent) { stopCapture(); return; }
+      if (["Control", "Alt", "Shift", "Meta"].includes(e.key)) return;   // still holding modifiers
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.key === "Escape") { stopCapture(); return; }
+      let accel;
+      if ((e.key === "Backspace" || e.key === "Delete") && !e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey) accel = "";
+      else accel = acceleratorFor(e);
+      if (accel === null) {
+        $(row.sub).textContent = "Use Ctrl, Alt or Win with a key, or an F key. Ctrl+C, V, X, A, Z and Y are left alone.";
+        $(row.sub).classList.add("srow-sub--error");
+        return;
+      }
+      stopCapture();
+      api.setHotkey(action, accel).then(render).catch((err) => {
+        $(row.sub).textContent = String((err && err.message) || err).replace(/^Error invoking remote method '[^']+': (Error: )?/, "");
+        $(row.sub).classList.add("srow-sub--error");
+      });
+    };
+    capturing = { action, button, listener };
+    document.addEventListener("keydown", listener, true);
+    window.addEventListener("blur", stopCapture);
+    // The shortcuts already set would act before this page saw the keys.
+    if (api.pauseHotkeys) api.pauseHotkeys(true).catch(() => {});
+  }
+
+  document.querySelectorAll("#appHotkeys [data-hotkey]").forEach((button) => {
+    button.addEventListener("click", () => {
+      if (capturing && capturing.button === button) { stopCapture(); return; }
+      startCapture(button.dataset.hotkey, button);
+    });
+  });
+
+  // A hotkey pressed anywhere presses Frivo's own button, so it does exactly
+  // what clicking it would.
+  if (api.onHotkey) {
+    api.onHotkey((action) => {
+      const btn = $(action === "send" ? "sendBtn" : "dictateBtn");
+      if (btn && !btn.disabled) btn.click();
+    });
+  }
+
+  const baseRender = render;
+  render = (s) => { baseRender(s); renderHotkeys(s); };
+
   api.onState(render);
   refresh();
+})();
+
+
+// ============================================================
+// NEW (1.8.0): Settings › Other devices
+// ============================================================
+// This PC's network address with a QR code for phones, the pairing code the
+// Frivo app asks for, and Frivo's certificate for trusting it on a phone.
+(function initOtherDevices() {
+  const section = $("devicesSection");
+  if (!section) return;
+  let loaded = false;
+
+  function showQr(url) {
+    $("devQr").src = `/api/qr.png?scale=6&text=${encodeURIComponent(url)}`;
+    document.querySelectorAll("#devUrls .dev-url").forEach((b) => b.classList.toggle("is-on", b.dataset.url === url));
+  }
+
+  async function load() {
+    let d;
+    try {
+      const res = await fetch("/api/devices");
+      d = await res.json();
+    } catch {
+      return;
+    }
+    loaded = true;
+    const urls = d.network_urls || [];
+    const host = $("devUrls");
+    host.innerHTML = "";
+    urls.forEach((url) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "dev-url";
+      b.dataset.url = url;
+      b.textContent = url;
+      b.title = "Show this address as the QR code";
+      b.addEventListener("click", () => showQr(url));
+      host.appendChild(b);
+    });
+    $("devQrRow").classList.toggle("is-hidden", !urls.length);
+    if (urls.length) showQr(urls[0]);
+    $("devCode").textContent = d.pairing_code || "—";
+    const note = $("devNote");
+    if (!urls.length) {
+      note.textContent = "This PC isn't on a network right now, so other devices can't reach Frivo.";
+    } else if (!d.https) {
+      note.textContent = "Frivo isn't using HTTPS here, so there's no certificate or pairing code. Run setup again (Repair) to make one.";
+    } else {
+      note.textContent = "If a phone can't connect, allow network access in Frivo's launcher on this PC (Settings › Open port 5000).";
+    }
+    note.classList.remove("is-hidden");
+    $("devCodeRow").classList.toggle("is-hidden", !d.pairing_code);
+    $("devTrust").classList.toggle("is-hidden", !d.certificate);
+  }
+
+  // Loaded the first time the section is opened.
+  new MutationObserver(() => {
+    if (!loaded && !section.classList.contains("is-hidden") && section.offsetParent !== null) load();
+  }).observe(section, { attributes: true, attributeFilter: ["class", "style", "hidden"] });
+  document.querySelectorAll('[data-settings-section="devices"]').forEach((b) => b.addEventListener("click", () => { if (!loaded) load(); }));
 })();

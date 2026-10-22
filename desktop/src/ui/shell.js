@@ -10,6 +10,7 @@
   const shellApi = window.frivoShell;
   const viewEl = document.getElementById('view');
   const footEl = document.getElementById('foot');
+  let typedAddress = null;   // what's typed in the address box, kept across redraws
 
   function el(tag, attrs, ...children) {
     const node = document.createElement(tag);
@@ -67,30 +68,96 @@
       ));
     }
 
+    // CHANGED: what's been typed survives the screen being redrawn (the
+    // network list fills in while it's open).
+    const prev = document.getElementById('address');
+    const hadFocus = prev && document.activeElement === prev;
     const input = el('input', {
       type: 'text', id: 'address', placeholder: '192.168.1.50', spellcheck: 'false', autocomplete: 'off',
-      'aria-label': "The other PC's address", value: v.remoteUrl || '',
+      'aria-label': "The other PC's address",
     });
+    input.value = typedAddress !== null ? typedAddress : (v.remoteUrl || '');
+    input.addEventListener('input', () => { typedAddress = input.value; });
     const error = el('p', { class: 'field-error', role: 'alert' });
-    const connect = async (e) => {
-      const btn = e && e.currentTarget && e.currentTarget.tagName === 'BUTTON' ? e.currentTarget : null;
+    const connectTo = async (address, name, btn) => {
       if (btn) btn.disabled = true;
       error.textContent = '';
-      const result = await shellApi.chooseRemote(input.value).catch((err) => ({ ok: false, error: String(err.message || err) }));
+      const result = await shellApi.chooseRemote(address, name).catch((err) => ({ ok: false, error: String(err.message || err) }));
       if (!result || !result.ok) {
         error.textContent = (result && result.error) || "That address didn't work.";
         if (btn) btn.disabled = false;
       }
     };
+    const connect = (e) => {
+      const btn = e && e.currentTarget && e.currentTarget.tagName === 'BUTTON' ? e.currentTarget : null;
+      return connectTo(input.value, '', btn);
+    };
     input.addEventListener('keydown', (e) => { if (e.key === 'Enter') connect(e); });
+
+    // NEW: Frivo found on the network, to pick from.
+    const found = (v.discovery && v.discovery.servers) || [];
+    const hideThisPc = v.local && v.local.supported && v.local.installed;
+    const listed = found.filter((s) => !(s.thisPc && hideThisPc));
+    const searching = v.discovery && v.discovery.searching;
+    const list = el('div', { class: 'found' },
+      listed.map((server) => el('button', {
+        type: 'button', class: 'found-item',
+        onclick: (e) => connectTo(server.url, server.name, e.currentTarget),
+      },
+      el('span', { class: 'found-name', text: server.name }),
+      el('span', { class: 'found-meta', text: `${server.address}${server.version ? ` · Frivo ${server.version}` : ''}${server.thisPc ? ' · this PC' : ''}` }))),
+      el('div', { class: 'found-status' },
+        searching ? el('span', { class: 'mini-spinner', 'aria-hidden': 'true' }) : null,
+        el('span', { text: searching
+          ? (listed.length ? 'Still looking…' : 'Looking for Frivo on your network…')
+          : (listed.length ? '' : "No Frivo found on your network. Type its address instead.") }),
+        searching ? null : button('Look again', () => shellApi.action('rescan'), 'link')));
+
     parts.push(el('div', { class: `option${v.current === 'remote' ? ' is-current' : ''}` },
       el('p', { class: 'option-title' }, 'On another PC', v.current === 'remote' ? el('span', { class: 'option-tag', text: 'Current' }) : null),
-      el('p', { class: 'option-sub', text: "Type the address shown in Frivo's launcher on that PC, under Other devices on your network." }),
+      el('p', { class: 'option-sub', text: "Pick it below, or type the address shown in Frivo's launcher on that PC." }),
+      list,
       el('div', { class: 'row' }, input, button('Connect', connect, v.local && v.local.supported ? null : 'primary')),
       error,
     ));
     viewEl.replaceChildren(...parts);
-    if (!v.local || !v.local.supported || v.current === 'remote') input.focus();
+    if (hadFocus) input.focus();
+    else if (!prev && (!v.local || !v.local.supported || v.current === 'remote')) input.focus();
+  }
+
+  // NEW: connecting to another PC for the first time asks for the code
+  // its launcher (or Settings › Other devices) shows.
+  function pair(v) {
+    const input = el('input', {
+      type: 'text', id: 'pair-code', class: 'code-input', placeholder: 'XXXX-XXXX-XXXX', maxlength: '16',
+      spellcheck: 'false', autocomplete: 'off', 'aria-label': 'Pairing code',
+    });
+    const error = el('p', { class: 'field-error', role: 'alert', text: v.error || '' });
+    const submit = async (e) => {
+      const btn = e && e.currentTarget && e.currentTarget.tagName === 'BUTTON' ? e.currentTarget : null;
+      if (btn) btn.disabled = true;
+      error.textContent = '';
+      const result = await shellApi.pair(input.value).catch((err) => ({ ok: false, error: String(err.message || err) }));
+      if (!result || !result.ok) {
+        error.textContent = (result && result.error) || "That code didn't work.";
+        if (btn) btn.disabled = false;
+        input.focus();
+        input.select();
+      }
+    };
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(e); });
+    const where = v.serverName ? `${v.serverName} (${v.host})` : v.host;
+    viewEl.replaceChildren(el('div', null,
+      el('h1', { text: v.changed ? `Pair with ${where} again` : `Pair with ${where}` }),
+      v.changed ? el('p', { class: 'lead warning', text: "Frivo at this address isn't the one this app paired with before. That's expected if Frivo was reinstalled there. If it wasn't, don't pair: something else may be answering at this address." }) : null,
+      el('p', { class: 'lead', text: "Type the pairing code shown on that PC: in Frivo's launcher, or in Frivo under Settings › Other devices. It proves this is your Frivo, so nothing else on the network can pretend to be it." }),
+      el('div', { class: 'row' }, input, button('Pair', submit, 'primary')),
+      error,
+      el('div', { class: 'actions actions-left' },
+        button('No code? Compare the certificate instead', () => shellApi.action('compare'), 'link'),
+        button('Cancel', () => shellApi.action('change'), 'link')),
+    ));
+    input.focus();
   }
 
   function status(v) {
@@ -111,10 +178,13 @@
       el('p', { class: `lead${v.changed ? ' warning' : ''}`, text: v.changed
         ? "This isn't the certificate this app trusted for this address before. That's expected if Frivo was reinstalled on that PC. If it wasn't, don't connect: something else may be answering at this address."
         : "Frivo makes its own certificate when it's installed, so Windows doesn't know it yet. Trust it if this is your Frivo. The app remembers it, and only ever accepts this one at this address." }),
+      // CHANGED: say what each row is. "Made by" read as who made the app;
+      // it's the certificate authority Frivo created on that PC, by the
+      // name written in the certificate.
       el('dl', { class: 'facts' },
         fact('Address', v.host),
-        fact('Made by', v.authority),
-        fact('For', (v.names || []).join(', ') || v.server),
+        fact('Certificate signed by', v.authority),
+        fact('Valid for', (v.names || []).join(', ') || v.server),
         fact('Fingerprint', v.fingerprint, true)),
       el('div', { class: 'actions' },
         button(v.changed ? 'Trust the new one' : 'Trust and connect', (e) => {
@@ -122,6 +192,7 @@
           shellApi.trust(true, v.fullFingerprint);
         }, 'primary'),
         button('Cancel', () => shellApi.trust(false))),
+      el('div', { class: 'actions' }, button('Use the pairing code instead', () => shellApi.action('pair'), 'link')),
     );
   }
 
@@ -150,9 +221,11 @@
 
   function render(v) {
     if (!v) return;
-    if (v.appVersion) footEl.textContent = `Frivo App ${v.appVersion}`;
+    if (v.appVersion) footEl.textContent = `Frivo App ${v.appVersion} · by Friday`;
+    if (v.name !== 'welcome') typedAddress = null;
     if (v.name === 'welcome') welcome(v);
     else if (v.name === 'trust') trust(v);
+    else if (v.name === 'pair') pair(v);
     else if (v.name === 'install') install(v);
     else status(v);
   }

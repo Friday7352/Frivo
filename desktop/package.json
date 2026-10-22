@@ -8,6 +8,7 @@
   "private": true,
   "main": "src/main.js",
   "frivo": {
+    "appId": "com.friday7352.frivo.app",
     "repository": "Friday7352/Frivo",
     "port": 5000,
     "minimumFrivo": "1.8.0"

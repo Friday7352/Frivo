@@ -797,6 +797,10 @@
             <button type="button" class="settings-nav-btn" data-settings-section="storage">
               <svg class="icon-16"><use href="#i-db"/></svg>Storage
             </button>
+            <!-- NEW (1.8.0): phones, other PCs and the Frivo app -->
+            <button type="button" class="settings-nav-btn" data-settings-section="devices">
+              <svg class="icon-16"><use href="#i-globe"/></svg>Other devices
+            </button>
             <!-- NEW (1.8.0): only in the Frivo app (desktop\ in the repo), never in a browser -->
             <button type="button" class="settings-nav-btn is-hidden" data-settings-section="app" id="appNavBtn">
               <svg class="icon-16"><use href="#i-chip"/></svg>App
@@ -1510,6 +1514,61 @@
                 </details>
               </section>
 
+              <!-- NEW (1.8.0): phones, other PCs and the Frivo app on them. -->
+              <section class="settings-section" data-settings-section="devices" id="devicesSection">
+                <h3 class="settings-section-title">Other devices</h3>
+                <p class="settings-section-sub">Use Frivo on your phone, or from the Frivo app on another PC. They need to be on the same network as this PC.</p>
+                <div class="settings-card">
+                  <div class="srow srow--stacked dev-qr-row" id="devQrRow">
+                    <span class="srow-main srow-main--flex">
+                      <span class="srow-label">On your phone</span>
+                      <span class="srow-sub">Scan this with your phone's camera, or type the address.</span>
+                      <span class="dev-urls" id="devUrls"></span>
+                    </span>
+                    <img class="dev-qr" id="devQr" alt="QR code for Frivo's network address" width="168" height="168">
+                  </div>
+                  <div class="srow" id="devCodeRow">
+                    <span class="srow-main srow-main--flex">
+                      <span class="srow-label">Pairing code</span>
+                      <span class="srow-sub">The Frivo app on another PC asks for this the first time it connects. It proves it's talking to this Frivo.</span>
+                    </span>
+                    <span class="srow-value srow-value--mono dev-code" id="devCode">—</span>
+                  </div>
+                </div>
+                <div id="devTrust">
+                <h3 class="settings-section-title backup-title">Trust Frivo on a phone</h3>
+                <p class="settings-section-sub">Phones warn that Frivo's connection isn't private, because Frivo makes its own certificate. Install it on your phone once and the warning goes away. Only do this for your own Frivo.</p>
+                <div class="settings-card">
+                  <div class="srow">
+                    <span class="srow-main srow-main--flex">
+                      <span class="srow-label">Frivo's certificate</span>
+                      <span class="srow-sub">Open this page on the phone, then download it.</span>
+                    </span>
+                    <a class="btn-ghost btn-sm" id="devCertLink" href="/frivo-ca.crt" download="Frivo-CA.crt">
+                      <svg class="icon-14" aria-hidden="true"><use href="#i-download"/></svg>Download
+                    </a>
+                  </div>
+                  <details class="srow srow--stacked dev-steps">
+                    <summary class="srow-label">iPhone or iPad</summary>
+                    <ol>
+                      <li>Tap <b>Download</b> in Safari, then <b>Allow</b>.</li>
+                      <li>Open <b>Settings › General › VPN &amp; Device Management</b>, tap <b>Frivo Local CA</b>, and <b>Install</b>.</li>
+                      <li>Open <b>Settings › General › About › Certificate Trust Settings</b> and turn on <b>Frivo Local CA</b>.</li>
+                    </ol>
+                  </details>
+                  <details class="srow srow--stacked dev-steps">
+                    <summary class="srow-label">Android</summary>
+                    <ol>
+                      <li>Tap <b>Download</b>.</li>
+                      <li>Open <b>Settings › Security</b> (on some phones <b>Security &amp; privacy › More security settings</b>) › <b>Encryption &amp; credentials › Install a certificate › CA certificate</b>, and pick <b>Frivo-CA.crt</b> from Downloads.</li>
+                      <li>Close the browser and open Frivo again.</li>
+                    </ol>
+                  </details>
+                </div>
+                </div>
+                <p class="settings-note is-hidden" id="devNote"></p>
+              </section>
+
               <!-- NEW (1.8.0): the Frivo app's own settings. Shown only when this page
                    is open in the app, which gives it window.frivoApp (desktop\src\preload.js). -->
               <section class="settings-section" data-settings-section="app" id="appSection">
@@ -1577,6 +1636,27 @@
                     <span class="srow-chevron"><svg class="icon-16"><use href="#i-chevron"/></svg></span>
                   </button>
                 </div>
+                <!-- NEW: keys that work anywhere, even in VRChat or a game. -->
+                <h4 class="settings-subhead">Shortcuts</h4>
+                <div class="settings-card" id="appHotkeys">
+                  <div class="srow">
+                    <span class="srow-main srow-main--flex">
+                      <span class="srow-label">Start or stop dictation</span>
+                      <span class="srow-sub" id="appHotkeyDictateSub">Works anywhere, even with a game in front.</span>
+                    </span>
+                    <span class="srow-value srow-value--mono" id="appHotkeyDictate">—</span>
+                    <button type="button" class="btn-ghost btn-sm" data-hotkey="dictate">Change</button>
+                  </div>
+                  <div class="srow">
+                    <span class="srow-main srow-main--flex">
+                      <span class="srow-label">Send</span>
+                      <span class="srow-sub" id="appHotkeySendSub">Speaks what's in the message box.</span>
+                    </span>
+                    <span class="srow-value srow-value--mono" id="appHotkeySend">—</span>
+                    <button type="button" class="btn-ghost btn-sm" data-hotkey="send">Change</button>
+                  </div>
+                </div>
+                <p class="settings-note">Press Change, then the keys: Ctrl, Alt or Win with a key, or an F key. Esc cancels; Backspace on its own turns the shortcut off.</p>
                 <p class="settings-note is-hidden" id="appOutdatedNote"></p>
               </section>
 

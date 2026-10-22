@@ -271,6 +271,15 @@ function Start-Server {
 }
 
 function Stop-Server {
+    # NEW (1.8.0): Frivo started before sign-in, by the at-startup task.
+    # Ended through Task Scheduler; the copy is also caught below.
+    if (Test-FrivoBootTaskRunning) {
+        try {
+            $service = New-Object -ComObject 'Schedule.Service'
+            $service.Connect()
+            [void] $service.GetFolder('\').GetTask('Frivo (at startup)').Stop(0)
+        } catch { }
+    }
     if ($script:serverProc -and -not $script:serverProc.HasExited) {
         try { Stop-Process -Id $script:serverProc.Id -Force -ErrorAction Stop } catch { }
     }
@@ -403,17 +412,20 @@ public static void SetWindowIdentity(IntPtr hwnd, string appId, string iconResou
 Import-Module (Join-Path $ScriptDir 'Frivo.Ui.psm1') -Force
 $ChromeTheme = Get-FrivoTheme
 
-$ColBg      = [System.Drawing.Color]::FromArgb(13, 17, 23)     # --bg
-$ColSurface = [System.Drawing.Color]::FromArgb(22, 27, 34)     # --surface
-$ColCard    = [System.Drawing.Color]::FromArgb(28, 35, 45)     # --surface-2
-$ColHair    = [System.Drawing.Color]::FromArgb(42, 50, 62)
-$ColInk     = [System.Drawing.Color]::FromArgb(232, 238, 247)  # --ink
-$ColDim     = [System.Drawing.Color]::FromArgb(154, 163, 178)
-$ColFaint   = [System.Drawing.Color]::FromArgb(110, 119, 134)
-$ColAccent  = [System.Drawing.Color]::FromArgb(250, 47, 47)    # --accent
-$ColAccentH = [System.Drawing.Color]::FromArgb(255, 82, 82)
-$ColSignal  = [System.Drawing.Color]::FromArgb(62, 207, 109)   # --signal
-$ColWarn    = [System.Drawing.Color]::FromArgb(240, 166, 60)   # --warn
+# CHANGED (1.8.0): from the shared theme (Frivo.Ui.psm1), which now has
+# Frivo's own colours, so the launcher looks like Frivo.
+$ColBg      = $ChromeTheme.Bg
+$ColSurface = $ChromeTheme.Surface
+$ColCard    = $ChromeTheme.Card
+$ColCardHi  = $ChromeTheme.CardHi
+$ColHair    = $ChromeTheme.Hair
+$ColInk     = $ChromeTheme.Ink
+$ColDim     = $ChromeTheme.Dim
+$ColFaint   = $ChromeTheme.Faint
+$ColAccent  = $ChromeTheme.Accent
+$ColAccentH = $ChromeTheme.AccentH
+$ColSignal  = $ChromeTheme.Signal
+$ColWarn    = $ChromeTheme.Warn
 
 $FontUI    = New-Object System.Drawing.Font('Segoe UI', 10.5)
 $FontSmall = New-Object System.Drawing.Font('Segoe UI', 9.25)
@@ -455,7 +467,7 @@ function New-Card {
     $p.Location = New-Object System.Drawing.Point($X, $Y)
     $p.Size = New-Object System.Drawing.Size($W, $H)
     $p.BackColor = $ColSurface
-    Set-Rounded $p 18
+    Set-Rounded $p 16
     $Parent.Controls.Add($p)
     return $p
 }
@@ -493,14 +505,25 @@ function New-FlatButton {
     } else {
         $b.BackColor = $ColCard
         $b.ForeColor = $ColInk
-        $b.FlatAppearance.BorderSize = 1
+        $b.FlatAppearance.BorderSize = 0   # CHANGED (1.8.0): Frivo's buttons have no outline
         $b.FlatAppearance.BorderColor = $ColHair
-        $b.FlatAppearance.MouseOverBackColor = [System.Drawing.Color]::FromArgb(50, 61, 76)
-        $b.FlatAppearance.MouseDownBackColor = [System.Drawing.Color]::FromArgb(24, 30, 39)
+        $b.FlatAppearance.MouseOverBackColor = $ColCardHi
+        $b.FlatAppearance.MouseDownBackColor = $ColSurface
     }
-    Set-Rounded $b 14
+    Set-Rounded $b 12
     $Parent.Controls.Add($b)
     return $b
+}
+
+# NEW (1.8.0): a thin line between rows on a card.
+function New-Divider {
+    param($Parent, [int] $X, [int] $Y, [int] $W)
+    $d = New-Object System.Windows.Forms.Panel
+    $d.Location = New-Object System.Drawing.Point($X, $Y)
+    $d.Size = New-Object System.Drawing.Size($W, 1)
+    $d.BackColor = $ColHair
+    $Parent.Controls.Add($d)
+    return $d
 }
 
 # ==================================================================
@@ -529,8 +552,10 @@ $taskbarIdentity = { try { [FrivoNative.Taskbar]::SetWindowIdentity($form.Handle
 $form.Add_HandleCreated(({ & $taskbarIdentity }).GetNewClosure())
 
 # ---------- header ----------
+# CHANGED (1.8.0): laid out like Frivo's own top bar: the logo and name on
+# the left, the status as a pill on the right.
 $logo = New-Object System.Windows.Forms.PictureBox
-$logo.Location = New-Object System.Drawing.Point(28, 22)
+$logo.Location = New-Object System.Drawing.Point(24, 24)
 $logo.Size = New-Object System.Drawing.Size(36, 36)
 $logo.SizeMode = 'Zoom'
 $logo.BackColor = [System.Drawing.Color]::Transparent
@@ -545,16 +570,47 @@ $logoPng = [System.IO.Path]::Combine($InstallDir, 'static', 'icon.png')
 $logo.Image = Get-FrivoImage $logoPng
 $form.Controls.Add($logo)
 
-$titleLbl = New-DarkLabel $form $AppName 78 15 250 38 $FontBig $ColInk
+$titleLbl = New-DarkLabel $form $AppName 70 20 200 40 $FontBig $ColInk
 
-$statusDot = New-Object System.Windows.Forms.Panel
-$statusDot.Location = New-Object System.Drawing.Point(82, 56)
-$statusDot.Size = New-Object System.Drawing.Size(9, 9)
-$statusDot.BackColor = $ColWarn
-Set-Rounded $statusDot 9
-$form.Controls.Add($statusDot)
+# The status pill: a dot and a word, drawn by hand so it can be round with
+# a hairline edge, like Frivo's "Ready" pill.
+$statusPill = New-Object System.Windows.Forms.Panel
+$statusPill.Location = New-Object System.Drawing.Point(316, 27)
+$statusPill.Size = New-Object System.Drawing.Size(130, 30)
+$statusPill.BackColor = $ColBg
+$statusPill.Tag = @{ Text = 'Starting…'; Color = $ColWarn; Fill = $ColSurface; Edge = $ColHair; Ink = $ColInk; Font = $FontSmall }
+$statusPill.Add_Paint({
+    param($c, $e)
+    $t = $c.Tag
+    $g = $e.Graphics
+    $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
+    $g.Clear($c.BackColor)
+    $size = [System.Windows.Forms.TextRenderer]::MeasureText($t.Text, $t.Font)
+    $w = [Math]::Min($c.ClientSize.Width - 1, $size.Width + 38)
+    $h = $c.ClientSize.Height - 1
+    $x0 = $c.ClientSize.Width - 1 - $w
+    $path = New-Object System.Drawing.Drawing2D.GraphicsPath
+    $path.AddArc($x0, 0, $h, $h, 90, 180)
+    $path.AddArc($x0 + $w - $h, 0, $h, $h, 270, 180)
+    $path.CloseFigure()
+    $fill = New-Object System.Drawing.SolidBrush($t.Fill)
+    $edge = New-Object System.Drawing.Pen($t.Edge)
+    $g.FillPath($fill, $path)
+    $g.DrawPath($edge, $path)
+    $dot = New-Object System.Drawing.SolidBrush($t.Color)
+    $g.FillEllipse($dot, $x0 + 13, [int] ($h / 2) - 4, 8, 8)
+    [System.Windows.Forms.TextRenderer]::DrawText($g, $t.Text, $t.Font,
+        (New-Object System.Drawing.Point(($x0 + 26), ([int] (($h - $size.Height) / 2) + 1))), $t.Ink)
+    $fill.Dispose(); $edge.Dispose(); $dot.Dispose(); $path.Dispose()
+})
+$form.Controls.Add($statusPill)
 
-$statusLbl = New-DarkLabel $form 'Starting…' 98 53 330 18 $FontSmall $ColDim
+function Set-StatusPill {
+    param([string] $Text, [System.Drawing.Color] $Color)
+    $statusPill.Tag.Text = $Text
+    $statusPill.Tag.Color = $Color
+    $statusPill.Invalidate()
+}
 
 # ---------- views ----------
 $viewMain = New-Object System.Windows.Forms.Panel
@@ -571,106 +627,169 @@ $viewSettings.Visible = $false
 $form.Controls.Add($viewSettings)
 
 # ---------- main view: addresses ----------
+# CHANGED (1.8.0): both addresses on one card, with a line between them.
 $hostnameWorks = Test-LocalHostnameWorks
 $localUrl = if ($hostnameWorks) { 'https://{0}:{1}' -f $Hostname, $Port } else { 'https://localhost:{0}' -f $Port }
 $lanIp    = Get-LanIp
 $lanUrl   = if ($lanIp) { 'https://{0}:{1}' -f $lanIp, $Port } else { $null }
 
-$card1 = New-Card $viewMain 24 10 422 78
-[void] (New-DarkLabel $card1 'ON THIS PC' 18 14 380 14 $FontCaps $ColFaint)
-[void] (New-DarkLabel $card1 $localUrl 18 34 300 24 $FontMid $ColInk)
-$copy1 = New-FlatButton $card1 'Copy' 336 30 68 32
+# CHANGED (1.8.0): taller, for the pairing code row.
+$cardAddr = New-Card $viewMain 24 8 422 204
+[void] (New-DarkLabel $cardAddr 'THIS PC' 18 16 300 14 $FontCaps $ColFaint)
+[void] (New-DarkLabel $cardAddr $localUrl 18 34 300 24 $FontMid $ColInk)
+$copy1 = New-FlatButton $cardAddr 'Copy' 334 26 70 32
 $copy1.Font = $FontUI
-
-$card2 = New-Card $viewMain 24 98 422 78
-[void] (New-DarkLabel $card2 'OTHER DEVICES ON YOUR NETWORK' 18 14 380 14 $FontCaps $ColFaint)
+[void] (New-Divider $cardAddr 18 70 386)
+[void] (New-DarkLabel $cardAddr 'OTHER DEVICES ON YOUR NETWORK' 18 86 300 14 $FontCaps $ColFaint)
 if ($lanUrl) {
-    [void] (New-DarkLabel $card2 $lanUrl 18 34 300 24 $FontMid $ColInk)
-    $copy2 = New-FlatButton $card2 'Copy' 336 30 68 32
+    [void] (New-DarkLabel $cardAddr $lanUrl 18 104 300 24 $FontMid $ColInk)
+    $copy2 = New-FlatButton $cardAddr 'Copy' 334 96 70 32
     $copy2.Font = $FontUI
 } else {
-    [void] (New-DarkLabel $card2 'No network connection detected.' 18 36 380 20 $FontUI $ColDim)
+    [void] (New-DarkLabel $cardAddr 'No network connection detected.' 18 106 300 20 $FontUI $ColDim)
     $copy2 = $null
 }
 
-$noteText = ("{0} works on this PC. Other devices use the address above." -f $Hostname)
-$noteLbl = New-DarkLabel $viewMain $noteText 28 188 414 54 $FontSmall $ColDim
+# NEW (1.8.0): the pairing code the Frivo app on another PC asks for, and a
+# QR code of the network address for phones.
+$CaCertPath = [System.IO.Path]::Combine($DataDir, 'ca.crt')
+$FontCode = New-Object System.Drawing.Font('Consolas', 13, [System.Drawing.FontStyle]::Bold)
+[void] (New-Divider $cardAddr 18 140 386)
+[void] (New-DarkLabel $cardAddr 'PAIRING CODE FOR THE FRIVO APP' 18 156 300 14 $FontCaps $ColFaint)
+$script:pairingCode = Get-FrivoPairingCode -CertificatePath $CaCertPath
+$codeLbl = New-DarkLabel $cardAddr $(if ($script:pairingCode) { $script:pairingCode } else { 'Shown once Frivo has started' }) 18 174 286 24 $(if ($script:pairingCode) { $FontCode } else { $FontUI }) $(if ($script:pairingCode) { $ColInk } else { $ColDim })
+if ($lanUrl) {
+    $btnQr = New-FlatButton $cardAddr 'QR code' 314 166 90 32
+    $btnQr.Font = $FontUI
+} else {
+    $btnQr = $null
+}
 
-$btnOpen = New-FlatButton $viewMain ('Open {0}' -f $AppName) 24 252 422 46 -Primary $true
+# The certificate authority is made the first time Frivo starts, so the
+# code can turn up after the window does.
+function Update-PairingCode {
+    if ($script:pairingCode) { return }
+    $code = Get-FrivoPairingCode -CertificatePath $CaCertPath
+    if (-not $code) { return }
+    $script:pairingCode = $code
+    $codeLbl.Text = $code
+    $codeLbl.Font = $FontCode
+    $codeLbl.ForeColor = $ColInk
+}
 
-$btnSettings = New-FlatButton $viewMain 'Settings' 24 310 205 38
-$btnPower    = New-FlatButton $viewMain ('Stop {0}' -f $AppName) 241 310 205 38
+# A QR code of the network address, made by Frivo's own Python (the segno
+# package Frivo uses for its Settings › Other devices), into a temporary
+# file: nothing goes over the network.
+function Show-QrCode {
+    if (-not $lanUrl) { return }
+    $png = [System.IO.Path]::Combine([System.IO.Path]::GetTempPath(), 'frivo-qr.png')
+    $ok = $false
+    try {
+        if (Test-Path -LiteralPath $png) { Remove-Item -LiteralPath $png -Force -ErrorAction SilentlyContinue }
+        $code = "import sys, segno; segno.make(sys.argv[1], error='m').save(sys.argv[2], scale=6, border=3)"
+        $argLine = '-c "{0}" "{1}" "{2}"' -f $code, $lanUrl, $png
+        $p = Start-Process -FilePath $PythonW -ArgumentList $argLine -WindowStyle Hidden -PassThru -Wait
+        $ok = ($p.ExitCode -eq 0) -and (Test-Path -LiteralPath $png -PathType Leaf)
+    } catch { $ok = $false }
+    if (-not $ok) {
+        [void] [System.Windows.Forms.MessageBox]::Show($form,
+            ("The QR code couldn't be made here. Open {0} and go to Settings › Other devices for it, or type {1} on your phone." -f $AppName, $lanUrl),
+            $AppName, 'OK', 'Information')
+        return
+    }
 
-$hintLbl = New-DarkLabel $viewMain '' 28 364 414 36 $FontSmall $ColFaint
+    $dlg = New-Object System.Windows.Forms.Form
+    $dlg.Text = ('{0} on your phone' -f $AppName)
+    $dlg.ClientSize = New-Object System.Drawing.Size(340, 448)
+    $dlg.StartPosition = 'CenterParent'
+    $dlg.FormBorderStyle = 'FixedDialog'
+    $dlg.MaximizeBox = $false
+    $dlg.MinimizeBox = $false
+    $dlg.ShowInTaskbar = $false
+    $dlg.AutoScaleMode = 'Dpi'
+    $dlg.BackColor = $ColBg
+    $dlg.Font = $FontUI
+    if ($form.Icon) { $dlg.Icon = $form.Icon }
+    Set-FrivoWindowChrome -Form $dlg -Theme $ChromeTheme
+
+    $pic = New-Object System.Windows.Forms.PictureBox
+    # At its own size: scaling a QR code blurs its squares.
+    $pic.Location = New-Object System.Drawing.Point(45, 20)
+    $pic.Size = New-Object System.Drawing.Size(250, 250)
+    $pic.SizeMode = 'CenterImage'
+    $pic.BackColor = [System.Drawing.Color]::White
+    $pic.Image = Get-FrivoImage $png
+    $dlg.Controls.Add($pic)
+
+    $u = New-DarkLabel $dlg $lanUrl 20 278 300 24 $FontMid $ColInk
+    $u.TextAlign = 'MiddleCenter'
+    $t = New-DarkLabel $dlg ("Scan it with your phone's camera, on the same Wi-Fi as this PC. The first time, your phone warns about the certificate: {0}'s Settings › Other devices shows how to trust it." -f $AppName) 24 310 292 80 $FontSmall $ColDim
+    $t.TextAlign = 'TopCenter'
+    $close = New-FlatButton $dlg 'Close' 120 396 100 36
+    $close.Font = $FontUI
+    $close.DialogResult = 'OK'
+    $dlg.AcceptButton = $close
+    $dlg.CancelButton = $close
+    [void] $dlg.ShowDialog($form)
+    if ($pic.Image) { $pic.Image.Dispose() }
+    $dlg.Dispose()
+    Remove-Item -LiteralPath $png -Force -ErrorAction SilentlyContinue
+}
+
+$noteText = ("{0} works on this PC. Phones and other PCs use the network address." -f $Hostname)
+$noteLbl = New-DarkLabel $viewMain $noteText 28 222 414 40 $FontSmall $ColDim
+
+$btnOpen = New-FlatButton $viewMain ('Open {0}' -f $AppName) 24 270 422 46 -Primary $true
+
+$btnSettings = New-FlatButton $viewMain 'Settings' 24 328 205 40
+$btnPower    = New-FlatButton $viewMain ('Stop {0}' -f $AppName) 241 328 205 40
+
+$hintLbl = New-DarkLabel $viewMain '' 28 382 414 40 $FontSmall $ColFaint
 $hintLbl.TextAlign = 'TopCenter'
 
 # ---------- settings view ----------
+# CHANGED (1.8.0): rows with switches, like Frivo's Settings, instead of
+# radio buttons and checkboxes.
 # [string] first: in Windows PowerShell 5.1 a bare [char] on the left of +
 # is treated as a number and the script dies trying to convert the text.
 $btnBack = New-FlatButton $viewSettings ([string][char]0x2190 + '  Back') 24 4 90 32
 $btnBack.Font = $FontUI
 
-[void] (New-DarkLabel $viewSettings 'WHEN I CLOSE THIS WINDOW' 30 52 380 16 $FontCaps $ColFaint)
-$cardClose = New-Card $viewSettings 24 74 422 104
+function New-SwitchRow {
+    param($Card, [int] $Y, [string] $Label, [string] $Sub, [string] $Name)
+    [void] (New-DarkLabel $Card $Label 18 $Y 330 22 $FontUI $ColInk)
+    [void] (New-DarkLabel $Card $Sub 18 ($Y + 22) 330 20 $FontSmall $ColDim)
+    return (New-FrivoSwitch -Theme $ChromeTheme -Parent $Card -X 362 -Y ($Y + 8) -Name $Name)
+}
 
-$radioKeep = New-Object System.Windows.Forms.RadioButton
-$radioKeep.Location = New-Object System.Drawing.Point(18, 14)
-$radioKeep.Size = New-Object System.Drawing.Size(390, 24)
-$radioKeep.Text = ('Keep {0} running in the background' -f $AppName)
-$radioKeep.ForeColor = $ColInk
-$radioKeep.BackColor = [System.Drawing.Color]::Transparent
-$cardClose.Controls.Add($radioKeep)
+[void] (New-DarkLabel $viewSettings 'WINDOW' 30 50 380 16 $FontCaps $ColFaint)
+$cardClose = New-Card $viewSettings 24 70 422 72
+$swKeep = New-SwitchRow $cardClose 14 ('Keep {0} running when I close this' -f $AppName) `
+    'It stays in the tray. Quit from the tray icon.' 'Keep running when closed'
 
-[void] (New-DarkLabel $cardClose ('Keeps {0} running in the notification area.' -f $AppName) 42 40 354 22 $FontSmall $ColDim)
-
-$radioStop = New-Object System.Windows.Forms.RadioButton
-$radioStop.Location = New-Object System.Drawing.Point(18, 58)
-$radioStop.Size = New-Object System.Drawing.Size(390, 24)
-$radioStop.Text = ('Stop {0}' -f $AppName)
-$radioStop.ForeColor = $ColInk
-$radioStop.BackColor = [System.Drawing.Color]::Transparent
-$cardClose.Controls.Add($radioStop)
-
-[void] (New-DarkLabel $cardClose 'Stops the server and closes Frivo.' 42 82 354 20 $FontSmall $ColDim)
-
-[void] (New-DarkLabel $viewSettings 'STARTUP' 30 192 380 16 $FontCaps $ColFaint)
-$cardStart = New-Card $viewSettings 24 214 422 104
-
-$chkStartup = New-Object System.Windows.Forms.CheckBox
-$chkStartup.Location = New-Object System.Drawing.Point(18, 14)
-$chkStartup.Size = New-Object System.Drawing.Size(390, 24)
-$chkStartup.Text = ('Start {0} when I sign in to Windows' -f $AppName)
-$chkStartup.ForeColor = $ColInk
-$chkStartup.BackColor = [System.Drawing.Color]::Transparent
-$cardStart.Controls.Add($chkStartup)
-
-[void] (New-DarkLabel $cardStart 'Starts Frivo in the notification area.' 42 40 354 22 $FontSmall $ColDim)
-
-$chkAutoOpen = New-Object System.Windows.Forms.CheckBox
-$chkAutoOpen.Location = New-Object System.Drawing.Point(18, 58)
-$chkAutoOpen.Size = New-Object System.Drawing.Size(390, 24)
-$chkAutoOpen.Text = 'Open the dashboard in my browser automatically'
-$chkAutoOpen.ForeColor = $ColInk
-$chkAutoOpen.BackColor = [System.Drawing.Color]::Transparent
-$cardStart.Controls.Add($chkAutoOpen)
-
-[void] (New-DarkLabel $cardStart 'Opens Frivo in your browser after launch.' 42 82 354 20 $FontSmall $ColDim)
+[void] (New-DarkLabel $viewSettings 'STARTUP' 30 156 380 16 $FontCaps $ColFaint)
+$cardStart = New-Card $viewSettings 24 176 422 128
+$swStartup = New-SwitchRow $cardStart 14 ('Start {0} when I sign in' -f $AppName) `
+    'In the tray, ready for phones and other PCs.' 'Start when I sign in'
+[void] (New-Divider $cardStart 18 64 386)
+$swAutoOpen = New-SwitchRow $cardStart 78 'Open it in my browser when it starts' `
+    'Once Frivo is ready.' 'Open in my browser when it starts'
 
 $needsFirewallRule = $lanUrl -and -not (Test-FrivoFirewallRule)
-$helpY = 336
+$helpY = 318
 if ($needsFirewallRule) {
-    [void] (New-DarkLabel $viewSettings 'NETWORK ACCESS' 30 336 380 16 $FontCaps $ColFaint)
-    $cardFirewall = New-Card $viewSettings 24 358 422 64
-    [void] (New-DarkLabel $cardFirewall 'Other devices need port 5000 open.' 18 13 250 22 $FontSmall $ColDim)
+    [void] (New-DarkLabel $viewSettings 'NETWORK ACCESS' 30 318 380 16 $FontCaps $ColFaint)
+    $cardFirewall = New-Card $viewSettings 24 338 422 64
+    [void] (New-DarkLabel $cardFirewall 'Other devices need port 5000 open.' 18 21 250 22 $FontSmall $ColDim)
     $btnFirewall = New-FlatButton $cardFirewall 'Open port 5000' 274 14 130 36
     $btnFirewall.Font = $FontUI
-    $helpY = 440
+    $helpY = 416
 } else {
     $btnFirewall = $null
 }
 
 [void] (New-DarkLabel $viewSettings 'TROUBLESHOOTING' 30 $helpY 380 16 $FontCaps $ColFaint)
-$cardHelp = New-Card $viewSettings 24 ($helpY + 22) 422 62
+$cardHelp = New-Card $viewSettings 24 ($helpY + 20) 422 62
 
 $btnLog = New-FlatButton $cardHelp 'View server log' 16 13 187 36
 $btnData = New-FlatButton $cardHelp 'Open settings folder' 219 13 187 36
@@ -803,8 +922,7 @@ function Update-Status {
 
     switch ($script:state) {
         'running' {
-            $statusDot.BackColor = $ColSignal
-            $statusLbl.Text = 'Running'
+            Set-StatusPill 'Running' $ColSignal   # CHANGED (1.8.0)
             $btnOpen.Enabled = $true
             $btnOpen.Text = ('Open {0}' -f $AppName)
             $btnPower.Text = ('Stop {0}' -f $AppName)
@@ -812,23 +930,20 @@ function Update-Status {
             $hintLbl.Text = ''
         }
         'starting' {
-            $statusDot.BackColor = $ColWarn
-            $statusLbl.Text = 'Starting…'
+            Set-StatusPill 'Starting…' $ColWarn   # CHANGED (1.8.0)
             $btnOpen.Enabled = $false
             $btnPower.Enabled = $false
             $hintLbl.Text = 'The first start after installing can take a few extra seconds.'
         }
         'stopped' {
-            $statusDot.BackColor = $ColFaint
-            $statusLbl.Text = 'Stopped'
+            Set-StatusPill 'Stopped' $ColFaint   # CHANGED (1.8.0)
             $btnOpen.Enabled = $true
             $btnOpen.Text = ('Start {0}' -f $AppName)
             $btnPower.Enabled = $false
             $hintLbl.Text = ''
         }
         'failed' {
-            $statusDot.BackColor = $ColAccent
-            $statusLbl.Text = 'Not running'
+            Set-StatusPill 'Not running' $ColAccent   # CHANGED (1.8.0)
             $btnOpen.Enabled = $true
             $btnOpen.Text = ('Start {0}' -f $AppName)
             $btnPower.Enabled = $false
@@ -860,6 +975,7 @@ $btnPower.Add_Click({
 $copy1.Add_Click({
     try { [System.Windows.Forms.Clipboard]::SetText($localUrl); $copy1.Text = 'Copied' } catch { }
 })
+if ($btnQr) { $btnQr.Add_Click({ Show-QrCode }) }   # NEW (1.8.0)
 if ($copy2) {
     $copy2.Add_Click({
         try { [System.Windows.Forms.Clipboard]::SetText($lanUrl); $copy2.Text = 'Copied' } catch { }
@@ -867,10 +983,10 @@ if ($copy2) {
 }
 
 $btnSettings.Add_Click({
-    $radioKeep.Checked   = ($script:settings.closeAction -eq 'keep')
-    $radioStop.Checked   = ($script:settings.closeAction -eq 'stop')
-    $chkStartup.Checked  = Test-StartupEnabled
-    $chkAutoOpen.Checked = [bool] $script:settings.openBrowser
+    # CHANGED (1.8.0): switches
+    Set-FrivoSwitch $swKeep ($script:settings.closeAction -eq 'keep')
+    Set-FrivoSwitch $swStartup (Test-StartupEnabled)
+    Set-FrivoSwitch $swAutoOpen ([bool] $script:settings.openBrowser)
     $viewMain.Visible = $false
     $viewSettings.Visible = $true
 })
@@ -880,25 +996,27 @@ $btnBack.Add_Click({
     $viewMain.Visible = $true
 })
 
-$radioKeep.Add_CheckedChanged({
-    if ($radioKeep.Checked) { $script:settings.closeAction = 'keep'; Save-LauncherSettings }
-})
-$radioStop.Add_CheckedChanged({
-    if ($radioStop.Checked) { $script:settings.closeAction = 'stop'; Save-LauncherSettings }
-})
-$chkStartup.Add_CheckedChanged({
-    if (-not (Set-StartupEnabled $chkStartup.Checked)) {
+$swKeep.Tag.OnChange = {
+    param([bool] $on)
+    $script:settings.closeAction = if ($on) { 'keep' } else { 'stop' }
+    Save-LauncherSettings
+}
+$swStartup.Tag.OnChange = {
+    param([bool] $on)
+    if (-not (Set-StartupEnabled $on)) {
+        Set-FrivoSwitch $swStartup (Test-StartupEnabled)
         [System.Windows.Forms.MessageBox]::Show(
             'The sign-in setting could not be changed.',
             $AppName,
             [System.Windows.Forms.MessageBoxButtons]::OK,
             [System.Windows.Forms.MessageBoxIcon]::Warning) | Out-Null
     }
-})
-$chkAutoOpen.Add_CheckedChanged({
-    $script:settings.openBrowser = $chkAutoOpen.Checked
+}
+$swAutoOpen.Tag.OnChange = {
+    param([bool] $on)
+    $script:settings.openBrowser = $on
     Save-LauncherSettings
-})
+}
 if ($btnFirewall) {
     $btnFirewall.Add_Click({
         $btnFirewall.Enabled = $false
@@ -1029,6 +1147,7 @@ $timer.Add_Tick({
     try { Watch-UpdateStatus } catch { }   # NEW (1.7.0)
     if ($copy1.Text -eq 'Copied') { $copy1.Text = 'Copy' }
     if ($copy2 -and $copy2.Text -eq 'Copied') { $copy2.Text = 'Copy' }
+    Update-PairingCode   # NEW (1.8.0)
     # A second launcher was started — bring this one forward instead.
     if ($showSignal.WaitOne(0)) {
         [void] $showSignal.Reset()

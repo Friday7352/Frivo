@@ -33,6 +33,11 @@ const DEFAULTS = Object.freeze({
   // Shortcuts this app removed because Frivo's own ones do the same job;
   // put back if that stops being true.
   removedShortcuts: [],
+  // NEW: the name the Frivo picked from the network gave, for showing.
+  remoteName: '',
+  // NEW: keys that work anywhere, even with VRChat in front. Electron
+  // accelerators ("CommandOrControl+Alt+D"); '' for none.
+  hotkeys: { dictate: 'CommandOrControl+Alt+D', send: '' },
 });
 
 function clone(value) {
@@ -61,6 +66,10 @@ class Settings {
     if (!['tray', 'quit'].includes(this.data.closeAction)) this.data.closeAction = 'tray';
     if (!this.data.trusted || typeof this.data.trusted !== 'object') this.data.trusted = {};
     if (!Array.isArray(this.data.removedShortcuts)) this.data.removedShortcuts = [];
+    if (!this.data.hotkeys || typeof this.data.hotkeys !== 'object') this.data.hotkeys = clone(DEFAULTS.hotkeys);
+    for (const key of Object.keys(DEFAULTS.hotkeys)) {
+      if (typeof this.data.hotkeys[key] !== 'string') this.data.hotkeys[key] = DEFAULTS.hotkeys[key];
+    }
   }
 
   get(key) {

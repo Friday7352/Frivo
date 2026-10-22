@@ -88,16 +88,18 @@ function Get-FrivoTheme {
         One object with every colour and font, so a window never invents
         its own shade of anything.
     #>
+    # CHANGED (1.8.0): Frivo's colours as they are now (app/static/style.css,
+    # dark), so setup, the uninstaller and the launcher look like Frivo.
     return [pscustomobject] @{
-        Bg      = [System.Drawing.Color]::FromArgb(13, 17, 23)     # --bg
-        Surface = [System.Drawing.Color]::FromArgb(22, 27, 34)     # --surface
-        Card    = [System.Drawing.Color]::FromArgb(28, 35, 45)     # --surface-2
-        CardHi  = [System.Drawing.Color]::FromArgb(50, 61, 76)     # --surface-4
-        CardLo  = [System.Drawing.Color]::FromArgb(24, 30, 39)
-        Hair    = [System.Drawing.Color]::FromArgb(42, 50, 62)
-        Ink     = [System.Drawing.Color]::FromArgb(232, 238, 247)  # --ink
-        Dim     = [System.Drawing.Color]::FromArgb(154, 163, 178)
-        Faint   = [System.Drawing.Color]::FromArgb(110, 119, 134)
+        Bg      = [System.Drawing.Color]::FromArgb(15, 16, 19)     # --bg
+        Surface = [System.Drawing.Color]::FromArgb(22, 24, 29)     # --surface-2: cards
+        Card    = [System.Drawing.Color]::FromArgb(30, 33, 41)     # --surface-3: controls on cards
+        CardHi  = [System.Drawing.Color]::FromArgb(38, 41, 50)     # --surface-4: hovered
+        CardLo  = [System.Drawing.Color]::FromArgb(19, 21, 25)     # --surface: pressed
+        Hair    = [System.Drawing.Color]::FromArgb(42, 45, 53)     # --rule
+        Ink     = [System.Drawing.Color]::FromArgb(236, 238, 242)  # --ink
+        Dim     = [System.Drawing.Color]::FromArgb(166, 170, 182)  # --ink-dim
+        Faint   = [System.Drawing.Color]::FromArgb(108, 113, 129)  # --ink-faint
         Accent  = [System.Drawing.Color]::FromArgb(250, 47, 47)    # --accent
         AccentH = [System.Drawing.Color]::FromArgb(255, 82, 82)
         AccentP = [System.Drawing.Color]::FromArgb(216, 31, 31)
@@ -414,6 +416,86 @@ function New-FrivoTextBox {
     return $t
 }
 
+function New-FrivoSwitch {
+    <#
+        NEW (1.8.0): an on/off switch like Frivo's own (a rounded track, red
+        when on, with a white knob), instead of a checkbox. It IS a checkbox
+        underneath, drawn over, so Tab reaches it, Space flips it and screen
+        readers know what it is. $OnChange gets the new value when the person
+        flips it; Set-FrivoSwitch changes it without calling $OnChange.
+    #>
+    param(
+        [Parameter(Mandatory)] $Theme,
+        [Parameter(Mandatory)] $Parent,
+        [int] $X, [int] $Y,
+        [bool] $On = $false,
+        [scriptblock] $OnChange,
+        [string] $Name = ''
+    )
+    $sw = New-Object System.Windows.Forms.CheckBox
+    $sw.Appearance = [System.Windows.Forms.Appearance]::Button
+    $sw.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
+    $sw.FlatAppearance.BorderSize = 0
+    $sw.FlatAppearance.CheckedBackColor = $Parent.BackColor
+    $sw.FlatAppearance.MouseOverBackColor = $Parent.BackColor
+    $sw.FlatAppearance.MouseDownBackColor = $Parent.BackColor
+    $sw.BackColor = $Parent.BackColor
+    $sw.Text = ''
+    $sw.Location = New-Object System.Drawing.Point($X, $Y)
+    $sw.Size = New-Object System.Drawing.Size(44, 26)
+    $sw.Cursor = [System.Windows.Forms.Cursors]::Hand
+    $sw.AccessibleName = $Name
+    $sw.Checked = $On
+    $sw.Tag = @{ OnChange = $OnChange; Theme = $Theme; Quiet = $false }
+    $sw.Add_Paint({
+        param($control, $e)
+        $t = $control.Tag.Theme
+        $g = $e.Graphics
+        $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
+        $g.Clear($control.BackColor)
+        $w = 40; $h = 22
+        $x0 = [int] (($control.ClientSize.Width - $w) / 2)
+        $y0 = [int] (($control.ClientSize.Height - $h) / 2)
+        $path = New-Object System.Drawing.Drawing2D.GraphicsPath
+        $path.AddArc($x0, $y0, $h, $h, 90, 180)
+        $path.AddArc($x0 + $w - $h, $y0, $h, $h, 270, 180)
+        $path.CloseFigure()
+        $track = New-Object System.Drawing.SolidBrush($(if ($control.Checked) { $t.Accent } else { $t.CardHi }))
+        $g.FillPath($track, $path)
+        $track.Dispose()
+        if ($control.Focused -and $control.ShowFocusCues) {
+            $ring = New-Object System.Drawing.Pen($t.Dim)
+            $g.DrawPath($ring, $path)
+            $ring.Dispose()
+        }
+        $path.Dispose()
+        $knob = $h - 6
+        $left = if ($control.Checked) { $x0 + $w - $knob - 3 } else { $x0 + 3 }
+        $white = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::White)
+        $g.FillEllipse($white, $left, $y0 + 3, $knob, $knob)
+        $white.Dispose()
+    })
+    $sw.Add_CheckedChanged({
+        param($control, $e)
+        $control.Invalidate()
+        if (-not $control.Tag.Quiet -and $control.Tag.OnChange) { & $control.Tag.OnChange ([bool] $control.Checked) }
+    })
+    $Parent.Controls.Add($sw)
+    return $sw
+}
+
+function Set-FrivoSwitch {
+    param([Parameter(Mandatory)] $Switch, [bool] $On)
+    $Switch.Tag.Quiet = $true
+    try { $Switch.Checked = $On } finally { $Switch.Tag.Quiet = $false }
+    $Switch.Invalidate()
+}
+
+function Get-FrivoSwitch {
+    param([Parameter(Mandatory)] $Switch)
+    return [bool] $Switch.Checked
+}
+
 function New-FrivoProgress {
     <#
         A progress bar drawn from panels, because the native control paints
@@ -451,4 +533,5 @@ function New-FrivoProgress {
 
 Export-ModuleMember -Function Get-FrivoImage, Get-FrivoTheme, Set-FrivoRounded, New-FrivoForm, New-FrivoHeader,
     New-FrivoCard, New-FrivoLabel, New-FrivoButton, New-FrivoCheck, New-FrivoRadio,
-    New-FrivoTextBox, New-FrivoProgress, Set-FrivoWindowChrome, Set-FrivoTaskbarIcon
+    New-FrivoTextBox, New-FrivoProgress, Set-FrivoWindowChrome, Set-FrivoTaskbarIcon,
+    New-FrivoSwitch, Set-FrivoSwitch, Get-FrivoSwitch

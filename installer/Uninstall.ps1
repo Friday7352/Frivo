@@ -13,6 +13,8 @@ param(
     [switch] $Silent,
     [switch] $KeepSettings,
     [switch] $RemoveSettings,
+    # NEW (1.8.0): silent uninstalls leave the Frivo app alone unless asked.
+    [switch] $RemoveApp,
     # Captured before elevation so a standard user who supplies separate
     # administrator credentials still has their own settings addressed.
     [string] $DataPath
@@ -56,6 +58,23 @@ $RegKeys   = @(
     'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\VoiceConsole'
     'HKCU:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\VoiceConsole'
 )
+
+# NEW (1.8.0): the Frivo app, if it's installed for the person signed in
+# here, and whether setup installed it with Frivo ("Both"): then removing
+# it is the default. One installed on its own is only removed if asked.
+$script:AppPaths = $null
+$script:AppWithFrivo = $false
+try {
+    $person = Get-FrivoDesktopUser
+    $candidate = Get-FrivoAppPaths -LocalAppData $person.LocalAppData
+    if (Test-Path -LiteralPath $candidate.Uninstaller -PathType Leaf) { $script:AppPaths = $candidate }
+} catch { }
+foreach ($key in $RegKeys) {
+    try {
+        $r = Get-ItemProperty -Path $key -ErrorAction Stop
+        if ($r.PSObject.Properties.Name -contains 'FrivoRole') { $script:AppWithFrivo = ([string] $r.FrivoRole -eq 'Both'); break }
+    } catch { }
+}
 
 $steps    = New-Object System.Collections.ArrayList
 $problems = New-Object System.Collections.ArrayList
@@ -141,11 +160,35 @@ function Invoke-Removal {
     # [switch] $KeepSettings parameter (variable names are case-insensitive),
     # and a switch silently turns $null into $false — which once made
     # cancelling delete settings anyway.
-    param([bool] $PreserveSettings)
+    param([bool] $PreserveSettings, [bool] $RemoveTheApp)
 
     if (-not $script:InstallOwned) {
         Add-Step 'Refused to remove an unverified program folder' $false
         return
+    }
+
+    # --- NEW (1.8.0): the Frivo app ---
+    # Its own uninstaller, silently, as the person it was installed for. It
+    # closes the app if it's open.
+    if ($RemoveTheApp -and $script:AppPaths) {
+        try {
+            [void] (Invoke-FrivoAsDesktopUser -User (Get-FrivoDesktopUser).User `
+                -FilePath $script:AppPaths.Uninstaller -Arguments '/S' -Wait -TimeoutSeconds 180)
+            # The uninstaller hands over to a copy of itself and exits at once,
+            # so wait for the app itself to be gone.
+            $until = (Get-Date).AddSeconds(90)
+            while ((Test-Path -LiteralPath $script:AppPaths.Exe) -and (Get-Date) -lt $until) {
+                Start-Sleep -Milliseconds 300
+                if ('System.Windows.Forms.Application' -as [type]) { [System.Windows.Forms.Application]::DoEvents() }
+            }
+            if (-not (Test-Path -LiteralPath $script:AppPaths.Exe)) {
+                Add-Step 'Removed the Frivo app'
+            } else {
+                Add-Step 'Remove the Frivo app (remove "Frivo App" in Apps & features)' $false
+            }
+        } catch {
+            Add-Step 'Remove the Frivo app (remove "Frivo App" in Apps & features)' $false
+        }
     }
 
     # --- the launcher window ---
@@ -161,6 +204,15 @@ function Invoke-Removal {
             } |
             ForEach-Object { try { Stop-Process -Id $_.ProcessId -Force -ErrorAction Stop } catch { } }
     } catch { }
+
+    # --- NEW (1.8.0): starting Frivo before sign-in ---
+    # First, so the task isn't left pointing at a removed Frivo. Only when
+    # it runs this install's Frivo.
+    try {
+        if (Unregister-FrivoBootTask -InstallDir $InstallDir) { Add-Step 'Removed the "Frivo (at startup)" task' }
+    } catch {
+        Add-Step 'Remove the "Frivo (at startup)" task' $false
+    }
 
     # --- running instances ---
     try {
@@ -424,7 +476,7 @@ function Invoke-Removal {
 # ==================================================================
 
 if ($Silent) {
-    Invoke-Removal -PreserveSettings (-not $RemoveSettings)
+    Invoke-Removal -PreserveSettings (-not $RemoveSettings) -RemoveTheApp ([bool] $RemoveApp)
     $steps | ForEach-Object { Write-Host $_.Text }
     exit $(if ($problems.Count) { 1 } else { 0 })
 }
@@ -457,8 +509,11 @@ $form.Controls.Add($viewConfirm)
 This removes Frivo, its shortcuts, network access and local certificate.
 "@ -X 28 -Y 10 -W 444 -H 42 -Font $Theme.FontUI -Color $Theme.Dim)
 
-$cardSettings = New-FrivoCard -Theme $Theme -Parent $viewConfirm -X 24 -Y 64 -W 452 -H 70
+$cardSettings = New-FrivoCard -Theme $Theme -Parent $viewConfirm -X 24 -Y 64 -W 452 -H $(if ($script:AppPaths) { 108 } else { 70 })
 $chkDelete = New-FrivoCheck -Theme $Theme -Parent $cardSettings -Text 'Also remove Frivo saved API keys and preferences' -X 18 -Y 18 -W 416
+# NEW (1.8.0): ticked when setup installed the app with Frivo.
+$chkApp = New-FrivoCheck -Theme $Theme -Parent $cardSettings -Text 'Also remove the Frivo app' -X 18 -Y 58 -W 416 -Checked $script:AppWithFrivo
+$chkApp.Visible = [bool] $script:AppPaths
 
 $btnRemove = New-FrivoButton -Theme $Theme -Parent $viewConfirm -Text ('Uninstall {0}' -f $AppName) -X 24 -Y 250 -W 452 -H 44 -Primary $true
 $btnCancel = New-FrivoButton -Theme $Theme -Parent $viewConfirm -Text 'Cancel' -X 24 -Y 302 -W 452 -H 38
@@ -483,6 +538,9 @@ $btnCancel.Add_Click({
 })
 
 $btnRemove.Add_Click({
+    # Read before the view is hidden: a control in a hidden panel reports
+    # Visible = $false, which made this always "keep the app".
+    $removeApp = [bool] $script:AppPaths -and $chkApp.Checked
     $viewConfirm.Visible = $false
     $viewRun.Visible = $true
     $header.Subtitle.Text = 'Removing…'
@@ -497,7 +555,7 @@ $btnRemove.Add_Click({
         [System.Windows.Forms.Application]::DoEvents()
     }
 
-    Invoke-Removal -PreserveSettings (-not $chkDelete.Checked)
+    Invoke-Removal -PreserveSettings (-not $chkDelete.Checked) -RemoveTheApp $removeApp
 
     if ($problems.Count -eq 0) {
         $header.Subtitle.Text = 'Finished'

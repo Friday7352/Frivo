@@ -229,18 +229,26 @@ install or set up Voicemeeter.
 ## The Frivo app (Windows)
 
 The Frivo app is Frivo in its own window, with a tray icon and no browser tab.
-Download `FrivoApp-Setup-<version>.exe` from the
-[app's releases](https://github.com/Friday7352/Frivo/releases?q=app-v&expanded=true).
-The first time it opens, it asks where Frivo runs:
+Setup asks what each PC is for:
 
-- **On this PC.** Frivo's server runs in the background and the app is its
-  window, so there's only one thing to open. Frivo's launcher stays out of
-  sight, and the Frivo shortcuts and starting with Windows open the app. If
-  Frivo isn't installed yet, the app downloads its setup from GitHub, checks
-  it, and runs it.
-- **On another PC.** Type the address shown in Frivo's launcher on that PC.
-  The first time, the app shows that Frivo's certificate and asks you to
-  trust it, then remembers it.
+- **Run Frivo here, in the Frivo app** (the default). Frivo runs in the
+  background and the app is its window, so there's only one thing to open.
+  The Frivo shortcuts and starting with Windows open the app.
+- **Run Frivo here, without the app.** Frivo and its launcher, used in a
+  browser. For a PC that phones and other PCs connect to.
+- **Just the Frivo app.** For a PC that connects to Frivo on another PC. Pick
+  it from the list of Frivo found on your network (or type its address) and
+  type the pairing code shown in its launcher, or in Frivo under Settings ›
+  Other devices. The app remembers it after that.
+
+For phones, Settings › Other devices has a QR code to scan and the steps to
+trust Frivo's certificate. Setup can also start Frivo **before anyone signs
+in**, for a PC that only runs Frivo for others.
+
+Setup downloads the app from GitHub and checks it before installing it. The
+app is also a separate download,
+[`FrivoApp-Setup-<version>.exe`](https://github.com/Friday7352/Frivo/releases?q=app-v&expanded=true),
+for a PC that only needs the app.
 
 The app shows Frivo's own pages, so every Frivo update shows up in it with no
 app update needed. The app updates itself when its own parts change. Its

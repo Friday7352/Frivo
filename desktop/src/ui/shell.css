@@ -84,6 +84,7 @@ h1 { margin: 0 0 6px; font-size: 24px; font-weight: 700; letter-spacing: -0.01em
 
 .row { display: flex; gap: 8px; }
 .row input { flex: 1; min-width: 0; }
+.row .btn { flex: none; }
 
 input[type="text"] {
   height: 40px;
@@ -129,6 +130,32 @@ input[type="text"]::placeholder { color: var(--ink-faint); }
 
 .back { margin: -12px 0 20px; }
 
+/* NEW: Frivo found on the network. */
+.found { display: flex; flex-direction: column; gap: 6px; margin: 0 0 12px; }
+.found-item {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+  width: 100%; padding: 10px 14px;
+  border: 1px solid var(--rule); border-radius: var(--radius);
+  background: var(--surface-3); color: var(--ink);
+  font: inherit; text-align: left; cursor: pointer;
+}
+.found-item:hover { background: var(--surface-4); }
+.found-item:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.found-item:disabled { opacity: 0.5; cursor: default; }
+.found-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.found-meta { color: var(--ink-faint); font-size: 13px; white-space: nowrap; }
+.found-status { display: flex; align-items: center; gap: 8px; min-height: 22px; color: var(--ink-faint); font-size: 13px; }
+.found-status .btn-link { font-size: 13px; }
+.mini-spinner {
+  width: 14px; height: 14px;
+  border: 2px solid var(--surface-4); border-top-color: var(--accent);
+  border-radius: 50%; animation: spin 0.9s linear infinite;
+}
+
+/* NEW: pairing code. */
+.code-input { font-family: var(--mono); font-size: 18px !important; letter-spacing: 0.12em; text-transform: uppercase; }
+.actions-left { justify-content: flex-start; gap: 18px; margin-top: 14px; }
+
 /* Status: starting, stopped, can't reach, updating. */
 .status { padding-top: 12px; text-align: center; }
 .status h1 { margin-top: 18px; }
@@ -168,7 +195,7 @@ input[type="text"]::placeholder { color: var(--ink-faint); }
   border-radius: var(--radius-lg);
   background: var(--surface-2);
 }
-.fact { display: grid; grid-template-columns: 150px 1fr; gap: 10px; padding: 4px 0; font-size: 14px; }
+.fact { display: grid; grid-template-columns: 170px 1fr; gap: 10px; padding: 4px 0; font-size: 14px; }
 .fact dt { color: var(--ink-faint); }
 .fact dd { margin: 0; overflow-wrap: anywhere; }
 .mono { font-family: var(--mono); font-size: 13px; }

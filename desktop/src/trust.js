@@ -114,6 +114,22 @@ function leafTrustedBy(leaf, pin) {
   }
 }
 
+/*
+  NEW (1.8.0): is `pem` a real certificate authority, signed by its own key?
+  A pairing code only covers part of the authority's fingerprint, so the
+  authority has to be one that took a real signature to make, not bytes
+  shuffled until the fingerprint matched.
+*/
+function isSelfSignedAuthority(pem) {
+  try {
+    const cert = new X509Certificate(pem);
+    return cert.ca === true && inDate(cert) &&
+      cert.checkIssued(cert) && cert.verify(cert.publicKey);
+  } catch {
+    return false;
+  }
+}
+
 function nameOf(subject) {
   if (!subject) return '';
   return subject.CN || subject.O || '';
@@ -144,6 +160,8 @@ function inspectServer(origin, timeoutMs = 6000) {
         const top = topOfNodeChain(peer);
         resolve({
           fingerprint: sha256Hex(top.raw),
+          // NEW: what the pairing code for this server's authority is.
+          pairingCode: require('./pairing').pairingCodeFor(top.raw),
           authorityPem: derToPem(top.raw),
           leafRaw: Buffer.from(peer.raw),
           authority: nameOf(top.subject),
@@ -208,4 +226,5 @@ module.exports = {
   formatFingerprint,
   sha256Hex,
   pemToDer,
+  isSelfSignedAuthority,   // NEW (1.8.0)
 };

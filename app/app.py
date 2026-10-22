@@ -113,8 +113,14 @@ def _resolve_data_dir():
     also the correct thing on Windows for anything user-specific.
 
     VOICE_CONSOLE_DATA overrides both, for anyone who wants the data on a
-    different drive.
+    different drive. NEW (1.8.0): so does --data-dir <folder> on the
+    command line, which is how the "Frivo (at startup)" task says where the
+    data is (it starts pythonw.exe directly, with no way to set a variable).
     """
+    if "--data-dir" in sys.argv:
+        i = sys.argv.index("--data-dir")
+        if i + 1 < len(sys.argv) and sys.argv[i + 1].strip():
+            return os.path.abspath(sys.argv[i + 1].strip())
     override = os.environ.get("VOICE_CONSOLE_DATA", "").strip()
     if override:
         return os.path.abspath(override)
@@ -11081,6 +11087,119 @@ def storage_change():
 
 
 apply_storage()
+
+
+# ============================================================
+# NEW (1.8.0): other devices: finding Frivo, pairing, QR code, the certificate
+# ============================================================
+# What the Frivo app (desktop\ in the repo) and phones need to find and trust
+# this Frivo:
+#
+#   /api/hello       "yes, this is Frivo", with this PC's name. The app asks
+#                    every PC on the local network for it, so you pick Frivo
+#                    from a list instead of typing an address.
+#   /api/devices     this PC's addresses and its pairing code, for Settings ›
+#                    Other devices.
+#   /api/qr.png      a QR code, for a phone to scan instead of typing.
+#   /frivo-ca.crt    Frivo's certificate authority, for a phone to trust.
+#
+# The pairing code is worked out from Frivo's own certificate authority:
+# its SHA-256, first 60 bits, as twelve letters and digits (Crockford's base
+# 32, no I, L, O or U), shown as XXXX-XXXX-XXXX. The app works out the same
+# from the certificate the server it's talking to sent, and only accepts a
+# real self-signed authority; if it matches what you typed from this PC's
+# screen, it's this Frivo. Another server would need an authority, properly
+# signed by its own key, whose fingerprint starts with the same 60 bits:
+# around 10^18 signatures, out of reach. The code isn't a secret: it's read off a screen you
+# trust. desktop\src\pairing.js and installer\Launcher.ps1 work it out the
+# same way (tests/test-devices.py checks all three agree).
+
+import hashlib as _hashlib
+
+PAIRING_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
+
+
+def pairing_code_for(der):
+    """Twelve characters, as XXXX-XXXX-XXXX, from a certificate's DER bytes."""
+    digest = _hashlib.sha256(der).digest()
+    bits = "".join(format(b, "08b") for b in digest[:8])[:60]
+    text = "".join(PAIRING_ALPHABET[int(bits[i:i + 5], 2)] for i in range(0, 60, 5))
+    return text[:4] + "-" + text[4:8] + "-" + text[8:]
+
+
+def authority_der():
+    """Frivo's certificate authority as DER, or None (no HTTPS)."""
+    for path in (CA_CERT_CRT_PATH, CA_CERT_PATH):
+        try:
+            with open(path, "rb") as f:
+                pem = f.read()
+            m = re.search(rb"-----BEGIN CERTIFICATE-----(.+?)-----END CERTIFICATE-----", pem, re.S)
+            if m:
+                import base64 as _b64
+                return _b64.b64decode(b"".join(m.group(1).split()))
+        except OSError:
+            continue
+    return None
+
+
+def network_urls():
+    """How other devices reach this Frivo: one address per LAN IPv4."""
+    scheme = request.scheme
+    port = request.host.rsplit(":", 1)[1] if ":" in request.host and not request.host.endswith("]") else ("443" if scheme == "https" else "80")
+    return ["%s://%s:%s" % (scheme, ip, port) for ip in local_ip_addresses() if not ip.startswith("127.")]
+
+
+@app.route("/api/hello")
+def frivo_hello():
+    return jsonify({
+        "frivo": True,
+        "name": socket.gethostname(),
+        "version": APP_VERSION,
+        "https": request.scheme == "https",
+        "pairing": authority_der() is not None,
+    })
+
+
+@app.route("/api/devices")
+def devices_info():
+    der = authority_der()
+    return jsonify({
+        "name": socket.gethostname(),
+        "network_urls": network_urls(),
+        "pairing_code": pairing_code_for(der) if der else None,
+        "certificate": der is not None,
+        "https": request.scheme == "https",
+    })
+
+
+@app.route("/api/qr.png")
+def qr_png():
+    text = (request.args.get("text") or "").strip()
+    if not text or len(text) > 512:
+        return jsonify({"error": "Give the text for the QR code (up to 512 characters)."}), 400
+    try:
+        import io as _io
+        import segno
+    except ImportError:
+        return jsonify({"error": "QR codes need the segno package. Run setup again (Repair)."}), 501
+    out = _io.BytesIO()
+    scale = max(2, min(16, int(request.args.get("scale") or 8)))
+    segno.make(text, error="m").save(out, kind="png", scale=scale, border=2, dark="#0f1013", light="#ffffff")
+    resp = Response(out.getvalue(), mimetype="image/png")
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
+@app.route("/frivo-ca.crt")
+def frivo_ca_download():
+    """Frivo's certificate authority, for trusting this Frivo on a phone.
+    Only the authority's public certificate: its key never leaves this PC."""
+    der = authority_der()
+    if not der:
+        return jsonify({"error": "This Frivo has no certificate (it isn't using HTTPS)."}), 404
+    resp = Response(der, mimetype="application/x-x509-ca-cert")
+    resp.headers["Content-Disposition"] = 'attachment; filename="Frivo-CA.crt"'
+    return resp
 
 
 if __name__ == "__main__":

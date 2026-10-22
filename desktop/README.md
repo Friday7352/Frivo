@@ -39,13 +39,47 @@ and runs it.
 **On another PC.** The app connects to Frivo's address there, like a phone
 does. Frivo serves HTTPS with a certificate from its own small certificate
 authority, made when it was installed, which another PC doesn't know. The
-first time, the app shows that authority and its fingerprint and asks. Once
-trusted, that authority's certificate is kept for that address, and a server
+welcome screen lists Frivo found on the network (`src/discovery.js` asks every
+address on this PC's private networks for `/api/hello` on port 5000). The
+first time, the app asks for that Frivo's pairing code (`src/pairing.js`: the
+first 60 bits of the SHA-256 of its authority, as `XXXX-XXXX-XXXX`, accepted
+only from a real self-signed authority) and checks it
+against the authority the server sent; comparing the full fingerprint is
+still offered. Once paired, that authority's certificate is kept for that address, and a server
 there is only accepted when its certificate is really signed by it and in
 date. (Frivo sends its authority's certificate to anyone who connects, so
 just matching it would prove nothing.) (`src/trust.js` says why the
 certificate is read before Chromium connects.) Starting with Windows is the
 app's own sign-in entry (`HKCU\...\Run\Frivo App`).
+
+**Shortcuts.** Global hotkeys (Electron's `globalShortcut`) set in Settings ›
+App › Shortcuts, kept in the app's settings: Ctrl+Alt+D for dictation by
+default, and one for Send. The app sends `app:hotkey` to Frivo's page, which
+presses its own button (`initDesktopApp` in `app/static/app.js`). The window
+isn't throttled in the background, so dictation keeps going behind a game.
+
+## Installed by Frivo's setup
+
+NEW (Frivo 1.8.0). `FrivoSetup.exe` asks what the PC is for: Frivo in the
+app (the default), Frivo without the app, or just the app. For the app it
+looks up the newest `app-v…` release, downloads `FrivoApp-Setup-<version>.exe`,
+checks it against GitHub's SHA-256 (`Select-FrivoAppRelease` and
+`Save-FrivoDownload` in `installer\Frivo.Update.psm1`), and runs it silently
+as the person signed in at the PC (`Invoke-FrivoAsDesktopUser` in
+`installer\Frivo.Setup.psm1`). For Frivo in the app it then sets app mode in
+`launcher.json` and tells the app Frivo runs here (`mode: "local"` in its
+`app-settings.json`), so the app opens straight to Frivo. The choice is kept
+in Frivo's Apps & features entry (`FrivoRole`) for updates and Repair; a
+silent in-app update never downloads the app. Uninstalling Frivo offers to
+remove the app too.
+
+**So publish an app release before (or with) a Frivo release that should
+install it**: setup can only download an app release that exists. Without
+one, setup still installs Frivo and says the app couldn't be installed.
+
+The folder, program and uninstaller names setup looks for come from
+`package.json` (`name`, `build.executableName`, `productName`);
+`tests/test-app-setup.ps1` checks they still agree.
 
 ## Frivo's pages and the app
 
@@ -96,6 +130,8 @@ someone runs it (*More info › Run anyway*), the same as `FrivoSetup.exe`.
 | `src/main.js` | The window, tray, connecting, starting and stopping, updates |
 | `src/frivo-local.js` | Frivo on this PC: finding it, its launcher, its sign-in entry |
 | `src/trust.js` | Trusting Frivo's certificate on another PC |
+| `src/pairing.js` | Pairing codes (the same as `app.py` and the launcher work out) |
+| `src/discovery.js` | Finding Frivo on the network |
 | `src/github.js` | Releases on GitHub, and downloads checked against their SHA-256 |
 | `src/address.js` | Turning what's typed into Frivo's address |
 | `src/settings.js` | The app's own settings, in `%APPDATA%\Frivo App` |

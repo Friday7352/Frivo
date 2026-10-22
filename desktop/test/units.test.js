@@ -19,6 +19,16 @@ const { FrivoLocal, parseRegValue } = require('../src/frivo-local');
 const REPO = 'Friday7352/Frivo';
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'frivo-app-test-'));
 
+test('package.json: what the app reads is there once packaged', () => {
+  // electron-builder drops "build" from the packaged package.json, so the
+  // app reads only "frivo" and "version" at run time.
+  const pkg = require('../package.json');
+  assert.strictEqual(pkg.frivo.appId, pkg.build.appId);
+  for (const key of ['appId', 'repository', 'port', 'minimumFrivo']) assert.ok(pkg.frivo[key], key);
+  const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'main.js'), 'utf8');
+  assert.ok(!/pkg\.build\b/.test(source), 'main.js must not read pkg.build');
+});
+
 test('addresses: Frivo\'s https and port 5000 are filled in', () => {
   assert.deepStrictEqual(normalizeAddress('192.168.1.50'), { ok: true, url: 'https://192.168.1.50:5000', host: '192.168.1.50:5000' });
   assert.strictEqual(normalizeAddress('frivo-box').url, 'https://frivo-box:5000');
@@ -215,4 +225,46 @@ test('update status: recent only', () => {
   assert.deepStrictEqual(local.updateStatus(), { state: 'installing', message: 'Installing 1.7.1', version: '' });
   fs.writeFileSync(local.updateStatusFile, JSON.stringify({ state: 'done', started_utc: new Date(Date.now() - 2 * 3600e3).toISOString() }));
   assert.strictEqual(local.updateStatus(), null);
+});
+
+// NEW: pairing codes and finding Frivo on the network.
+test('pairing code: ten Crockford base-32 characters from the authority', () => {
+  const { pairingCodeFor, normalizeCode } = require('../src/pairing');
+  const code = pairingCodeFor(Buffer.from('frivo'));
+  assert.match(code, /^[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}$/);
+  assert.equal(pairingCodeFor(Buffer.from('frivo')), code);
+  assert.notEqual(pairingCodeFor(Buffer.from('frivo!')), code);
+  assert.equal(normalizeCode(code.toLowerCase().replace(/-/g, ' ')), code);
+  assert.equal(normalizeCode('o123-4567-89AB'), '0123-4567-89AB');
+  assert.equal(normalizeCode('i1l1 1000 0000'), '1111-1000-0000');
+  assert.equal(normalizeCode('UUUU-UUUU-UUUU'), null);
+  assert.equal(normalizeCode('12345-67890'), null);   // the old ten-character form
+  assert.equal(normalizeCode('12345'), null);
+  assert.equal(normalizeCode(''), null);
+});
+
+test('discovery: only private networks, capped in size', () => {
+  const { candidateAddresses, isPrivate } = require('../src/discovery');
+  assert.ok(isPrivate('192.168.1.5') && isPrivate('10.0.0.1') && isPrivate('172.20.1.1'));
+  assert.ok(!isPrivate('8.8.8.8') && !isPrivate('172.32.0.1'));
+  const nic = (address, netmask, internal = false) => ({ family: 'IPv4', address, netmask, internal });
+  const home = candidateAddresses({ eth: [nic('192.168.1.20', '255.255.255.0')], lo: [nic('127.0.0.1', '255.0.0.0', true)] });
+  assert.equal(home.addresses.length, 254);
+  assert.ok(home.own.has('192.168.1.20'));
+  assert.ok(!home.addresses.includes('192.168.1.0') && !home.addresses.includes('192.168.1.255'));
+  const big = candidateAddresses({ eth: [nic('10.4.7.9', '255.0.0.0')] });
+  assert.equal(big.addresses.length, 254);
+  assert.ok(big.addresses.includes('10.4.7.1'));
+  const pub = candidateAddresses({ eth: [nic('203.0.113.4', '255.255.255.0')] });
+  assert.equal(pub.addresses.length, 0);
+});
+
+test('pairing only trusts a real self-signed authority', () => {
+  const fx = (n) => fs.readFileSync(path.join(__dirname, 'fixtures', n), 'utf8');
+  assert.equal(trust.isSelfSignedAuthority(fx('frivo-ca.pem')), true);
+  assert.equal(trust.isSelfSignedAuthority(fx('frivo-leaf.pem')), false);   // not an authority
+  // The authority with its signature changed: same fields, but not signed by its key.
+  const der = Buffer.from(fx('frivo-ca.pem').replace(/-----[^-]+-----/g, '').replace(/\s+/g, ''), 'base64');
+  der[der.length - 5] ^= 0xff;
+  assert.equal(trust.isSelfSignedAuthority(trust.derToPem(der)), false);
 });
