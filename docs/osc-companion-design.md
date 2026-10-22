@@ -155,7 +155,7 @@ rate limit, so a 500ms poll costs nothing perceptible.
 
 ```
 POST /api/frivosc/hello
-  { "version": "1.0.0", "hostname": "PAYTON-PC", "oscquery": true }
+  { "version": "1.0.0", "hostname": "GAME-PC", "oscquery": true }
   → { "ok": true, "server_version": "1.2.0", "poll_ms": 500 }
 
 POST /api/frivosc/state
