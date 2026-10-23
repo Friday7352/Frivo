@@ -781,6 +781,10 @@
             <button type="button" class="settings-nav-btn is-active" data-settings-section="replies">
               <svg class="icon-16"><use href="#i-chat"/></svg>Replies
             </button>
+            <!-- NEW (2.0.0): devices, like Discord's Voice & Video -->
+            <button type="button" class="settings-nav-btn" data-settings-section="audio">
+              <svg class="icon-16"><use href="#i-speaker"/></svg>Audio
+            </button>
             <button type="button" class="settings-nav-btn" data-settings-section="dictation">
               <svg class="icon-16"><use href="#i-mic"/></svg>Dictation
             </button>
@@ -797,11 +801,11 @@
             <button type="button" class="settings-nav-btn" data-settings-section="storage">
               <svg class="icon-16"><use href="#i-db"/></svg>Storage
             </button>
-            <!-- NEW (1.8.0): phones, other PCs and the Frivo app -->
+            <!-- NEW (2.0.0): phones, other PCs and the Frivo app -->
             <button type="button" class="settings-nav-btn" data-settings-section="devices">
               <svg class="icon-16"><use href="#i-globe"/></svg>Other devices
             </button>
-            <!-- NEW (1.8.0): only in the Frivo app (desktop\ in the repo), never in a browser -->
+            <!-- NEW (2.0.0): only in the Frivo app (desktop\ in the repo), never in a browser -->
             <button type="button" class="settings-nav-btn is-hidden" data-settings-section="app" id="appNavBtn">
               <svg class="icon-16"><use href="#i-chip"/></svg>App
             </button>
@@ -1016,16 +1020,7 @@
                       <button type="button" class="btn btn-ghost btn-sm" id="anchorRemakeBtn">Make a new one</button>
                     </span>
                   </div>
-                  <div class="srow">
-                    <span class="srow-main srow-main--flex">
-                      <span class="srow-label">Volume</span>
-                      <span class="srow-sub">Playback here. Doesn't change what VRChat hears.</span>
-                    </span>
-                    <span class="srow-slider">
-                      <input type="range" id="settingsVolumeSlider" min="0" max="150" step="5" value="100" aria-label="Output volume">
-                    </span>
-                    <span class="srow-number" id="settingsVolumeValue">100%</span>
-                  </div>
+                  <!-- CHANGED (2.0.0): Volume moved to Settings › Audio -->
                 </div>
               </section>
 
@@ -1096,21 +1091,85 @@
                 </div>
               </section>
 
+              <!-- NEW (2.0.0): Audio. Laid out like Discord's Voice & Video:
+                   the two devices side by side, a mic test you can hear,
+                   and what the Listening panel listens to. -->
+              <section class="settings-section" data-settings-section="audio" id="audioSection">
+                <h3 class="settings-section-title">Audio</h3>
+                <p class="settings-section-sub">The microphone you dictate with, where Frivo plays, and what the Listening panel hears.</p>
+
+                <div class="audio-grid">
+                  <div class="audio-field">
+                    <label class="audio-cap" for="micSelect">Input device</label>
+                    <select id="micSelect"></select>
+                    <p class="audio-hint" id="micNote">For dictation.</p>
+                  </div>
+                  <div class="audio-field">
+                    <label class="audio-cap" for="outputSelect">Output device</label>
+                    <select id="outputSelect"></select>
+                    <p class="audio-hint" id="outputNote">Replies, voice previews and the mic test.</p>
+                  </div>
+                  <div class="audio-field audio-field--permit">
+                    <button id="refreshMicsBtn" class="btn btn-ghost btn-sm is-hidden" type="button">Show device names</button>
+                  </div>
+                  <div class="audio-field">
+                    <label class="audio-cap" for="settingsVolumeSlider">Output volume</label>
+                    <div class="audio-volume">
+                      <input type="range" id="settingsVolumeSlider" min="0" max="150" step="5" value="100" aria-label="Output volume">
+                      <span class="audio-readout" id="settingsVolumeValue">100%</span>
+                    </div>
+                    <p class="audio-hint">Here only. Doesn't change what VRChat hears.</p>
+                  </div>
+                </div>
+
+                <div class="audio-test">
+                  <span class="audio-cap">Mic test</span>
+                  <p class="audio-hint">Having mic trouble? Press Let's check and say something: you'll hear yourself through your output device.</p>
+                  <div class="audio-test-row">
+                    <button type="button" class="btn btn-sm" id="micTestBtn">Let's check</button>
+                    <div class="level-bars" id="micTestBars" aria-hidden="true"></div>
+                    <button type="button" class="btn btn-ghost btn-sm" id="outputTestBtn">
+                      <svg class="icon-14" aria-hidden="true"><use href="#i-play"/></svg> Test sound
+                    </button>
+                  </div>
+                </div>
+
+                <h3 class="settings-section-title audio-subtitle">Listening input</h3>
+                <p class="settings-section-sub">What the Listening panel translates: other people, usually through a cable like VB-Cable or Voicemeeter rather than your own mic.</p>
+                <div class="audio-listen">
+                  <div class="audio-field">
+                    <label class="audio-cap" for="listenDeviceSelect">Audio source</label>
+                    <div class="audio-listen-row">
+                      <select id="listenDeviceSelect"></select>
+                      <button type="button" class="btn btn-ghost btn-sm" id="listenCheckBtn">Check</button>
+                    </div>
+                  </div>
+                  <div class="audio-field">
+                    <label class="audio-cap" for="listenThreshold">Loudness gate</label>
+                    <div class="meter audio-gate-meter" id="listenMeter" aria-hidden="true">
+                      <div class="meter-fill" id="listenMeterFill"></div>
+                      <div class="meter-mark" id="listenMeterMark"></div>
+                    </div>
+                    <input type="range" id="listenThreshold" min="1" max="120" step="1" value="12" aria-label="Loudness gate">
+                    <p class="audio-hint" id="listenGateHint">The bar is the level now, the red line is the gate. Press Check, then set the gate just above the background noise: quieter sounds are ignored.</p>
+                  </div>
+                </div>
+              </section>
+
               <!-- Dictation -->
               <section class="settings-section" data-settings-section="dictation">
                 <h3 class="settings-section-title">Dictation</h3>
                 <p class="settings-section-sub">Talking into the message box with the mic button.</p>
                 <div class="settings-card">
-                  <div class="srow">
-                    <label class="srow-main srow-main--flex" for="micSelect">
+                  <!-- CHANGED (2.0.0): the microphone is chosen in Settings › Audio -->
+                  <button class="srow" type="button" data-goto-section="audio">
+                    <span class="srow-main srow-main--flex">
                       <span class="srow-label">Microphone</span>
-                      <span class="srow-sub" id="micNote">Used by Accurate and Live (Evora) dictation.</span>
-                    </label>
-                    <span class="srow-control srow-control--wide">
-                      <select id="micSelect"></select>
-                      <button id="refreshMicsBtn" class="btn-ghost btn-sm" type="button">Reload</button>
+                      <span class="srow-sub">Chosen and tested in Audio.</span>
                     </span>
-                  </div>
+                    <span class="srow-value" data-audio-summary="input">System default</span>
+                    <span class="srow-chevron"><svg class="icon-16"><use href="#i-chevron"/></svg></span>
+                  </button>
                   <div class="srow srow--stacked">
                     <span class="srow-main srow-main--flex">
                       <span class="srow-label">Dictation mode</span>
@@ -1133,29 +1192,15 @@
                 <h3 class="settings-section-title">Listening</h3>
                 <p class="settings-section-sub">Translating and transcribing the people around you. Open it from the rail.</p>
                 <div class="settings-card" id="listenSetupCard">
-                  <div class="srow">
-                    <label class="srow-main srow-main--flex" for="listenDeviceSelect">
+                  <!-- CHANGED (2.0.0): the audio source and gate are in Settings › Audio -->
+                  <button class="srow" type="button" data-goto-section="audio">
+                    <span class="srow-main srow-main--flex">
                       <span class="srow-label">Audio source</span>
-                      <span class="srow-sub">What to listen to — e.g. your Voicemeeter cable.</span>
-                    </label>
-                    <span class="srow-control srow-control--wide">
-                      <select id="listenDeviceSelect"></select>
-                      <button id="listenRefreshDevicesBtn" class="btn-ghost btn-sm" type="button">Reload</button>
+                      <span class="srow-sub">Chosen, checked and gated in Audio.</span>
                     </span>
-                  </div>
-                  <div class="srow srow--stacked">
-                    <label class="srow-main srow-main--flex" for="listenThreshold">
-                      <span class="srow-label">Loudness gate</span>
-                      <span class="srow-sub">The marker is the gate, the bar is the level now. Set it just above background chatter.</span>
-                    </label>
-                    <div class="meter-row">
-                      <div class="meter" id="listenMeter" aria-hidden="true">
-                        <div class="meter-fill" id="listenMeterFill"></div>
-                        <div class="meter-mark" id="listenMeterMark"></div>
-                      </div>
-                    </div>
-                    <input type="range" id="listenThreshold" min="1" max="120" step="1" value="12" aria-label="Loudness gate">
-                  </div>
+                    <span class="srow-value" data-audio-summary="listen">System default</span>
+                    <span class="srow-chevron"><svg class="icon-16"><use href="#i-chevron"/></svg></span>
+                  </button>
                   <div class="srow">
                     <label class="srow-main srow-main--flex" for="listenSegmentSeconds">
                       <span class="srow-label">Commit every</span>
@@ -1514,7 +1559,7 @@
                 </details>
               </section>
 
-              <!-- NEW (1.8.0): phones, other PCs and the Frivo app on them. -->
+              <!-- NEW (2.0.0): phones, other PCs and the Frivo app on them. -->
               <section class="settings-section" data-settings-section="devices" id="devicesSection">
                 <h3 class="settings-section-title">Other devices</h3>
                 <p class="settings-section-sub">Use Frivo on your phone, or from the Frivo app on another PC. They need to be on the same network as this PC.</p>
@@ -1569,7 +1614,7 @@
                 <p class="settings-note is-hidden" id="devNote"></p>
               </section>
 
-              <!-- NEW (1.8.0): the Frivo app's own settings. Shown only when this page
+              <!-- NEW (2.0.0): the Frivo app's own settings. Shown only when this page
                    is open in the app, which gives it window.frivoApp (desktop\src\preload.js). -->
               <section class="settings-section" data-settings-section="app" id="appSection">
                 <h3 class="settings-section-title">App</h3>
@@ -1694,7 +1739,7 @@
                 </div>
                 <p class="settings-note is-hidden" id="updateNote"></p>
 
-                <!-- NEW (1.8.0): the Frivo app, offered in a browser on Windows. -->
+                <!-- NEW (2.0.0): the Frivo app, offered in a browser on Windows. -->
                 <div class="settings-card app-offer is-hidden" id="appOffer">
                   <div class="srow">
                     <span class="srow-main srow-main--flex">

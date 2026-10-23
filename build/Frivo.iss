@@ -106,6 +106,14 @@ end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
+  { NEW (2.0.0): the folder FrivoSetup.exe was run from, for Install.ps1.
+    A Frivo app installer beside it (dist\ after Build.bat) is installed
+    from there instead of being downloaded from GitHub. }
+  if CurStep = ssInstall then
+  begin
+    ForceDirectories(ExpandConstant('{tmp}\FrivoSetupPayload'));
+    SaveStringToFile(ExpandConstant('{tmp}\FrivoSetupPayload\setup-folder.txt'), ExpandConstant('{src}'), False);
+  end;
   if (CurStep = ssPostInstall) and WizardSilent then
     RunSilentUpdate;
 end;

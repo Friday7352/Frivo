@@ -1058,6 +1058,7 @@ function ensureAudioContext() {
     masterGain = audioCtx.createGain();
     masterGain.gain.value = masterVolume;
     masterGain.connect(audioCtx.destination);
+    routeOutput(audioCtx);   // NEW (2.0.0): the output device from Settings › Audio
   }
   if (audioCtx.state === "suspended") audioCtx.resume();
   return audioCtx;
@@ -1084,6 +1085,27 @@ function computeClipGain(channelData) {
     gain = CLIP_CEILING / peak;
   }
   return gain;
+}
+
+// NEW (2.0.0): the output device chosen in Settings › Audio. Everything
+// Frivo plays goes through here: the reply mixer (an AudioContext) and the
+// few plain <audio> players (previews, fallbacks). "" is the system default.
+// Browsers that can't choose (Firefox for the mixer, phones) just play
+// through the default, as before.
+const OUTPUT_DEVICE_KEY = "frivo_output_device";
+function savedOutputDevice() {
+  try { return localStorage.getItem(OUTPUT_DEVICE_KEY) || ""; } catch (e) { return ""; }
+}
+function canChooseOutput() {
+  return Boolean((window.AudioContext && "setSinkId" in AudioContext.prototype) ||
+    (window.HTMLMediaElement && "setSinkId" in HTMLMediaElement.prototype));
+}
+function routeOutput(target, deviceId) {
+  if (!target || typeof target.setSinkId !== "function") return target;
+  const id = deviceId === undefined ? savedOutputDevice() : deviceId;
+  // A device that's gone (unplugged headphones) falls back to the default.
+  target.setSinkId(id).catch(() => { if (id) target.setSinkId("").catch(() => {}); });
+  return target;
 }
 
 function setMasterVolume(pct) {
@@ -1324,7 +1346,7 @@ function attachBubbleAudio(wrap, url, onStart, onPlayback, extras = {}) {   // C
       wrap.classList.remove("is-loading");
       wrap.classList.add("is-fallback");
 
-      const audio = document.createElement("audio");
+      const audio = routeOutput(document.createElement("audio"));   // CHANGED (2.0.0)
       audio.src = url;
       audio.volume = Math.min(1, masterVolume);
       audio.autoplay = true;
@@ -1364,6 +1386,7 @@ function attachBubbleAudio(wrap, url, onStart, onPlayback, extras = {}) {   // C
       analyser.connect(masterGain);
     } catch (e) {
       el.volume = Math.min(1, masterVolume);   // straight out, without the mixer
+      routeOutput(el);   // NEW (2.0.0)
       analyser = null;
     }
     let playing = false;
@@ -2076,6 +2099,11 @@ function setSettingsOpen(open) {
   if (open && typeof refreshSettingsSummaries === "function") refreshSettingsSummaries();
   // NEW (1.5.0): the microphone list is always current when you look at it.
   if (open && typeof loadMicrophones === "function") loadMicrophones();
+  // NEW (2.0.0): and the other two in Settings › Audio. Closing stops any
+  // mic test or level check still running.
+  if (open && typeof loadOutputDevices === "function") loadOutputDevices();
+  if (open && typeof loadListenDevices === "function") loadListenDevices();
+  if (!open && typeof stopAudioChecks === "function") stopAudioChecks();
   // NEW (1.5.0)
   if (open && typeof refreshFreeVoices === "function") refreshFreeVoices();
 }
@@ -3786,7 +3814,7 @@ function playVoicePreview(v) {
     return;
   }
 
-  const audio = new Audio(v.preview_url);
+  const audio = routeOutput(new Audio(v.preview_url));   // CHANGED (2.0.0)
   // Previews are separate from the reply player's gain chain, so the volume
   // slider is applied directly here. Capped at 1 because HTMLAudioElement
   // throws on anything above it, while the slider goes to 150%.
@@ -4484,7 +4512,9 @@ function fillMicrophones(devices, selectedId) {
   }
   mics.forEach((mic, i) => micSelect.appendChild(micOption(mic.deviceId, mic.label || `Microphone ${i + 1}`)));
   micSelect.value = selectedId;
-  if (micSelect.value !== selectedId) micSelect.selectedIndex = 0;
+  // CHANGED (2.0.0): "" with no "" option selects nothing (a blank box), so
+  // that falls back to the first, the system default, too.
+  if (micSelect.value !== selectedId || micSelect.selectedIndex < 0) micSelect.selectedIndex = 0;
   return true;
 }
 
@@ -4496,9 +4526,12 @@ async function loadMicrophones() {
   try {
     const devices = await navigator.mediaDevices.enumerateDevices();
     const visible = fillMicrophones(devices, localStorage.getItem(MIC_STORAGE_KEY) || "");
+    // CHANGED (2.0.0): one button, shown only while the names are hidden.
     micNote.textContent = visible
-      ? "Used by Accurate and Live (Evora) dictation."
-      : "Your browser hides microphone names until it's allowed to use the mic — click Reload, or start dictation, to see them.";
+      ? "For dictation (Accurate and Live (Evora) modes)."
+      : "Device names show once Frivo is allowed to use the microphone.";
+    refreshMicsBtn.classList.toggle("is-hidden", visible);
+    if (typeof syncAudioSummaries === "function") syncAudioSummaries();
   } catch (err) {
     console.error("enumerateDevices failed:", err);
   }
@@ -4547,6 +4580,9 @@ refreshMicsBtn.addEventListener("click", async () => {
     setStatus("Microphone access was denied — dictation won't work without it.", true);
   }
   await loadMicrophones();
+  // NEW (2.0.0): the same permission names every list in Settings › Audio.
+  if (typeof loadOutputDevices === "function") loadOutputDevices();
+  if (typeof loadListenDevices === "function") loadListenDevices();
 });
 
 
@@ -5534,7 +5570,6 @@ const listenStartBtn = $("listenStartBtn");
 const listenClearBtn = $("listenClearBtn");
 const listenStatusEl = $("listenStatus");
 const listenDeviceSelect = $("listenDeviceSelect");
-const listenRefreshDevicesBtn = $("listenRefreshDevicesBtn");
 const listenThreshold = $("listenThreshold");
 const listenMeter = $("listenMeter");
 const listenMeterFill = $("listenMeterFill");
@@ -5708,6 +5743,7 @@ async function loadListenDevices() {
     if (preferred && inputs.some((d) => d.deviceId === preferred)) {
       listenDeviceSelect.value = preferred;
     }
+    if (typeof syncAudioSummaries === "function") syncAudioSummaries();   // NEW (2.0.0)
   } catch (err) {
     console.error("loadListenDevices failed:", err);
   }
@@ -6536,18 +6572,8 @@ if (listenClearBtn) {
   });
 }
 
-if (listenRefreshDevicesBtn) {
-  listenRefreshDevicesBtn.addEventListener("click", async () => {
-    // Device labels stay blank until permission has been granted once.
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      stream.getTracks().forEach((t) => t.stop());
-    } catch (err) {
-      setListenStatus("Audio access denied — listening needs it.");
-    }
-    await loadListenDevices();
-  });
-}
+// CHANGED (2.0.0): no Reload button: Settings › Audio's "Show device names"
+// (refreshMicsBtn) names every list, and the lists follow devicechange.
 
 if (listenDeviceSelect) {
   listenDeviceSelect.addEventListener("change", () => {
@@ -11080,7 +11106,7 @@ async function refreshAnchorStatus() {
   if (hear) hear.addEventListener("click", () => {
     if (!hear.dataset.url) return;
     if (anchorAudio) { anchorAudio.pause(); anchorAudio = null; }
-    anchorAudio = new Audio(hear.dataset.url);
+    anchorAudio = routeOutput(new Audio(hear.dataset.url));   // CHANGED (2.0.0)
     anchorAudio.play().catch(() => {});
   });
   if (remake) remake.addEventListener("click", async () => {
@@ -13809,7 +13835,7 @@ async function checkElevenKey(force) {
     stop();
     if (typeof stopVoicePreview === "function") stopVoicePreview();
     if (was) { render(); return; }
-    const a = new Audio(`/api/voices/library/sample/${encodeURIComponent(key)}`);
+    const a = routeOutput(new Audio(`/api/voices/library/sample/${encodeURIComponent(key)}`));   // CHANGED (2.0.0)
     a.volume = Math.min(1, typeof masterVolume === "number" ? masterVolume : 1);
     audio = a;
     loadingKey = key;
@@ -14330,7 +14356,7 @@ function omCardUses() {
 
 
 // ============================================================
-// NEW (1.8.0): the Frivo app (desktop\ in the repo)
+// NEW (2.0.0): the Frivo app (desktop\ in the repo)
 // ============================================================
 // Inside the app, the page has window.frivoApp (desktop\src\preload.js) and
 // Settings gets an App section for the app's own settings. In a browser on
@@ -14562,7 +14588,7 @@ function omCardUses() {
 
 
 // ============================================================
-// NEW (1.8.0): Settings › Other devices
+// NEW (2.0.0): Settings › Other devices
 // ============================================================
 // This PC's network address with a QR code for phones, the pairing code the
 // Frivo app asks for, and Frivo's certificate for trusting it on a phone.
@@ -14620,3 +14646,279 @@ function omCardUses() {
   }).observe(section, { attributes: true, attributeFilter: ["class", "style", "hidden"] });
   document.querySelectorAll('[data-settings-section="devices"]').forEach((b) => b.addEventListener("click", () => { if (!loaded) load(); }));
 })();
+
+
+// ============================================================
+// NEW (2.0.0): Settings › Audio
+// ============================================================
+// Like Discord's Voice & Video: the input and output devices side by side,
+// a mic test you hear yourself through, a test sound, and the Listening
+// panel's audio source with a live level against its loudness gate. The
+// input device is the dictation microphone (micSelect, above) and the
+// source is the Listening panel's (listenDeviceSelect); this adds the
+// output device and the checks.
+const outputSelect = $("outputSelect");
+const outputNote = $("outputNote");
+const micTestBtn = $("micTestBtn");
+const micTestBars = $("micTestBars");
+const outputTestBtn = $("outputTestBtn");
+const listenCheckBtn = $("listenCheckBtn");
+const audioSection = $("audioSection");
+const MIC_TEST_BARS = 32;
+
+function audioSectionShown() {
+  return Boolean(audioSection && audioSection.offsetParent);
+}
+
+function selectedLabel(select, fallback) {
+  const opt = select && select.selectedOptions && select.selectedOptions[0];
+  const text = opt ? opt.textContent.trim() : "";
+  return text && !/^Not supported/.test(text) ? text : fallback;
+}
+
+function syncAudioSummaries() {
+  document.querySelectorAll('[data-audio-summary="input"]').forEach((el) => {
+    el.textContent = selectedLabel(micSelect, "System default");
+  });
+  document.querySelectorAll('[data-audio-summary="listen"]').forEach((el) => {
+    el.textContent = selectedLabel(listenDeviceSelect, "System default");
+  });
+}
+
+// ---- output device ----
+async function loadOutputDevices() {
+  if (!outputSelect) return;
+  const saved = savedOutputDevice();
+  const opt = (value, text) => { const o = document.createElement("option"); o.value = value; o.textContent = text; return o; };
+  if (!canChooseOutput() || !navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) {
+    outputSelect.replaceChildren(opt("", "System default"));
+    outputSelect.disabled = true;
+    if (outputNote) outputNote.textContent = "This browser always plays through the system default. Chrome, Edge and the Frivo app can choose.";
+    return;
+  }
+  let outputs = [];
+  try {
+    outputs = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === "audiooutput");
+  } catch (e) { /* listed as default only */ }
+  const named = outputs.some((d) => d.label);
+  const items = [];
+  // Chrome lists the default itself, as "default"; it's "" here either way.
+  const def = outputs.find((d) => d.deviceId === "default");
+  items.push(opt("", def && def.label ? def.label.replace(/^Default - /, "System default: ") : "System default"));
+  outputs.filter((d) => d.deviceId && d.deviceId !== "default" && d.deviceId !== "communications")
+    .forEach((d, i) => items.push(opt(d.deviceId, d.label || `Output ${i + 1}`)));
+  if (saved && !outputs.some((d) => d.deviceId === saved)) items.push(opt(saved, named ? "Saved device (not connected)" : "Your saved device"));
+  outputSelect.replaceChildren(...items);
+  outputSelect.disabled = false;
+  outputSelect.value = saved;
+  if (outputSelect.value !== saved) outputSelect.value = "";
+  if (outputNote) {
+    outputNote.textContent = saved && !outputs.some((d) => d.deviceId === saved) && named
+      ? "That device isn't connected, so Frivo plays through the system default until it's back."
+      : "Replies, voice previews and the mic test.";
+  }
+  if (refreshMicsBtn && !named && outputs.length) refreshMicsBtn.classList.remove("is-hidden");
+}
+
+if (outputSelect) {
+  outputSelect.addEventListener("change", () => {
+    const id = outputSelect.value || "";
+    try { localStorage.setItem(OUTPUT_DEVICE_KEY, id); } catch (e) { /* this time only */ }
+    // Everything already playing moves over too.
+    if (audioCtx) routeOutput(audioCtx, id);
+    document.querySelectorAll("audio").forEach((a) => routeOutput(a, id));
+    if (micTest && micTest.ctx) routeOutput(micTest.ctx, id);
+    loadOutputDevices();
+  });
+}
+
+// ---- test sound: a short two-note chime through the mixer, so it plays
+// on the chosen device at the chosen volume, exactly like a reply ----
+if (outputTestBtn) {
+  outputTestBtn.addEventListener("click", () => {
+    const ctx = ensureAudioContext();
+    const start = ctx.currentTime + 0.05;
+    [[660, 0], [880, 0.18]].forEach(([freq, at]) => {
+      const osc = ctx.createOscillator();
+      const env = ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.value = freq;
+      env.gain.setValueAtTime(0.0001, start + at);
+      env.gain.exponentialRampToValueAtTime(0.35, start + at + 0.02);
+      env.gain.exponentialRampToValueAtTime(0.0001, start + at + 0.5);
+      osc.connect(env);
+      env.connect(masterGain);
+      osc.start(start + at);
+      osc.stop(start + at + 0.55);
+    });
+  });
+}
+
+// ---- mic test ----
+let micTest = null;
+
+function buildLevelBars() {
+  if (!micTestBars || micTestBars.childElementCount) return;
+  for (let i = 0; i < MIC_TEST_BARS; i++) micTestBars.appendChild(document.createElement("span"));
+}
+
+function paintLevelBars(level) {
+  if (!micTestBars) return;
+  // Speech sits around 0.02-0.2 RMS; a log scale spreads that over the bar.
+  const db = 20 * Math.log10(Math.max(level, 1e-4));          // -80 .. 0
+  const lit = Math.round(Math.max(0, Math.min(1, (db + 60) / 50)) * MIC_TEST_BARS);
+  [...micTestBars.children].forEach((bar, i) => bar.classList.toggle("is-lit", i < lit));
+}
+
+function stopMicTest() {
+  if (!micTest) return;
+  cancelAnimationFrame(micTest.frame);
+  micTest.stream.getTracks().forEach((t) => t.stop());
+  try { micTest.ctx.close(); } catch (e) { /* closed */ }
+  micTest = null;
+  paintLevelBars(0);
+  if (micTestBtn) {
+    micTestBtn.textContent = "Let's check";
+    micTestBtn.classList.remove("btn-ghost");
+  }
+}
+
+async function startMicTest() {
+  stopMicTest();
+  buildLevelBars();
+  let stream;
+  try {
+    stream = await openMicrophone();
+  } catch (err) {
+    setStatus("Frivo can't use the microphone: " + (err && err.message ? err.message : "access was denied."), true);
+    return;
+  }
+  const ctx = new (window.AudioContext || window.webkitAudioContext)();
+  if (ctx.state === "suspended") ctx.resume().catch(() => {});
+  routeOutput(ctx);
+  const source = ctx.createMediaStreamSource(stream);
+  const analyser = ctx.createAnalyser();
+  analyser.fftSize = 1024;
+  const monitor = ctx.createGain();
+  monitor.gain.value = Math.min(1.5, masterVolume);
+  source.connect(analyser);
+  source.connect(monitor);
+  monitor.connect(ctx.destination);   // you hear yourself, like Discord's test
+  const data = new Float32Array(analyser.fftSize);
+  micTest = { stream, ctx, analyser, frame: 0 };
+  if (micTestBtn) {
+    micTestBtn.textContent = "Stop checking";
+    micTestBtn.classList.add("btn-ghost");
+  }
+  if (micFellBack) setStatus("The chosen microphone isn't connected, so this is the system default.", true);
+  const tick = () => {
+    if (!micTest) return;
+    if (!audioSectionShown()) { stopMicTest(); return; }   // Settings closed, or another section
+    analyser.getFloatTimeDomainData(data);
+    let sum = 0;
+    for (let i = 0; i < data.length; i++) sum += data[i] * data[i];
+    paintLevelBars(Math.sqrt(sum / data.length));
+    micTest.frame = requestAnimationFrame(tick);
+  };
+  tick();
+}
+
+if (micTestBtn) {
+  buildLevelBars();
+  micTestBtn.addEventListener("click", () => (micTest ? stopMicTest() : startMicTest()));
+}
+// A different microphone while testing: test that one instead.
+micSelect.addEventListener("change", () => {
+  syncAudioSummaries();
+  if (micTest) startMicTest();
+});
+
+// ---- the Listening panel's source: a level check against the gate ----
+let listenCheck = null;
+
+function stopListenCheck() {
+  if (!listenCheck) return;
+  cancelAnimationFrame(listenCheck.frame);
+  listenCheck.stream.getTracks().forEach((t) => t.stop());
+  try { listenCheck.ctx.close(); } catch (e) { /* closed */ }
+  listenCheck = null;
+  if (listenMeterFill && !listening) listenMeterFill.style.width = "0%";
+  if (listenMeter) listenMeter.classList.remove("is-open");
+  if (listenCheckBtn) listenCheckBtn.textContent = "Check";
+}
+
+async function startListenCheck() {
+  stopListenCheck();
+  if (listening) {
+    // The panel is already listening, and already moving this meter.
+    setStatus("Listening is on, so the meter is already showing that source.");
+    return;
+  }
+  const deviceId = listenDeviceSelect ? listenDeviceSelect.value : "";
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio: deviceId
+        ? { deviceId: { exact: deviceId }, echoCancellation: false, noiseSuppression: false, autoGainControl: false }
+        : { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+    });
+  } catch (err) {
+    setStatus("Couldn't open that source: " + (err && err.message ? err.message : "access was denied."), true);
+    return;
+  }
+  loadListenDevices();   // allowed now, so the real names
+  const ctx = new (window.AudioContext || window.webkitAudioContext)();
+  if (ctx.state === "suspended") ctx.resume().catch(() => {});
+  const analyser = ctx.createAnalyser();
+  analyser.fftSize = 1024;
+  ctx.createMediaStreamSource(stream).connect(analyser);
+  const data = new Float32Array(analyser.fftSize);
+  listenCheck = { stream, ctx, frame: 0 };
+  if (listenCheckBtn) listenCheckBtn.textContent = "Stop";
+  const tick = () => {
+    if (!listenCheck) return;
+    if (!audioSectionShown() || listening) { stopListenCheck(); return; }
+    analyser.getFloatTimeDomainData(data);
+    let sum = 0;
+    for (let i = 0; i < data.length; i++) sum += data[i] * data[i];
+    const level = Math.sqrt(sum / data.length);
+    // The same scale listenPoll uses, so the bar and the gate line agree.
+    const open = level > thresholdFromSlider(listenThreshold.value);
+    if (listenMeterFill) listenMeterFill.style.width = `${Math.min(100, (level / 0.25) * 100)}%`;
+    if (listenMeter) listenMeter.classList.toggle("is-open", open);
+    listenCheck.frame = requestAnimationFrame(tick);
+  };
+  tick();
+}
+
+if (listenCheckBtn) {
+  listenCheckBtn.addEventListener("click", () => (listenCheck ? stopListenCheck() : startListenCheck()));
+}
+if (listenDeviceSelect) {
+  listenDeviceSelect.addEventListener("change", () => {
+    syncAudioSummaries();
+    if (listenCheck) startListenCheck();
+  });
+}
+
+function stopAudioChecks() {
+  stopMicTest();
+  stopListenCheck();
+}
+
+// Rows elsewhere in Settings that lead here.
+document.querySelectorAll("[data-goto-section]").forEach((row) => {
+  row.addEventListener("click", () => {
+    if (typeof window.showSettingsSection === "function") window.showSettingsSection(row.dataset.gotoSection);
+  });
+});
+
+if (navigator.mediaDevices && navigator.mediaDevices.addEventListener) {
+  navigator.mediaDevices.addEventListener("devicechange", () => {
+    loadOutputDevices();
+    loadListenDevices();
+  });
+}
+loadOutputDevices();
+syncAudioSummaries();
+

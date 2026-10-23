@@ -926,7 +926,7 @@ function Get-LauncherShim {
 }
 
 # ==================================================================
-# NEW (1.8.0): the Frivo app (desktop\ in the repo)
+# NEW (2.0.0): the Frivo app (desktop\ in the repo)
 # ==================================================================
 # Setup can install the Frivo app with Frivo, or on its own. The app is a
 # per-person install, in that person's own AppData, made by its own
@@ -940,7 +940,10 @@ function Get-LauncherShim {
 # after "productName". Change them together.
 $script:AppFolderName  = 'frivo-app'
 $script:AppExeName     = 'FrivoApp.exe'
-$script:AppUninstaller = 'Uninstall Frivo App.exe'
+# CHANGED (2.0.0): the app is called just Frivo (productName), so its
+# uninstaller is "Uninstall Frivo.exe". Apps from before were "Frivo App".
+$script:AppUninstaller = 'Uninstall Frivo.exe'
+$script:AppUninstallerOld = 'Uninstall Frivo App.exe'
 
 function Get-FrivoDesktopUser {
     <#
@@ -988,11 +991,48 @@ function Get-FrivoDesktopUser {
 function Get-FrivoAppPaths {
     param([Parameter(Mandatory)] [string] $LocalAppData)
     $folder = Join-Path $LocalAppData ('Programs\' + $script:AppFolderName)
+    $uninstaller = Join-Path $folder $script:AppUninstaller
+    $old = Join-Path $folder $script:AppUninstallerOld
+    if (-not (Test-Path -LiteralPath $uninstaller -PathType Leaf) -and (Test-Path -LiteralPath $old -PathType Leaf)) { $uninstaller = $old }
     return [pscustomobject] @{
         Folder      = $folder
         Exe         = Join-Path $folder $script:AppExeName
-        Uninstaller = Join-Path $folder $script:AppUninstaller
+        Uninstaller = $uninstaller
     }
+}
+
+function Set-FrivoAppListed {
+    <#
+        NEW (2.0.0): whether the Frivo app has its own entry in Apps &
+        features for $User. With Frivo installed on the same PC it doesn't:
+        there's one "Frivo" there, and uninstalling it offers to remove the
+        app too. On its own, or once Frivo is uninstalled and the app kept,
+        it does. (The app's installer hides it the same way when Frivo is
+        here: desktop\build\installer.nsh.) Returns $true when it found
+        the app's entry.
+    #>
+    param([Parameter(Mandatory)] [string] $User, [Parameter(Mandatory)] [bool] $Listed)
+    $sid = (New-Object System.Security.Principal.NTAccount($User)).Translate(
+        [System.Security.Principal.SecurityIdentifier]).Value
+    $me = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    $root = if ($sid -eq $me) { 'HKCU:' } else { 'Registry::HKEY_USERS\' + $sid }
+    $uninstallKey = Join-Path $root 'Software\Microsoft\Windows\CurrentVersion\Uninstall'
+    if (-not (Test-Path -LiteralPath $uninstallKey)) { return $false }
+    $found = $false
+    foreach ($key in @(Get-ChildItem -LiteralPath $uninstallKey -ErrorAction SilentlyContinue)) {
+        $values = Get-ItemProperty -LiteralPath $key.PSPath -ErrorAction SilentlyContinue
+        if (-not $values) { continue }
+        $command = [string] $values.UninstallString
+        # The app's entry, and only it: its uninstaller in Programs\frivo-app.
+        if ($command -notmatch ('\\Programs\\' + [regex]::Escape($script:AppFolderName) + '\\Uninstall Frivo( App)?\.exe')) { continue }
+        if ($Listed) {
+            Remove-ItemProperty -LiteralPath $key.PSPath -Name 'SystemComponent' -ErrorAction SilentlyContinue
+        } else {
+            New-ItemProperty -LiteralPath $key.PSPath -Name 'SystemComponent' -Value 1 -PropertyType DWord -Force | Out-Null
+        }
+        $found = $true
+    }
+    return $found
 }
 
 function Invoke-FrivoAsDesktopUser {
@@ -1116,7 +1156,7 @@ function Set-FrivoAppMode {
 
 function Get-FrivoPairingCode {
     <#
-        NEW (1.8.0): Frivo's pairing code, from its certificate authority
+        NEW (2.0.0): Frivo's pairing code, from its certificate authority
         (ca.crt in Frivo's data folder): the SHA-256, first 60 bits, as
         twelve characters of Crockford's base 32, XXXX-XXXX-XXXX. The Frivo app on
         another PC asks for it. Worked out the same way as pairing_code_for
@@ -1140,7 +1180,7 @@ function Get-FrivoPairingCode {
 }
 
 # ------------------------------------------------------------------
-# NEW (1.8.0): running Frivo before anyone signs in
+# NEW (2.0.0): running Frivo before anyone signs in
 # ------------------------------------------------------------------
 # For a PC that's only a Frivo server: Frivo's server starts when Windows
 # does, as the person who installed it, with nobody signed in. It's a
@@ -1270,6 +1310,165 @@ function Start-FrivoBootTask {
     }
 }
 
+# ------------------------------------------------------------------
+# NEW (2.0.0): a backup from setup or the uninstaller
+# ------------------------------------------------------------------
+# The same zip Frivo makes in Settings > Updates > Back up, so it restores
+# there the same way (Restore adds it to what's there): settings, profiles,
+# saved replies with their audio, tag taste, Hold the accent anchors, and
+# optionally the voices you added. Made here in PowerShell, without Frivo's
+# Python, so it works whatever version is installed and even when Frivo's
+# own files are half gone. Saved replies and voices are found wherever
+# Settings > Storage put them.
+
+function Get-FrivoBackupFolder {
+    <#
+        Documents\Frivo backups for the person signed in at this PC (not the
+        administrator setup may be running as).
+    #>
+    param([string] $RoamingAppData)
+    $docs = [Environment]::GetFolderPath('MyDocuments')
+    $me = $env:APPDATA
+    if ($RoamingAppData -and $me -and -not $RoamingAppData.TrimEnd('\').Equals($me.TrimEnd('\'), [System.StringComparison]::OrdinalIgnoreCase)) {
+        # Someone else's profile: C:\Users\name\AppData\Roaming -> C:\Users\name\Documents
+        $profileDir = Split-Path -Parent (Split-Path -Parent $RoamingAppData.TrimEnd('\'))
+        if ($profileDir) { $docs = Join-Path $profileDir 'Documents' }
+    }
+    if (-not $docs) { $docs = [System.IO.Path]::GetTempPath() }
+    return (Join-Path $docs 'Frivo backups')
+}
+
+function Test-FrivoHasData {
+    param([Parameter(Mandatory)] [string] $DataDir)
+    foreach ($name in @('config.json', 'profiles.json', 'saved')) {
+        if (Test-Path -LiteralPath (Join-Path $DataDir $name)) { return $true }
+    }
+    return $false
+}
+
+function New-FrivoBackup {
+    <#
+        Writes "Frivo backup <date> <time>.zip" into $Destination and returns
+        its path. API keys are left out unless -IncludeKeys (a backup is a
+        file people copy around); voices you added only with -IncludeVoices
+        (they're big). Throws with a reason when it can't.
+    #>
+    param(
+        [Parameter(Mandatory)] [string] $DataDir,
+        [Parameter(Mandatory)] [string] $Destination,
+        [string] $Version = '',
+        [switch] $IncludeKeys,
+        [switch] $IncludeVoices
+    )
+    if (-not (Test-Path -LiteralPath $DataDir -PathType Container) -or -not (Test-FrivoHasData -DataDir $DataDir)) {
+        throw ('There are no Frivo settings to back up in {0}.' -f $DataDir)
+    }
+    Add-Type -AssemblyName System.IO.Compression
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $utf8 = New-Object System.Text.UTF8Encoding($false)
+
+    $configText = $null
+    $configPath = Join-Path $DataDir 'config.json'
+    if (Test-Path -LiteralPath $configPath -PathType Leaf) { $configText = [System.IO.File]::ReadAllText($configPath) }
+    # Where Settings > Storage keeps saved replies and voices.
+    $picked = @{ saved = ''; voices = '' }
+    if ($configText) {
+        foreach ($kind in @('saved', 'voices')) {
+            $m = [regex]::Match($configText, ('"storage_{0}"\s*:\s*"((?:[^"\\]|\\.)*)"' -f $kind))
+            if ($m.Success) {
+                try { $value = ('"{0}"' -f $m.Groups[1].Value) | ConvertFrom-Json } catch { $value = '' }
+                if ($value -and [System.IO.Path]::IsPathRooted([string] $value) -and (Test-Path -LiteralPath ([string] $value))) {
+                    $picked[$kind] = [string] $value
+                }
+            }
+        }
+    }
+    $savedDir  = Join-Path $(if ($picked.saved)  { $picked.saved }  else { $DataDir }) 'saved'
+    $voicesDir = Join-Path $(if ($picked.voices) { $picked.voices } else { $DataDir }) 'voices'
+
+    if (-not $IncludeKeys -and $configText) {
+        # Only the keys' values are blanked; everything else stays exactly
+        # as written. Frivo's restore skips a blank key.
+        $configText = [regex]::Replace($configText,
+            '("(?:openai_api_key|elevenlabs_api_key)"\s*:\s*)"(?:[^"\\]|\\.)*"', '$1""')
+    }
+
+    New-Item -ItemType Directory -Path $Destination -Force | Out-Null
+    $stamp = Get-Date -Format 'yyyy-MM-dd HHmm'
+    $final = Join-Path $Destination ('Frivo backup {0}.zip' -f $stamp)
+    for ($n = 2; Test-Path -LiteralPath $final; $n++) {
+        $final = Join-Path $Destination ('Frivo backup {0} ({1}).zip' -f $stamp, $n)
+    }
+    $temp = $final + '.partial'
+    $counts = [ordered] @{ profiles = 0; saved = 0; voices = 0 }
+
+    try {
+    $zip = [System.IO.Compression.ZipFile]::Open($temp, [System.IO.Compression.ZipArchiveMode]::Create)
+    try {
+        $addText = {
+            param([string] $Name, [string] $Text)
+            $entry = $zip.CreateEntry($Name, [System.IO.Compression.CompressionLevel]::Optimal)
+            $stream = $entry.Open()
+            try { $bytes = $utf8.GetBytes($Text); $stream.Write($bytes, 0, $bytes.Length) } finally { $stream.Dispose() }
+        }
+        $addFile = {
+            param([string] $Path, [string] $Name)
+            [void] [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, $Path, $Name, [System.IO.Compression.CompressionLevel]::Optimal)
+        }
+        $countIn = {
+            param([string] $Path)
+            try { return @((Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json)).Count } catch { return 0 }
+        }
+
+        if ($null -ne $configText) { & $addText 'data/config.json' $configText }
+        foreach ($name in @('profiles.json', 'tag_taste.json', 'voice_anchors.json')) {
+            $path = Join-Path $DataDir $name
+            if (Test-Path -LiteralPath $path -PathType Leaf) { & $addFile $path ('data/' + $name) }
+        }
+        $profiles = Join-Path $DataDir 'profiles.json'
+        if (Test-Path -LiteralPath $profiles -PathType Leaf) { $counts.profiles = & $countIn $profiles }
+        $anchors = Join-Path $DataDir 'anchors'
+        if (Test-Path -LiteralPath $anchors -PathType Container) {
+            Get-ChildItem -LiteralPath $anchors -File | Where-Object { $_.Name -match '^[A-Za-z0-9_.\-]{1,120}\.(mp3|wav)$' } |
+                ForEach-Object { & $addFile $_.FullName ('data/anchors/' + $_.Name) }
+        }
+        if (Test-Path -LiteralPath $savedDir -PathType Container) {
+            Get-ChildItem -LiteralPath $savedDir -File | ForEach-Object { & $addFile $_.FullName ('data/saved/' + $_.Name) }
+            $index = Join-Path $savedDir 'saved.json'
+            if (Test-Path -LiteralPath $index -PathType Leaf) { $counts.saved = & $countIn $index }
+        }
+        if ($IncludeVoices -and (Test-Path -LiteralPath $voicesDir -PathType Container)) {
+            $root = (Resolve-Path -LiteralPath $voicesDir).ProviderPath.TrimEnd('\', '/')
+            Get-ChildItem -LiteralPath $voicesDir -File -Recurse | ForEach-Object {
+                $rel = $_.FullName.Substring($root.Length + 1).Replace('\', '/')
+                & $addFile $_.FullName ('data/voices/' + $rel)
+            }
+            $index = Join-Path $voicesDir 'voices.json'
+            if (Test-Path -LiteralPath $index -PathType Leaf) { $counts.voices = & $countIn $index }
+        }
+        & $addText 'browser.json' '{}'
+        $about = [ordered] @{
+            format  = 1
+            app     = 'Frivo'
+            version = $Version
+            made    = (Get-Date -Format 'yyyy-MM-dd HH:mm')
+            keys    = [bool] $IncludeKeys
+            voices  = [bool] $IncludeVoices
+            counts  = $counts
+            by      = 'setup'
+        }
+        & $addText 'frivo-backup.json' ($about | ConvertTo-Json -Depth 4)
+    } finally {
+        $zip.Dispose()
+    }
+    Move-Item -LiteralPath $temp -Destination $final -Force
+    } catch {
+        Remove-Item -LiteralPath $temp -Force -ErrorAction SilentlyContinue
+        throw
+    }
+    return $final
+}
+
 function Get-SetupLogPath { return $script:SetupLogPath }
 
 Export-ModuleMember -Function `
@@ -1287,4 +1486,5 @@ Export-ModuleMember -Function `
     Install-FrivoRootCertificate, Remove-FrivoRootCertificate, Get-LauncherShim, Get-WScriptPath,
     Get-FrivoDesktopUser, Get-FrivoAppPaths, Invoke-FrivoAsDesktopUser,
     Set-FrivoLauncherAppPath, Get-FrivoLauncherAppPath, Set-FrivoAppMode, Get-FrivoPairingCode,
+    Get-FrivoBackupFolder, Test-FrivoHasData, New-FrivoBackup, Set-FrivoAppListed,
     Get-FrivoBootTaskAction, Test-FrivoBootTask, Register-FrivoBootTask, Unregister-FrivoBootTask, Start-FrivoBootTask, Test-FrivoBootTaskRunning

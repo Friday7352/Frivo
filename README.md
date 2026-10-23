@@ -336,8 +336,14 @@ data is from [eSpeak NG](https://github.com/espeak-ng/espeak-ng) (GPL-3.0).
 <summary>Building, versions and tests</summary>
 
 **Building.** Clone the repository and run `Install.bat` to install from
-source. To make the single-file installer, run `Build-Installer.bat`; it
-installs Inno Setup if needed and writes `dist\FrivoSetup.exe`.
+source. To build, run **`Build.bat`**. It writes `dist\FrivoSetup.exe`, the
+one installer (Frivo, the Frivo app, or both), and beside it
+`dist\FrivoApp-Setup-<version>.exe`, the app that setup installs. Leave the
+two together: setup installs the app from that file, and only that exact
+file (it checks its fingerprint), instead of downloading it. Nothing needs
+installing first: it fetches Inno Setup and a private copy of Node.js when
+it needs them. The app is only rebuilt when something in `desktop\`
+changed; `Build.bat /app` forces it.
 
 **Version number.** The version lives only in `VERSION` at the root of the
 repository. Everything else — the installer, Apps & features,
@@ -346,18 +352,19 @@ repository. Everything else — the installer, Apps & features,
 
 **Publishing an update.**
 
-1. Change `VERSION` and run `Build-Installer.bat`.
-2. Create a GitHub release tagged with that version, such as `v1.5.0`. It
-   can't be a pre-release or a draft.
-3. Attach `dist\FrivoSetup.exe`, keeping that exact name.
+1. Change `VERSION` and run `Build.bat`.
+2. If the app changed (its own version in `desktop\package.json`), first
+   create a GitHub release tagged `app-v<app version>` with
+   `dist\FrivoApp-Setup-<app version>.exe`, and **untick "Set as the latest
+   release"**. Setup downloads the app from there.
+3. Create a GitHub release tagged with Frivo's version, such as `v2.0.0`. It
+   can't be a pre-release or a draft. Attach `dist\FrivoSetup.exe`, keeping
+   that exact name.
 
 Installed copies offer it within six hours. The release notes appear in the
 update dialog.
 
-**The Frivo app.** Its code is in `desktop\`. Run `Build-App.bat` to make
-`desktop\dist\FrivoApp-Setup-<version>.exe`. Nothing needs installing first:
-it downloads its own copy of Node.js into `desktop\.tools` the first time.
-See [`desktop/README.md`](desktop/README.md) for how it works and how to
+**The Frivo app.** Its code is in `desktop\`; `Build.bat` builds it too. See [`desktop/README.md`](desktop/README.md) for how it works and how to
 publish an app update.
 
 **Tests.** See [`tests/README.md`](tests/README.md).

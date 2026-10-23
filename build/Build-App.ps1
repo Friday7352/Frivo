@@ -1,8 +1,9 @@
 ﻿<#
     Frivo App — build
     ------------------------------------------------------------------
-    NEW (1.8.0): builds desktop\dist\FrivoApp-Setup-<version>.exe, the Frivo
-    app's installer. Run through Build-App.bat.
+    NEW (2.0.0): builds desktop\dist\FrivoApp-Setup-<version>.exe, the Frivo
+    app's installer. Run by build\Build.ps1 (Build.bat at the repo root),
+    which also builds FrivoSetup.exe and puts the two together in dist\.
 
     Nothing needs installing first. The app is built with Node.js, so this
     downloads a private copy of it the first time into desktop\.tools (not

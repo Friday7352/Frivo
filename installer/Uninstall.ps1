@@ -2,7 +2,8 @@
     Frivo — uninstaller
     ------------------------------------------------------------------
     A small window in the application's own style: one confirmation with
-    a checkbox for the settings, live progress while it removes things,
+    a choice to keep or delete your settings and saves (with a backup to
+    Documents\Frivo backups first), live progress while it removes things,
     and a summary of exactly what was done.
 
     Each step is recorded, and the result is shown in the window and log.
@@ -13,8 +14,10 @@ param(
     [switch] $Silent,
     [switch] $KeepSettings,
     [switch] $RemoveSettings,
-    # NEW (1.8.0): silent uninstalls leave the Frivo app alone unless asked.
+    # NEW (2.0.0): silent uninstalls leave the Frivo app alone unless asked.
     [switch] $RemoveApp,
+    # NEW (2.0.0): save a backup to Documents\Frivo backups first.
+    [switch] $Backup,
     # Captured before elevation so a standard user who supplies separate
     # administrator credentials still has their own settings addressed.
     [string] $DataPath
@@ -59,7 +62,7 @@ $RegKeys   = @(
     'HKCU:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\VoiceConsole'
 )
 
-# NEW (1.8.0): the Frivo app, if it's installed for the person signed in
+# NEW (2.0.0): the Frivo app, if it's installed for the person signed in
 # here, and whether setup installed it with Frivo ("Both"): then removing
 # it is the default. One installed on its own is only removed if asked.
 $script:AppPaths = $null
@@ -100,6 +103,8 @@ if (-not (Test-IsAdministrator)) {
     if ($Silent)         { $relaunch += '-Silent' }
     if ($KeepSettings)   { $relaunch += '-KeepSettings' }
     if ($RemoveSettings) { $relaunch += '-RemoveSettings' }
+    if ($RemoveApp)      { $relaunch += '-RemoveApp' }   # NEW (2.0.0): was lost here
+    if ($Backup)         { $relaunch += '-Backup' }      # NEW (2.0.0)
     if ($DataDir)        { $relaunch += @('-DataPath', ('"{0}"' -f $DataDir)) }
     try {
         Start-Process -FilePath 'powershell.exe' -ArgumentList $relaunch -Verb RunAs -WindowStyle Hidden | Out-Null
@@ -160,14 +165,14 @@ function Invoke-Removal {
     # [switch] $KeepSettings parameter (variable names are case-insensitive),
     # and a switch silently turns $null into $false — which once made
     # cancelling delete settings anyway.
-    param([bool] $PreserveSettings, [bool] $RemoveTheApp)
+    param([bool] $PreserveSettings, [bool] $RemoveTheApp, [bool] $MakeBackup = $false)
 
     if (-not $script:InstallOwned) {
         Add-Step 'Refused to remove an unverified program folder' $false
         return
     }
 
-    # --- NEW (1.8.0): the Frivo app ---
+    # --- NEW (2.0.0): the Frivo app ---
     # Its own uninstaller, silently, as the person it was installed for. It
     # closes the app if it's open.
     if ($RemoveTheApp -and $script:AppPaths) {
@@ -184,11 +189,19 @@ function Invoke-Removal {
             if (-not (Test-Path -LiteralPath $script:AppPaths.Exe)) {
                 Add-Step 'Removed the Frivo app'
             } else {
-                Add-Step 'Remove the Frivo app (remove "Frivo App" in Apps & features)' $false
+                Add-Step 'Remove the Frivo app (it is listed as "Frivo" in Apps & features now)' $false
+                try { [void] (Set-FrivoAppListed -User (Get-FrivoDesktopUser).User -Listed $true) } catch { }
             }
         } catch {
-            Add-Step 'Remove the Frivo app (remove "Frivo App" in Apps & features)' $false
+            Add-Step 'Remove the Frivo app (it is listed as "Frivo" in Apps & features now)' $false
+            try { [void] (Set-FrivoAppListed -User (Get-FrivoDesktopUser).User -Listed $true) } catch { }
         }
+    } elseif ($script:AppPaths) {
+        # NEW (2.0.0): the app stays, so it gets its own entry in Apps &
+        # features back (it was folded into Frivo's).
+        try {
+            if (Set-FrivoAppListed -User (Get-FrivoDesktopUser).User -Listed $true) { Add-Step 'Kept the Frivo app; it has its own entry in Apps & features' }
+        } catch { }
     }
 
     # --- the launcher window ---
@@ -205,7 +218,7 @@ function Invoke-Removal {
             ForEach-Object { try { Stop-Process -Id $_.ProcessId -Force -ErrorAction Stop } catch { } }
     } catch { }
 
-    # --- NEW (1.8.0): starting Frivo before sign-in ---
+    # --- NEW (2.0.0): starting Frivo before sign-in ---
     # First, so the task isn't left pointing at a removed Frivo. Only when
     # it runs this install's Frivo.
     try {
@@ -304,6 +317,25 @@ function Invoke-Removal {
             }
         } catch {
             Add-Step ('Remove firewall rule "{0}"' -f $rule) $false
+        }
+    }
+
+    # --- NEW (2.0.0): a backup, once Frivo has stopped writing ---
+    # Settings are only deleted once it's safely made.
+    $script:BackupPath = ''
+    if ($MakeBackup -and (Test-FrivoHasData -DataDir $DataDir)) {
+        try {
+            $version = ''
+            try { $version = ([string] (Get-Content -LiteralPath (Join-Path $InstallDir 'VERSION') -Raw -ErrorAction Stop)).Trim() } catch { }
+            $script:BackupPath = New-FrivoBackup -DataDir $DataDir -Version $version `
+                -Destination (Get-FrivoBackupFolder -RoamingAppData (Get-FrivoDesktopUser).RoamingAppData)
+            Add-Step ('Saved a backup: {0}' -f $script:BackupPath)
+        } catch {
+            Add-Step ('Save a backup ({0})' -f $_.Exception.Message) $false
+            if (-not $PreserveSettings) {
+                $PreserveSettings = $true
+                Add-Step 'Kept your settings and saves, since the backup could not be made'
+            }
         }
     }
 
@@ -476,7 +508,7 @@ function Invoke-Removal {
 # ==================================================================
 
 if ($Silent) {
-    Invoke-Removal -PreserveSettings (-not $RemoveSettings) -RemoveTheApp ([bool] $RemoveApp)
+    Invoke-Removal -PreserveSettings (-not $RemoveSettings) -RemoveTheApp ([bool] $RemoveApp) -MakeBackup ([bool] $Backup)
     $steps | ForEach-Object { Write-Host $_.Text }
     exit $(if ($problems.Count) { 1 } else { 0 })
 }
@@ -492,7 +524,7 @@ Add-Type -AssemblyName System.Drawing
 Import-Module (Join-Path $ScriptDir 'Frivo.Ui.psm1') -Force
 $Theme = Get-FrivoTheme
 
-$form = New-FrivoForm -Theme $Theme -Title ('Uninstall {0}' -f $AppName) -Width 500 -Height 430 `
+$form = New-FrivoForm -Theme $Theme -Title ('Uninstall {0}' -f $AppName) -Width 500 -Height 520 `
     -IconPath (Join-Path $InstallDir 'static\Frivo.ico')
 
 $header = New-FrivoHeader -Theme $Theme -Form $form -Title ('Uninstall {0}' -f $AppName) `
@@ -501,7 +533,7 @@ $header = New-FrivoHeader -Theme $Theme -Form $form -Title ('Uninstall {0}' -f $
 # ---------- confirm view ----------
 $viewConfirm = New-Object System.Windows.Forms.Panel
 $viewConfirm.Location = New-Object System.Drawing.Point(0, 76)
-$viewConfirm.Size = New-Object System.Drawing.Size(500, 354)
+$viewConfirm.Size = New-Object System.Drawing.Size(500, 444)
 $viewConfirm.BackColor = $Theme.Bg
 $form.Controls.Add($viewConfirm)
 
@@ -509,26 +541,50 @@ $form.Controls.Add($viewConfirm)
 This removes Frivo, its shortcuts, network access and local certificate.
 "@ -X 28 -Y 10 -W 444 -H 42 -Font $Theme.FontUI -Color $Theme.Dim)
 
-$cardSettings = New-FrivoCard -Theme $Theme -Parent $viewConfirm -X 24 -Y 64 -W 452 -H $(if ($script:AppPaths) { 108 } else { 70 })
-$chkDelete = New-FrivoCheck -Theme $Theme -Parent $cardSettings -Text 'Also remove Frivo saved API keys and preferences' -X 18 -Y 18 -W 416
-# NEW (1.8.0): ticked when setup installed the app with Frivo.
-$chkApp = New-FrivoCheck -Theme $Theme -Parent $cardSettings -Text 'Also remove the Frivo app' -X 18 -Y 58 -W 416 -Checked $script:AppWithFrivo
+# CHANGED (2.0.0): keep or delete your settings and saves, as a choice
+# rather than a box to tick, with a backup first.
+[void] (New-FrivoLabel -Theme $Theme -Parent $viewConfirm -Text 'YOUR SETTINGS AND SAVES' `
+    -X 30 -Y 54 -W 400 -H 14 -Font $Theme.FontCaps -Color $Theme.Faint)
+$cardSettings = New-FrivoCard -Theme $Theme -Parent $viewConfirm -X 24 -Y 72 -W 452 -H 140
+$radioKeep = New-FrivoRadio -Theme $Theme -Parent $cardSettings -Text 'Keep them for next time' -X 18 -Y 12 -W 416 -Checked $true
+[void] (New-FrivoLabel -Theme $Theme -Parent $cardSettings `
+    -Text 'Your API keys, profiles, saved replies and voices stay on this PC. Installing Frivo again picks them up.' `
+    -X 38 -Y 34 -W 398 -H 32 -Font $Theme.FontSmall -Color $Theme.Dim)
+$radioDelete = New-FrivoRadio -Theme $Theme -Parent $cardSettings -Text 'Delete them' -X 18 -Y 74 -W 416
+[void] (New-FrivoLabel -Theme $Theme -Parent $cardSettings `
+    -Text 'Removes them from this PC for good, API keys included.' `
+    -X 38 -Y 96 -W 398 -H 32 -Font $Theme.FontSmall -Color $Theme.Dim)
+
+$hasData = Test-FrivoHasData -DataDir $DataDir
+$chkBackup = New-FrivoCheck -Theme $Theme -Parent $viewConfirm -Text 'Save a backup first, to Documents\Frivo backups' -X 28 -Y 224 -W 444
+$backupNote = New-FrivoLabel -Theme $Theme -Parent $viewConfirm `
+    -Text 'Restore it in Frivo under Settings › Updates › Restore. API keys aren''t included.' `
+    -X 48 -Y 248 -W 424 -H 18 -Font $Theme.FontSmall -Color $Theme.Dim
+$chkBackup.Visible = $hasData
+$backupNote.Visible = $hasData
+# Deleting ticks the backup, unless it's been set by hand.
+$script:backupTouched = $false
+$chkBackup.Add_Click({ $script:backupTouched = $true })
+$radioDelete.Add_CheckedChanged({ if (-not $script:backupTouched) { $chkBackup.Checked = $radioDelete.Checked } })
+
+# NEW (2.0.0): ticked when setup installed the app with Frivo.
+$chkApp = New-FrivoCheck -Theme $Theme -Parent $viewConfirm -Text 'Also remove the Frivo app' -X 28 -Y 280 -W 444 -Checked $script:AppWithFrivo
 $chkApp.Visible = [bool] $script:AppPaths
 
-$btnRemove = New-FrivoButton -Theme $Theme -Parent $viewConfirm -Text ('Uninstall {0}' -f $AppName) -X 24 -Y 250 -W 452 -H 44 -Primary $true
-$btnCancel = New-FrivoButton -Theme $Theme -Parent $viewConfirm -Text 'Cancel' -X 24 -Y 302 -W 452 -H 38
+$btnRemove = New-FrivoButton -Theme $Theme -Parent $viewConfirm -Text ('Uninstall {0}' -f $AppName) -X 24 -Y 336 -W 452 -H 44 -Primary $true
+$btnCancel = New-FrivoButton -Theme $Theme -Parent $viewConfirm -Text 'Cancel' -X 24 -Y 390 -W 452 -H 38
 
 # ---------- progress view ----------
 $viewRun = New-Object System.Windows.Forms.Panel
 $viewRun.Location = New-Object System.Drawing.Point(0, 76)
-$viewRun.Size = New-Object System.Drawing.Size(500, 354)
+$viewRun.Size = New-Object System.Drawing.Size(500, 444)
 $viewRun.BackColor = $Theme.Bg
 $viewRun.Visible = $false
 $form.Controls.Add($viewRun)
 
-$runLog = New-FrivoTextBox -Theme $Theme -Parent $viewRun -X 24 -Y 8 -W 452 -H 230 -Multiline
-$summaryLbl = New-FrivoLabel -Theme $Theme -Parent $viewRun -Text '' -X 28 -Y 246 -W 444 -H 48 -Font $Theme.FontUI -Color $Theme.Ink
-$btnClose = New-FrivoButton -Theme $Theme -Parent $viewRun -Text 'Close' -X 24 -Y 302 -W 452 -H 38 -Primary $true
+$runLog = New-FrivoTextBox -Theme $Theme -Parent $viewRun -X 24 -Y 8 -W 452 -H 296 -Multiline
+$summaryLbl = New-FrivoLabel -Theme $Theme -Parent $viewRun -Text '' -X 28 -Y 314 -W 444 -H 68 -Font $Theme.FontUI -Color $Theme.Ink
+$btnClose = New-FrivoButton -Theme $Theme -Parent $viewRun -Text 'Close' -X 24 -Y 390 -W 452 -H 38 -Primary $true
 $btnClose.Enabled = $false
 
 # ---------- behaviour ----------
@@ -541,6 +597,8 @@ $btnRemove.Add_Click({
     # Read before the view is hidden: a control in a hidden panel reports
     # Visible = $false, which made this always "keep the app".
     $removeApp = [bool] $script:AppPaths -and $chkApp.Checked
+    $makeBackup = $hasData -and $chkBackup.Checked   # NEW (2.0.0)
+    $deleteData = $radioDelete.Checked
     $viewConfirm.Visible = $false
     $viewRun.Visible = $true
     $header.Subtitle.Text = 'Removing…'
@@ -555,14 +613,15 @@ $btnRemove.Add_Click({
         [System.Windows.Forms.Application]::DoEvents()
     }
 
-    Invoke-Removal -PreserveSettings (-not $chkDelete.Checked) -RemoveTheApp $removeApp
+    Invoke-Removal -PreserveSettings (-not $deleteData) -RemoveTheApp $removeApp -MakeBackup $makeBackup
 
     if ($problems.Count -eq 0) {
         $header.Subtitle.Text = 'Finished'
         $done = ('{0} has been uninstalled. You can now close this window.' -f $AppName)
-        if (-not $chkDelete.Checked -and (Test-Path -LiteralPath $DataDir)) {
-            $done += ' Your settings were kept.'
+        if (Test-Path -LiteralPath $DataDir) {
+            $done += ' Your settings and saves were kept for next time.'
         }
+        if ($script:BackupPath) { $done += (' A backup is in {0}.' -f (Split-Path -Parent $script:BackupPath)) }
         $summaryLbl.Text = $done
     } else {
         $header.Subtitle.Text = 'Finished, with problems'

@@ -101,15 +101,19 @@ def main():
         markers = comment_markers[os.path.splitext(path)[1]]
         with open(path, encoding="utf-8-sig") as handle:
             text = handle.read()
-        # Comments say which version something came in ("NEW (1.8.0)"):
+        # Comments say which version something came in ("NEW (2.0.0)"):
         # block comments and comments at the end of a line too.
         if path.endswith(".ps1"):
             text = re.sub(r"<#.*?#>", "", text, flags=re.S)
+        if path.endswith(".iss"):
+            # Pascal { ... } comments in [Code] (and {tmp}-style constants,
+            # which never hold a version either).
+            text = re.sub(r"\{[^{}]*\}", "", text, flags=re.S)
         body = "\n".join(
             line for line in text.splitlines()
             if not line.lstrip().startswith(markers)
         )
-        # CHANGED (1.8.0): network ranges like 10.0.0.0/8 (the firewall
+        # CHANGED (2.0.0): network ranges like 10.0.0.0/8 (the firewall
         # rule's private networks) aren't versions either.
         body = "\n".join(re.sub(r"\s(#|//)\s.*$", "", line) for line in body.splitlines())
         found = [m.group(0) for m in literal.finditer(body)

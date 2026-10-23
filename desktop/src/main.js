@@ -883,7 +883,7 @@ function start() {
         state.update.percent = total ? Math.floor((received / total) * 100) : 0;
       });
       state.update = { state: 'ready', version: found.version, error: '', file, percent: 100 };
-      notify('Frivo App update ready', `Version ${found.version} installs when you restart the app.`);
+      notify('Frivo update ready', `The app's update (${found.version}) installs when you restart it.`);
     } catch (err) {
       state.update = { state: 'error', version: '', error: err.message || String(err), file: '', percent: 0 };
     }

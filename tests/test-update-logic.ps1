@@ -204,7 +204,7 @@ Check 'the launcher closes when the watcher asks' ($launcher -match 'Local\\Friv
 $watch = Read-Source 'installer/Update-Watch.ps1'
 Check 'the watcher asks with the same name' ($watch -match "OpenExisting\('Local\\FrivoLauncherQuit'\)")
 
-# NEW (1.8.0): the Frivo app (desktop\) and the launcher's app mode agree.
+# NEW (2.0.0): the Frivo app (desktop\) and the launcher's app mode agree.
 $appLocal = Read-Source 'desktop/src/frivo-local.js'
 Check 'the launcher stops Frivo when the app asks' ($launcher -match 'Local\\FrivoLauncherStop' -and $launcher -match 'stopSignal\.WaitOne\(0\)')
 Check 'the app asks with the same name' ($appLocal -match "OpenExisting\('Local\\\\FrivoLauncherStop'\)")

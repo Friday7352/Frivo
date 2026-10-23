@@ -22,7 +22,7 @@ param(
     # Retained across UAC elevation so settings stay with the person who
     # launched setup, even when they supply separate admin credentials.
     [string] $DataPath,
-    # NEW (1.8.0): what this PC is for. Both: Frivo and the Frivo app. Server:
+    # NEW (2.0.0): what this PC is for. Both: Frivo and the Frivo app. Server:
     # Frivo and its launcher, as before. App: just the app. The wizard asks;
     # a silent update keeps what was chosen.
     [ValidateSet('Both', 'Server', 'App')]
@@ -318,7 +318,7 @@ function Start-FrivoAsUser {
         and needs no password for exactly that reason. It is removed again
         straight away.
 
-        NEW (1.8.0): -Window opens Frivo's window (or the Frivo app, in app
+        NEW (2.0.0): -Window opens Frivo's window (or the Frivo app, in app
         mode) instead of starting in the tray. "Launch Frivo now" at the end
         of setup uses it, so Frivo doesn't run as administrator.
     #>
@@ -332,7 +332,7 @@ function Start-FrivoAsUser {
     $root = if ($env:SystemRoot) { $env:SystemRoot } else { 'C:\Windows' }
     $taskName = 'Frivo Restart'
     try {
-        $shimArgs = if ($Window) { '"{0}"' -f $shim } else { '"{0}" -Tray' -f $shim }   # CHANGED (1.8.0)
+        $shimArgs = if ($Window) { '"{0}"' -f $shim } else { '"{0}" -Tray' -f $shim }   # CHANGED (2.0.0)
         $action = New-ScheduledTaskAction -Execute ($root.TrimEnd('\') + '\System32\wscript.exe') `
             -Argument $shimArgs -WorkingDirectory $Target
         $principal = New-ScheduledTaskPrincipal -UserId $User -LogonType Interactive -RunLevel Limited
@@ -554,7 +554,7 @@ function Get-InstallSettings {
         StartMenuShortcut = (Test-Path -LiteralPath (Join-Path ([Environment]::GetFolderPath('CommonStartMenu')) 'Programs\Frivo.lnk'))
         Startup = $false
         Firewall = $false
-        # NEW (1.8.0): installs from before this was asked: "Both" if the app
+        # NEW (2.0.0): installs from before this was asked: "Both" if the app
         # was installed separately and runs Frivo here (app mode), else
         # "Server", what they were.
         Role = 'Server'
@@ -587,7 +587,7 @@ function Get-InstallSettings {
                     $settings.($item.Property) = [bool] ([int] $registered.($item.Name))
                 }
             }
-            # NEW (1.8.0)
+            # NEW (2.0.0)
             if ($registered.PSObject.Properties.Name -contains 'FrivoRole' -and
                 [string] $registered.FrivoRole -in @('Both', 'Server')) {
                 $settings.Role = [string] $registered.FrivoRole
@@ -605,7 +605,7 @@ function Save-InstallSettings {
         [bool] $StartMenuShortcut,
         [bool] $Startup,
         [bool] $Firewall,
-        [string] $Role = 'Server'   # NEW (1.8.0)
+        [string] $Role = 'Server'   # NEW (2.0.0)
     )
 
     # This key is created by Register-Uninstaller immediately before us.
@@ -613,15 +613,53 @@ function Save-InstallSettings {
     Set-ItemProperty -Path $RegKey -Name 'FrivoStartMenuShortcut' -Value ([int] $StartMenuShortcut) -Type DWord
     Set-ItemProperty -Path $RegKey -Name 'FrivoStartup' -Value ([int] $Startup) -Type DWord
     Set-ItemProperty -Path $RegKey -Name 'FrivoFirewall' -Value ([int] $Firewall) -Type DWord
-    # NEW (1.8.0). Not when it's only a guess (a silent update of an install
+    # NEW (2.0.0). Not when it's only a guess (a silent update of an install
     # from before this was asked, running as SYSTEM, can't see the person's
     # settings to guess from).
     if ($Role) { Set-ItemProperty -Path $RegKey -Name 'FrivoRole' -Value $Role -Type String }
 }
 
+function Find-FrivoLocalAppInstaller {
+    <#
+        NEW (2.0.0): the Frivo app installer built together with this setup
+        (Build.bat): beside FrivoSetup.exe, as Build.bat leaves it in dist\,
+        or, running from the source tree, in dist\ or desktop\dist\.
+        bundled-app.json, which Build.bat writes into the setup, names it
+        and gives its SHA-256, and only a file that matches is used: any
+        other FrivoApp-Setup file that happens to be in the same folder (a
+        Downloads folder, say) is never run. $null when there isn't one.
+    #>
+    $expected = $null
+    try {
+        $expected = Get-Content -LiteralPath (Join-Path $ScriptDir 'bundled-app.json') -Raw -ErrorAction Stop | ConvertFrom-Json
+    } catch { return $null }
+    if (-not $expected -or -not $expected.name -or [string] $expected.sha256 -notmatch '^[0-9a-fA-F]{64}$') { return $null }
+    $m = [regex]::Match([string] $expected.name, '^FrivoApp-Setup-(\d+\.\d+\.\d+)\.exe$')
+    if (-not $m.Success) { return $null }
+    $folders = @()
+    $marker = Join-Path $PackageDir 'setup-folder.txt'
+    if (Test-Path -LiteralPath $marker -PathType Leaf) {
+        try { $folders += ([System.IO.File]::ReadAllText($marker)).Trim() } catch { }
+    }
+    $folders += (Join-Path $PackageDir 'dist')
+    $folders += (Join-Path $PackageDir 'desktop\dist')
+    foreach ($folder in $folders) {
+        if (-not $folder) { continue }
+        $path = Join-Path $folder ([string] $expected.name)
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { continue }
+        $actual = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash
+        if (-not $actual.Equals([string] $expected.sha256, [System.StringComparison]::OrdinalIgnoreCase)) {
+            Write-SetupLog ('app: {0} is not the app built with this setup; ignored' -f $path)
+            continue
+        }
+        return [pscustomobject] @{ Path = $path; Version = [version] $m.Groups[1].Value; Name = [string] $expected.name }
+    }
+    return $null
+}
+
 function Install-FrivoApp {
     <#
-        NEW (1.8.0): the Frivo app (desktop\ in the repo). Downloads its
+        NEW (2.0.0): the Frivo app (desktop\ in the repo). Downloads its
         installer from Frivo's releases on GitHub, checks it against the
         SHA-256 GitHub publishes, and runs it as the person signed in at this
         PC: it's a per-person app, in their own AppData, and runs as them.
@@ -632,8 +670,38 @@ function Install-FrivoApp {
 
     $person = Get-FrivoDesktopUser
     $paths = Get-FrivoAppPaths -LocalAppData $person.LocalAppData
+    $local = Find-FrivoLocalAppInstaller   # NEW (2.0.0)
     if (Test-Path -LiteralPath $paths.Exe -PathType Leaf) {
-        & $Log 'The Frivo app is already installed. It keeps itself up to date.'
+        # CHANGED (2.0.0): unless this setup came with the same or a newer
+        # one (the same version too: a build of app changes you're testing).
+        $installed = $null
+        try { $installed = [version] ((Get-Item -LiteralPath $paths.Exe).VersionInfo.ProductVersion -replace '[^\d.].*$', '') } catch { }
+        if (-not $local -or ($installed -and $installed -gt $local.Version)) {
+            & $Log 'The Frivo app is already installed. It keeps itself up to date.'
+            return $paths.Exe
+        }
+        & $Log ('Updating the Frivo app to {0}, which came with this setup...' -f $local.Version)
+    }
+
+    # NEW (2.0.0): the app built with this setup, without going to GitHub.
+    if ($local) {
+        $folder = Join-Path $person.LocalAppData 'Temp\FrivoSetup'
+        New-Item -ItemType Directory -Path $folder -Force | Out-Null
+        $file = Join-Path $folder $local.Name
+        Copy-Item -LiteralPath $local.Path -Destination $file -Force
+        & $Log ('Installing the Frivo app {0} from {1}...' -f $local.Version, (Split-Path -Parent $local.Path))
+        Write-SetupLog ('app: installing {0}' -f $local.Path)
+        try {
+            $finished = Invoke-FrivoAsDesktopUser -User $person.User -FilePath $file -Arguments '/S' -Wait -TimeoutSeconds 300
+        } finally {
+            Remove-Item -LiteralPath $file -Force -ErrorAction SilentlyContinue
+        }
+        if (-not (Test-Path -LiteralPath $paths.Exe -PathType Leaf)) {
+            if (-not $finished) { throw 'The app''s installer did not finish in time.' }
+            throw ('The app''s installer ran, but the app is not where it should be: {0}' -f $paths.Exe)
+        }
+        & $Log ('The Frivo app {0} is installed.' -f $local.Version)
+        Write-SetupLog ('app installed at {0} for {1}' -f $paths.Exe, $person.User)
         return $paths.Exe
     }
 
@@ -657,7 +725,7 @@ function Install-FrivoApp {
     } finally {
         $ProgressPreference = $previous
     }
-    if (-not $release) { throw 'No release of the Frivo app was found on GitHub.' }
+    if (-not $release) { throw 'No release of the Frivo app was found on GitHub. To install it from this PC, run Build.bat and run dist\FrivoSetup.exe with the app file beside it.' }
 
     # In the person's own temp folder: the installer runs as them, and
     # setup's own temp folder may not be theirs to read.
@@ -716,7 +784,7 @@ function Set-StartupEntry {
 
 function Set-FrivoBootStart {
     <#
-        NEW (1.8.0): the "Frivo (at startup)" task, for a PC that's only a
+        NEW (2.0.0): the "Frivo (at startup)" task, for a PC that's only a
         Frivo server: Frivo starts with Windows, as the person installing it,
         before anyone signs in. Never fatal.
     #>
@@ -891,7 +959,7 @@ function Install-Frivo {
         [string]      $Action = 'Install',
         [scriptblock] $Log,
         [scriptblock] $Progress,
-        # NEW (1.8.0): 'Both' adds the Frivo app; $InstallApp says whether to
+        # NEW (2.0.0): 'Both' adds the Frivo app; $InstallApp says whether to
         # download it now (never in a silent update), $AppProgress follows
         # the download. $ClearAppMode: changed from Both to Server.
         [ValidateSet('Both', 'Server')]
@@ -900,7 +968,7 @@ function Install-Frivo {
         [bool]        $ClearAppMode = $false,
         [scriptblock] $AppProgress,
         [bool]        $SaveRole = $true,
-        # NEW (1.8.0): start Frivo's server when Windows starts, before
+        # NEW (2.0.0): start Frivo's server when Windows starts, before
         # anyone signs in. $null leaves it as it is (silent runs).
         [object]      $BootStart = $null
     )
@@ -909,7 +977,7 @@ function Install-Frivo {
     if (-not $check.Ok) { throw $check.Reason }
     $Target = $check.Path
 
-    # NEW (1.8.0): Frivo started by the at-startup task is started the same
+    # NEW (2.0.0): Frivo started by the at-startup task is started the same
     # way again once this is done (Resume-FrivoBootTask). Before Repair's
     # clean-up, which stops it.
     $script:bootTaskWasRunning = Test-FrivoBootTaskRunning
@@ -1058,7 +1126,7 @@ function Install-Frivo {
     }
     & $Progress 94
 
-    # NEW (1.8.0): the Frivo app. Frivo itself is installed by now, so a
+    # NEW (2.0.0): the Frivo app. Frivo itself is installed by now, so a
     # problem here never undoes that: Frivo works in a browser meanwhile.
     $script:appExe = ''
     $script:appProblem = ''
@@ -1092,6 +1160,14 @@ function Install-Frivo {
         try { Set-FrivoLauncherAppPath -DataDir $script:SetupDataDir -AppPath '' } catch { }
         try { Set-FrivoAppMode -RoamingAppData (Get-FrivoDesktopUser).RoamingAppData -Mode $null } catch { }
     }
+    # NEW (2.0.0): one "Frivo" in Apps & features. With Frivo here, the app
+    # isn't listed on its own; uninstalling Frivo offers to remove it too.
+    try {
+        $person = Get-FrivoDesktopUser
+        if ($person.User -and (Test-Path -LiteralPath (Get-FrivoAppPaths -LocalAppData $person.LocalAppData).Exe -PathType Leaf)) {
+            [void] (Set-FrivoAppListed -User $person.User -Listed $false)
+        }
+    } catch { Write-SetupLog ('app listing: ' + $_.Exception.Message) }
     & $Progress 100
 
     & $Log 'Installation complete.'
@@ -1118,7 +1194,7 @@ if ($Silent) {
     $restartUsers = @()   # NEW (restart)
     $restartTarget = ''
     try {
-        # NEW (1.8.0): just the app is installed through the wizard, as the
+        # NEW (2.0.0): just the app is installed through the wizard, as the
         # person signed in; a silent run only ever installs or updates Frivo.
         if ($Role -eq 'App') { throw 'Just the Frivo app cannot be installed silently. Run FrivoSetup.exe and choose it.' }
         $existing = Get-ExistingInstall
@@ -1173,7 +1249,7 @@ if ($Silent) {
         # is the one outcome nobody can fix from a browser on another PC.
         # Only if it is not already back (an older version's watcher may
         # have managed it): a second launcher would pop the first one open.
-        # NEW (1.8.0): Frivo started before sign-in (the at-startup task):
+        # NEW (2.0.0): Frivo started before sign-in (the at-startup task):
         # started that way first, since nobody may be signed in.
         if ($restartTarget) { try { Resume-FrivoBootTask -Target $restartTarget } catch { } }
         foreach ($user in $restartUsers) {
@@ -1246,15 +1322,20 @@ $radioRepair = New-FrivoRadio -Theme $Theme -Parent $cardExisting -Text '' -X 18
 $repairNote  = New-FrivoLabel -Theme $Theme -Parent $cardExisting -Text '' -X 38 -Y 98 -W 516 -H 30 -Font $Theme.FontSmall -Color $Theme.Dim
 $radioRemove = New-FrivoRadio -Theme $Theme -Parent $cardExisting -Text ('Uninstall {0}' -f $AppName) -X 18 -Y 138 -W 536
 $removeNote  = New-FrivoLabel -Theme $Theme -Parent $cardExisting `
-    -Text 'Removes the program. You will be asked whether to keep your API keys and profiles.' `
+    -Text 'Removes the program. You choose whether to keep your settings and saves for next time.' `
     -X 38 -Y 160 -W 516 -H 30 -Font $Theme.FontSmall -Color $Theme.Dim
+# NEW (2.0.0): a backup before changing anything, restorable in Frivo.
+$chkSetupBackup = New-FrivoCheck -Theme $Theme -Parent $pageExisting `
+    -Text 'Save a backup of my settings and saves first, to Documents\Frivo backups' -X 28 -Y 316 -W 564
+$script:setupBackupTouched = $false
+$chkSetupBackup.Add_Click({ $script:setupBackupTouched = $true })
 
 # ---------- welcome ----------
 $pageWelcome = New-Page
 [void] (New-FrivoLabel -Theme $Theme -Parent $pageWelcome `
     -Text ('This wizard will install {0} on your computer.' -f $AppName) `
     -X 28 -Y 12 -W 564 -H 22 -Font $Theme.FontMid -Color $Theme.Ink)
-# CHANGED (1.8.0): what Frivo is now: no keys needed to start, and the app.
+# CHANGED (2.0.0): what Frivo is now: no keys needed to start, and the app.
 [void] (New-FrivoLabel -Theme $Theme -Parent $pageWelcome -Text @"
 Frivo turns what you type or say into speech, for VRChat and anywhere else.
 It runs on this PC and opens in the Frivo app or your browser; phones and
@@ -1267,7 +1348,7 @@ Ollama and Evora are optional, and are set up in Frivo's Settings.
 [void] (New-FrivoLabel -Theme $Theme -Parent $pageWelcome -Text 'Click Next to continue.' `
     -X 28 -Y 230 -W 564 -H 20 -Font $Theme.FontUI -Color $Theme.Ink)
 
-# ---------- NEW (1.8.0): what this PC is for ----------
+# ---------- NEW (2.0.0): what this PC is for ----------
 # One card: radio buttons only exclude each other inside the same container.
 $pageRole = New-Page
 [void] (New-FrivoLabel -Theme $Theme -Parent $pageRole -Text 'WHAT IS THIS PC FOR?' `
@@ -1285,9 +1366,9 @@ $radioApp = New-FrivoRadio -Theme $Theme -Parent $cardRole -Text 'Just the Frivo
 $appOnlyNote = New-FrivoLabel -Theme $Theme -Parent $cardRole `
     -Text 'Connects to Frivo running on another PC on your network. Nothing else is installed here.' `
     -X 38 -Y 202 -W 516 -H 34 -Font $Theme.FontSmall -Color $Theme.Dim
-[void] (New-FrivoLabel -Theme $Theme -Parent $pageRole `
+$roleNote = New-FrivoLabel -Theme $Theme -Parent $pageRole `
     -Text 'The app (about 100 MB) is downloaded from Frivo''s releases on GitHub and checked before it''s installed. After that it keeps itself up to date.' `
-    -X 30 -Y 298 -W 560 -H 34 -Font $Theme.FontSmall -Color $Theme.Dim)
+    -X 30 -Y 298 -W 560 -H 50 -Font $Theme.FontSmall -Color $Theme.Dim
 
 # ---------- location ----------
 $pageLocation = New-Page
@@ -1319,7 +1400,7 @@ $chkStart   = New-FrivoCheck -Theme $Theme -Parent $cardShort -Text 'Add a Start
 
 [void] (New-FrivoLabel -Theme $Theme -Parent $pageOptions -Text 'STARTUP' `
     -X 30 -Y 112 -W 400 -H 14 -Font $Theme.FontCaps -Color $Theme.Faint)
-# CHANGED (1.8.0): on by default; and starting before anyone signs in.
+# CHANGED (2.0.0): on by default; and starting before anyone signs in.
 $cardStartup = New-FrivoCard -Theme $Theme -Parent $pageOptions -X 24 -Y 130 -W 572 -H 104
 $chkStartup = New-FrivoCheck -Theme $Theme -Parent $cardStartup -Text ('Start {0} automatically when I sign in' -f $AppName) -X 18 -Y 12 -W 536 -Checked $true
 [void] (New-FrivoLabel -Theme $Theme -Parent $cardStartup `
@@ -1364,7 +1445,7 @@ $doneWarning.Visible = $false
 
 $chkLaunch = New-FrivoCheck -Theme $Theme -Parent $pageDone -Text ('Launch {0} now' -f $AppName) -X 28 -Y 152 -W 400 -Checked $true
 
-# NEW (1.8.0): what happened with the app, when it's part of this install.
+# NEW (2.0.0): what happened with the app, when it's part of this install.
 $doneAppNote = New-FrivoLabel -Theme $Theme -Parent $pageDone -Text '' `
     -X 28 -Y 190 -W 564 -H 80 -Font $Theme.FontSmall -Color $Theme.Dim
 $doneAppNote.Visible = $false
@@ -1377,7 +1458,7 @@ if ($existing.State -ne 'None') {
     [void] $pages.Add(@{ Panel = $pageExisting; Title = ('{0} is already installed' -f $AppName); Sub = 'Choose what you would like to do'; Next = 'Next' })
 }
 [void] $pages.Add(@{ Panel = $pageWelcome;  Title = ('Welcome to {0} Setup' -f $AppName); Sub = ('Version {0}' -f $AppVersion); Next = 'Next' })
-[void] $pages.Add(@{ Panel = $pageRole;     Title = 'How you''ll use Frivo';             Sub = 'Frivo, the Frivo app, or both';          Next = 'Next' })   # NEW (1.8.0)
+[void] $pages.Add(@{ Panel = $pageRole;     Title = 'How you''ll use Frivo';             Sub = 'Frivo, the Frivo app, or both';          Next = 'Next' })   # NEW (2.0.0)
 [void] $pages.Add(@{ Panel = $pageLocation; Title = 'Select destination';                Sub = 'Choose where to install the application'; Next = 'Next' })
 [void] $pages.Add(@{ Panel = $pageOptions;  Title = 'Configuration';                     Sub = 'Shortcuts, startup and network access';   Next = 'Install' })
 [void] $pages.Add(@{ Panel = $pageInstall;  Title = 'Installing';                        Sub = 'Please wait';                             Next = 'Next' })
@@ -1413,7 +1494,7 @@ if ($existing.State -eq 'Installed') {
     $txtPath.Text     = $existing.Path
 }
 
-# NEW (1.8.0): an existing Frivo keeps running here; the choice is whether
+# NEW (2.0.0): an existing Frivo keeps running here; the choice is whether
 # the app comes with it. "Just the app" would mean removing Frivo, which is
 # what Uninstall is for.
 if ($existing.State -ne 'None') {
@@ -1421,6 +1502,33 @@ if ($existing.State -ne 'None') {
     $appOnlyNote.Visible = $false
 }
 if ($existingInstallSettings -and $existingInstallSettings.Role -eq 'Server') { $radioServer.Checked = $true }
+
+# NEW (2.0.0): what's already here, said where the choice is made. Adding
+# the app to Frivo (or Frivo to the app) happens in place: nothing has to
+# be uninstalled first, and settings, profiles and saved replies stay.
+$script:appAlreadyHere = $false
+try {
+    $script:appAlreadyHere = Test-Path -LiteralPath (Get-FrivoAppPaths -LocalAppData (Get-FrivoDesktopUser).LocalAppData).Exe -PathType Leaf
+} catch { }
+if ($existing.State -eq 'Installed' -and $existingInstallSettings -and $existingInstallSettings.Role -eq 'Server' -and -not $script:appAlreadyHere) {
+    $roleNote.ForeColor = $Theme.Ink
+    $roleNote.Text = 'Frivo is installed here without the app. To add it, choose the first option: nothing needs uninstalling, and your settings, profiles and saved replies stay. The app is downloaded from GitHub and checked first.'
+} elseif ($script:appAlreadyHere -and $existing.State -eq 'None') {
+    $roleNote.ForeColor = $Theme.Ink
+    $roleNote.Text = 'The Frivo app is already installed here. Choose the first option to add Frivo itself: the app is kept and opens straight to it.'
+} elseif ($script:appAlreadyHere) {
+    $roleNote.Text = 'The Frivo app is already installed here, so nothing is downloaded.'
+}
+
+# NEW (2.0.0): the backup box, only with something to back up. Ticked for
+# Repair, which rebuilds everything; for an update it's your call.
+$script:hasSetupData = $false
+try { $script:hasSetupData = Test-FrivoHasData -DataDir $script:SetupDataDir } catch { }
+$chkSetupBackup.Visible = $script:hasSetupData -and $existing.State -ne 'None'
+$chkSetupBackup.Checked = ($existing.State -eq 'Partial')
+$radioRepair.Add_CheckedChanged({ if (-not $script:setupBackupTouched) { $chkSetupBackup.Checked = $radioRepair.Checked } })
+$radioRemove.Add_CheckedChanged({ $chkSetupBackup.Enabled = -not $radioRemove.Checked })   # the uninstaller asks itself
+$script:wantBackup = $false
 $script:savedRole = if ($existingInstallSettings) { $existingInstallSettings.Role } else { '' }
 $script:appOnly = $false
 
@@ -1430,7 +1538,7 @@ if ($existingInstallSettings) {
     $chkStartup.Checked  = $existingInstallSettings.Startup
     $chkFirewall.Checked = $existingInstallSettings.Firewall
 }
-$chkBoot.Checked = ($existing.State -ne 'None') -and (Test-FrivoBootTask)   # NEW (1.8.0)
+$chkBoot.Checked = ($existing.State -ne 'None') -and (Test-FrivoBootTask)   # NEW (2.0.0)
 
 function Set-ConfigurationForAction {
     param([ValidateSet('Install', 'Update', 'Repair')] [string] $Action)
@@ -1498,6 +1606,7 @@ $btnNext.Add_Click({
         return
     }
     if ($current.Panel -eq $pageExisting) {
+        $script:wantBackup = $chkSetupBackup.Visible -and $chkSetupBackup.Checked   # NEW (2.0.0)
         if ($radioUpdate.Visible -and $radioUpdate.Checked) {
             $script:installAction = 'Update'
         } else {
@@ -1505,7 +1614,7 @@ $btnNext.Add_Click({
         }
     }
 
-    # NEW (1.8.0): just the app: no destination or options to ask about.
+    # NEW (2.0.0): just the app: no destination or options to ask about.
     if ($current.Panel -eq $pageRole -and $radioApp.Checked) {
         $script:appOnly = $true
         $script:index = $idxInstalling
@@ -1585,7 +1694,30 @@ $btnNext.Add_Click({
         $script:index = $idxInstalling
         Show-Page $script:index
         try {
-            # NEW (1.8.0)
+            # NEW (2.0.0): the backup first, before anything is stopped or
+            # changed. If it can't be made, nothing changes unless you say so.
+            if ($script:wantBackup) {
+                Write-Log 'Saving a backup of your settings and saves...'
+                [System.Windows.Forms.Application]::DoEvents()
+                try {
+                    $backupFile = New-FrivoBackup -DataDir $script:SetupDataDir -Version $existing.Version `
+                        -Destination (Get-FrivoBackupFolder -RoamingAppData (Get-FrivoDesktopUser).RoamingAppData)
+                    Write-Log ('Backup saved: {0}' -f $backupFile)
+                    Write-SetupLog ('backup: ' + $backupFile)
+                } catch {
+                    Write-SetupLog ('backup failed: ' + $_.Exception.Message)
+                    $answer = [System.Windows.Forms.MessageBox]::Show(
+                        ("The backup couldn't be made:`r`n{0}`r`n`r`nContinue without a backup? Your settings are normally kept either way." -f $_.Exception.Message),
+                        ('{0} Setup' -f $AppName),
+                        [System.Windows.Forms.MessageBoxButtons]::YesNo,
+                        [System.Windows.Forms.MessageBoxIcon]::Warning)
+                    if ($answer -ne [System.Windows.Forms.DialogResult]::Yes) {
+                        throw 'Setup stopped before changing anything, since the backup could not be made.'
+                    }
+                    Write-Log 'Continuing without a backup.'
+                }
+            }
+            # NEW (2.0.0)
             $role = if ($radioBoth.Checked) { 'Both' } else { 'Server' }
             $script:launcherPath = Install-Frivo `
                 -Target $txtPath.Text `
@@ -1606,8 +1738,8 @@ $btnNext.Add_Click({
                 -Log { param($m) Write-Log $m } `
                 -Progress { param($p) $bar.SetValue($p); [System.Windows.Forms.Application]::DoEvents() }
             $doneWarning.Visible = -not $script:certificateReady
-            try { Resume-FrivoBootTask -Target $txtPath.Text } catch { }   # NEW (1.8.0)
-            # NEW (1.8.0)
+            try { Resume-FrivoBootTask -Target $txtPath.Text } catch { }   # NEW (2.0.0)
+            # NEW (2.0.0)
             if ($role -eq 'Both' -and $script:appProblem) {
                 $doneAppNote.ForeColor = $Theme.Warn
                 $doneAppNote.Text = ('The Frivo app could not be installed: {0} Frivo works in your browser meanwhile. Run setup again to try again.' -f $script:appProblem)
@@ -1641,7 +1773,7 @@ $btnNext.Add_Click({
     }
 
     if ($current.Panel -eq $pageDone) {
-        # NEW (1.8.0): just the app: open it, as the person signed in.
+        # NEW (2.0.0): just the app: open it, as the person signed in.
         if ($script:appOnly) {
             if ($chkLaunch.Checked -and $script:appExe) {
                 try {
@@ -1652,9 +1784,9 @@ $btnNext.Add_Click({
             $form.Close()
             return
         }
-        $startedAsUser = $false   # NEW (1.8.0)
+        $startedAsUser = $false   # NEW (2.0.0)
         if ($chkLaunch.Checked -and $script:launcherPath) {
-            # CHANGED (1.8.0): as the person signed in to this PC, not as
+            # CHANGED (2.0.0): as the person signed in to this PC, not as
             # administrator (setup's own rights). Frivo started from here used
             # to run as administrator: its files and settings were the same,
             # but nothing running as that person (the Frivo app, a new

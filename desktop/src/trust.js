@@ -115,7 +115,7 @@ function leafTrustedBy(leaf, pin) {
 }
 
 /*
-  NEW (1.8.0): is `pem` a real certificate authority, signed by its own key?
+  NEW (2.0.0): is `pem` a real certificate authority, signed by its own key?
   A pairing code only covers part of the authority's fingerprint, so the
   authority has to be one that took a real signature to make, not bytes
   shuffled until the fingerprint matched.
@@ -226,5 +226,5 @@ module.exports = {
   formatFingerprint,
   sha256Hex,
   pemToDer,
-  isSelfSignedAuthority,   // NEW (1.8.0)
+  isSelfSignedAuthority,   // NEW (2.0.0)
 };

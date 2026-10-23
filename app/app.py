@@ -113,7 +113,7 @@ def _resolve_data_dir():
     also the correct thing on Windows for anything user-specific.
 
     VOICE_CONSOLE_DATA overrides both, for anyone who wants the data on a
-    different drive. NEW (1.8.0): so does --data-dir <folder> on the
+    different drive. NEW (2.0.0): so does --data-dir <folder> on the
     command line, which is how the "Frivo (at startup)" task says where the
     data is (it starts pythonw.exe directly, with no way to set a variable).
     """
@@ -11090,7 +11090,7 @@ apply_storage()
 
 
 # ============================================================
-# NEW (1.8.0): other devices: finding Frivo, pairing, QR code, the certificate
+# NEW (2.0.0): other devices: finding Frivo, pairing, QR code, the certificate
 # ============================================================
 # What the Frivo app (desktop\ in the repo) and phones need to find and trust
 # this Frivo:

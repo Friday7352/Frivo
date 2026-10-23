@@ -5496,7 +5496,7 @@ html.motion-ready .stage { transition: transform var(--dur-smooth) var(--spring-
 .session-strip.is-compact #lengthValue { min-width: 3ch; }
 #masterVolumeValue { min-width: 4ch; }
 
-/* NEW (1.8.0): the Frivo app. In a browser on Windows, Settings › Updates
+/* NEW (2.0.0): the Frivo app. In a browser on Windows, Settings › Updates
    offers it; inside it, Settings has an App section. */
 .app-offer { margin-top: 14px; }
 .app-offer .srow { gap: 12px; }
@@ -5517,7 +5517,7 @@ html.motion-ready .stage { transition: transform var(--dur-smooth) var(--spring-
 #appSection .srow > .btn-ghost { flex: none; }
 #appSection .srow-value { max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-/* NEW (1.8.0): Settings › Other devices */
+/* NEW (2.0.0): Settings › Other devices */
 .dev-qr-row { flex-direction: row; align-items: center; gap: 18px; }
 .dev-qr { flex: none; width: 168px; height: 168px; border-radius: 12px; background: #fff; image-rendering: pixelated; }
 .dev-urls { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
@@ -5542,7 +5542,7 @@ html.motion-ready .stage { transition: transform var(--dur-smooth) var(--spring-
   .dev-qr-row { flex-direction: column; align-items: flex-start; }
 }
 
-/* NEW (1.8.0): Settings › App › Shortcuts */
+/* NEW (2.0.0): Settings › App › Shortcuts */
 .settings-subhead {
   margin: 26px 0 10px;
   font-size: 12px;
@@ -5552,3 +5552,74 @@ html.motion-ready .stage { transition: transform var(--dur-smooth) var(--spring-
   color: var(--ink-faint);
 }
 .srow-sub--error { color: var(--accent-hover, #ff5252); }
+
+/* ============================================================
+   NEW (2.0.0): Settings › Audio, laid out like Discord's Voice & Video
+   ============================================================ */
+.audio-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 24px;
+  row-gap: 18px;
+  padding: 6px 0 20px;
+  border-bottom: 1px solid var(--rule-soft);
+}
+.audio-field { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.audio-field--permit { justify-content: flex-start; align-items: flex-start; }
+.audio-field--permit:not(:has(.btn:not(.is-hidden))) { visibility: hidden; }
+.audio-cap {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+.audio-hint { margin: 0; font-size: var(--text-footnote); color: var(--ink-dim); line-height: 1.45; }
+.audio-hint:empty { display: none; }
+.audio-field > select, .audio-field > .pretty-select-trigger { width: 100%; }
+.audio-volume { display: flex; align-items: center; gap: 12px; }
+.audio-volume input[type="range"] { flex: 1; min-width: 0; }
+.audio-readout {
+  flex: none;
+  width: 3.2em;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-dim);
+  font-size: var(--text-footnote);
+}
+
+.audio-test { display: flex; flex-direction: column; gap: 8px; padding: 20px 0 22px; border-bottom: 1px solid var(--rule-soft); }
+.audio-test-row { display: flex; align-items: center; gap: 14px; margin-top: 4px; }
+.audio-test-row .btn { flex: none; }
+#micTestBtn { min-width: 118px; justify-content: center; }
+
+/* The mic test's level: a row of ticks, lit from the left. */
+.level-bars { flex: 1; min-width: 0; display: flex; align-items: stretch; gap: 3px; height: 22px; }
+.level-bars > span {
+  flex: 1;
+  border-radius: 2px;
+  background: var(--fill-strong);
+  transition: background-color 60ms linear;
+}
+.level-bars > span.is-lit { background: var(--signal); }
+
+.audio-subtitle { margin-top: 30px; }
+.audio-listen {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 24px;
+  row-gap: 18px;
+  padding: 6px 0 4px;
+}
+.audio-listen-row { display: flex; gap: 8px; align-items: center; }
+.audio-listen-row > select, .audio-listen-row > .pretty-select-trigger { flex: 1; min-width: 0; }
+.audio-listen-row > .btn { flex: none; }
+.audio-gate-meter { flex: none; height: 8px; margin-top: 6px; }
+.audio-listen input[type="range"] { width: 100%; }
+
+@media (max-width: 720px) {
+  .audio-grid, .audio-listen { grid-template-columns: 1fr; }
+  .audio-field--permit:not(:has(.btn:not(.is-hidden))) { display: none; }
+  .audio-test-row { flex-wrap: wrap; }
+  .level-bars { order: 3; flex-basis: 100%; }
+}

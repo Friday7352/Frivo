@@ -64,7 +64,7 @@ const RELEASES = [
   { tag_name: 'app-v1.4.0', draft: true, assets: [asset('FrivoApp-Setup-1.4.0.exe')] },
   { tag_name: 'app-v1.1.0', assets: [asset('FrivoApp-Setup-1.1.0.exe')] },
   { tag_name: 'v1.7.0', assets: [asset('FrivoSetup.exe', 'c'.repeat(64))] },
-  { tag_name: 'v1.8.0', assets: [asset('FrivoSetup.exe', null)] },               // no fingerprint
+  { tag_name: 'v2.0.0', assets: [asset('FrivoSetup.exe', null)] },               // no fingerprint
   { tag_name: 'v1.9.0', assets: [asset('FrivoSetup.exe', 'd'.repeat(64), 'someone/else')] },  // another repo's file
   { tag_name: 'v1.6.1', assets: [asset('FrivoSetup.exe')] },
 ];

@@ -1,4 +1,10 @@
-# Frivo App
+# The Frivo app
+
+Windows lists it as just **Frivo**. On a PC where Frivo itself is installed,
+it has no entry of its own in Apps & features: there's one Frivo, and
+uninstalling it offers to remove the app too (`build/installer.nsh` and
+`Set-FrivoAppListed` in `installer/Frivo.Setup.psm1`). Its settings stay in
+`%APPDATA%\Frivo App`, apart from Frivo's.
 
 Frivo in its own window, for Windows. It's an [Electron](https://www.electronjs.org)
 app that shows Frivo's own pages from Frivo's server, the way a browser tab
@@ -60,7 +66,7 @@ isn't throttled in the background, so dictation keeps going behind a game.
 
 ## Installed by Frivo's setup
 
-NEW (Frivo 1.8.0). `FrivoSetup.exe` asks what the PC is for: Frivo in the
+NEW (Frivo 2.0.0). `FrivoSetup.exe` asks what the PC is for: Frivo in the
 app (the default), Frivo without the app, or just the app. For the app it
 looks up the newest `app-v…` release, downloads `FrivoApp-Setup-<version>.exe`,
 checks it against GitHub's SHA-256 (`Select-FrivoAppRelease` and
@@ -106,10 +112,10 @@ Frivo keeps running through an app update.
 
 1. Change `"version"` in `package.json` (the app's own version, separate from
    Frivo's `VERSION` file).
-2. Run `Build-App.bat` in the repository root. It runs the tests and writes
-   `desktop\dist\FrivoApp-Setup-<version>.exe`. Nothing needs installing
-   first: the first time, it downloads a copy of Node.js (pinned in
-   `build\Build-App.ps1`, checked against nodejs.org's SHA-256) into
+2. Run `Build.bat` in the repository root. It runs the app's tests, builds
+   the app and `FrivoSetup.exe`, and puts both in `dist\`. Nothing needs
+   installing first: the first time, it downloads a copy of Node.js (pinned
+   in `build\Build-App.ps1`, checked against nodejs.org's SHA-256) into
    `desktop\.tools`, and uses only that.
 3. Make a GitHub release tagged `app-v<version>` (for example `app-v1.0.1`),
    not a pre-release or a draft, and attach that file with its name unchanged.

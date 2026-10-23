@@ -297,7 +297,7 @@ function Test-FrivoDownloadedFile {
 }
 
 # ------------------------------------------------------------------
-# NEW (1.8.0): the Frivo app's releases
+# NEW (2.0.0): the Frivo app's releases
 # ------------------------------------------------------------------
 # Setup downloads the Frivo app (desktop\ in the repo) when it's chosen.
 # Its releases are in the same repository, tagged "app-v1.0.0" and so on,

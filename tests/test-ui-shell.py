@@ -163,7 +163,11 @@ const base = 'http://127.0.0.1:5093';
   const shown = () => p.evaluate(() => [...document.querySelectorAll('#settingsRoot .settings-section.is-shown')].map(s => s.dataset.settingsSection));
   check('opens on Replies alone', JSON.stringify(await shown()) === '["replies"]', await shown());
   await p.click('[data-settings-section="dictation"]'); await wait(200);
-  check('Dictation shows only Dictation', JSON.stringify(await shown()) === '["dictation"]' && await vis('#micSelect + .pretty-select-trigger'), await shown());
+  check('Dictation shows only Dictation', JSON.stringify(await shown()) === '["dictation"]', await shown());
+  // CHANGED (2.0.0): the microphone is chosen in Audio
+  await p.click('.settings-nav-btn[data-settings-section="audio"]'); await wait(200);
+  check('Audio shows only Audio, with the microphone', JSON.stringify(await shown()) === '["audio"]' && await vis('#micSelect + .pretty-select-trigger'), await shown());
+  await p.click('[data-settings-section="dictation"]'); await wait(200);
   await p.fill('#settingsSearch', 'temperature'); await wait(200);
   check('search finds the row in another section', (await shown()).includes('replies') && await vis('#temperatureSlider'), await shown());
   const hiddenRows = await p.evaluate(() => [...document.querySelectorAll('#settingsRoot .settings-section.is-shown .srow')].filter(r => !r.classList.contains('is-hidden')).length);

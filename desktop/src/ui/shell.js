@@ -221,7 +221,8 @@
 
   function render(v) {
     if (!v) return;
-    if (v.appVersion) footEl.textContent = `Frivo App ${v.appVersion} · by Friday`;
+    // CHANGED (2.0.0): it's just Frivo. The app's own version is in Settings › App.
+    if (v.appVersion) footEl.textContent = 'Frivo · by Friday';
     if (v.name !== 'welcome') typedAddress = null;
     if (v.name === 'welcome') welcome(v);
     else if (v.name === 'trust') trust(v);

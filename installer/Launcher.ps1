@@ -14,7 +14,7 @@
     (the server process, %APPDATA%\Frivo, HKCU's Run key) belongs to that
     user anyway.
 
-    NEW (1.8.0): app mode. When the Frivo app (desktop\ in the repo) is
+    NEW (2.0.0): app mode. When the Frivo app (desktop\ in the repo) is
     set to run Frivo on this PC, it writes its own path to launcher.json as
     appPath. The launcher then has no window and no tray icon: it starts
     and stops the server, follows updates, and opens the app wherever it
@@ -78,17 +78,17 @@ $createdMutex = $false
 $instanceLock = New-Object System.Threading.Mutex($true, 'Local\FrivoLauncher', [ref] $createdMutex)
 $showSignal   = New-Object System.Threading.EventWaitHandle($false,
     [System.Threading.EventResetMode]::ManualReset, 'Local\FrivoLauncherShow')
-# NEW (1.8.0): "make sure the server is running", without showing anything.
+# NEW (2.0.0): "make sure the server is running", without showing anything.
 # What a second launcher started in the background (-Tray: the sign-in
 # entry, or the Frivo app starting Frivo) asks for, so signing in or the
 # app's Start doesn't bring a window up.
 $startSignal  = New-Object System.Threading.EventWaitHandle($false,
     [System.Threading.EventResetMode]::ManualReset, 'Local\FrivoLauncherStart')
 if (-not $createdMutex) {
-    if ($Tray) { [void] $startSignal.Set() } else { [void] $showSignal.Set() }   # CHANGED (1.8.0)
+    if ($Tray) { [void] $startSignal.Set() } else { [void] $showSignal.Set() }   # CHANGED (2.0.0)
     exit
 }
-# NEW (1.8.0): a request left over from a launcher that has since closed
+# NEW (2.0.0): a request left over from a launcher that has since closed
 # isn't for this one.
 [void] $showSignal.Reset()
 [void] $startSignal.Reset()
@@ -101,7 +101,7 @@ $quitSignal = New-Object System.Threading.EventWaitHandle($false,
     [System.Threading.EventResetMode]::ManualReset, 'Local\FrivoLauncherQuit')
 [void] $quitSignal.Reset()
 
-# NEW (1.8.0): the Frivo app's Stop and Quit. Unlike the update's quit, this
+# NEW (2.0.0): the Frivo app's Stop and Quit. Unlike the update's quit, this
 # one stops the server too.
 $stopSignal = New-Object System.Threading.EventWaitHandle($false,
     [System.Threading.EventResetMode]::ManualReset, 'Local\FrivoLauncherStop')
@@ -115,7 +115,7 @@ $script:settings = @{
     closeAction = 'keep'    # keep | stop — what closing the window does
     openBrowser = $false    # open the dashboard once the server is up
     lastUpdateNotice = ''   # NEW (updates): the update result already announced
-    appPath = ''            # NEW (1.8.0): the Frivo app, when it runs Frivo on this PC
+    appPath = ''            # NEW (2.0.0): the Frivo app, when it runs Frivo on this PC
 }
 
 function Read-LauncherSettings {
@@ -131,7 +131,7 @@ function Read-LauncherSettings {
         if ($raw.PSObject.Properties['lastUpdateNotice']) {   # NEW (updates)
             $script:settings.lastUpdateNotice = [string] $raw.lastUpdateNotice
         }
-        # NEW (1.8.0): written by the Frivo app; cleared by it when it stops
+        # NEW (2.0.0): written by the Frivo app; cleared by it when it stops
         # running Frivo on this PC.
         $script:settings.appPath = if ($raw.PSObject.Properties['appPath']) { [string] $raw.appPath } else { '' }
     } catch { }
@@ -175,7 +175,7 @@ function Set-StartupEnabled {
 
 Read-LauncherSettings
 
-# NEW (1.8.0): app mode, while the app that asked for it is still installed.
+# NEW (2.0.0): app mode, while the app that asked for it is still installed.
 # Never as administrator: the app (an ordinary program) couldn't stop a
 # launcher running as administrator, so one with no window or tray icon
 # would be a Frivo nobody can stop. That happens when setup's "Launch Frivo
@@ -271,7 +271,7 @@ function Start-Server {
 }
 
 function Stop-Server {
-    # NEW (1.8.0): Frivo started before sign-in, by the at-startup task.
+    # NEW (2.0.0): Frivo started before sign-in, by the at-startup task.
     # Ended through Task Scheduler; the copy is also caught below.
     if (Test-FrivoBootTaskRunning) {
         try {
@@ -412,7 +412,7 @@ public static void SetWindowIdentity(IntPtr hwnd, string appId, string iconResou
 Import-Module (Join-Path $ScriptDir 'Frivo.Ui.psm1') -Force
 $ChromeTheme = Get-FrivoTheme
 
-# CHANGED (1.8.0): from the shared theme (Frivo.Ui.psm1), which now has
+# CHANGED (2.0.0): from the shared theme (Frivo.Ui.psm1), which now has
 # Frivo's own colours, so the launcher looks like Frivo.
 $ColBg      = $ChromeTheme.Bg
 $ColSurface = $ChromeTheme.Surface
@@ -505,7 +505,7 @@ function New-FlatButton {
     } else {
         $b.BackColor = $ColCard
         $b.ForeColor = $ColInk
-        $b.FlatAppearance.BorderSize = 0   # CHANGED (1.8.0): Frivo's buttons have no outline
+        $b.FlatAppearance.BorderSize = 0   # CHANGED (2.0.0): Frivo's buttons have no outline
         $b.FlatAppearance.BorderColor = $ColHair
         $b.FlatAppearance.MouseOverBackColor = $ColCardHi
         $b.FlatAppearance.MouseDownBackColor = $ColSurface
@@ -515,7 +515,7 @@ function New-FlatButton {
     return $b
 }
 
-# NEW (1.8.0): a thin line between rows on a card.
+# NEW (2.0.0): a thin line between rows on a card.
 function New-Divider {
     param($Parent, [int] $X, [int] $Y, [int] $W)
     $d = New-Object System.Windows.Forms.Panel
@@ -552,7 +552,7 @@ $taskbarIdentity = { try { [FrivoNative.Taskbar]::SetWindowIdentity($form.Handle
 $form.Add_HandleCreated(({ & $taskbarIdentity }).GetNewClosure())
 
 # ---------- header ----------
-# CHANGED (1.8.0): laid out like Frivo's own top bar: the logo and name on
+# CHANGED (2.0.0): laid out like Frivo's own top bar: the logo and name on
 # the left, the status as a pill on the right.
 $logo = New-Object System.Windows.Forms.PictureBox
 $logo.Location = New-Object System.Drawing.Point(24, 24)
@@ -627,13 +627,13 @@ $viewSettings.Visible = $false
 $form.Controls.Add($viewSettings)
 
 # ---------- main view: addresses ----------
-# CHANGED (1.8.0): both addresses on one card, with a line between them.
+# CHANGED (2.0.0): both addresses on one card, with a line between them.
 $hostnameWorks = Test-LocalHostnameWorks
 $localUrl = if ($hostnameWorks) { 'https://{0}:{1}' -f $Hostname, $Port } else { 'https://localhost:{0}' -f $Port }
 $lanIp    = Get-LanIp
 $lanUrl   = if ($lanIp) { 'https://{0}:{1}' -f $lanIp, $Port } else { $null }
 
-# CHANGED (1.8.0): taller, for the pairing code row.
+# CHANGED (2.0.0): taller, for the pairing code row.
 $cardAddr = New-Card $viewMain 24 8 422 204
 [void] (New-DarkLabel $cardAddr 'THIS PC' 18 16 300 14 $FontCaps $ColFaint)
 [void] (New-DarkLabel $cardAddr $localUrl 18 34 300 24 $FontMid $ColInk)
@@ -650,7 +650,7 @@ if ($lanUrl) {
     $copy2 = $null
 }
 
-# NEW (1.8.0): the pairing code the Frivo app on another PC asks for, and a
+# NEW (2.0.0): the pairing code the Frivo app on another PC asks for, and a
 # QR code of the network address for phones.
 $CaCertPath = [System.IO.Path]::Combine($DataDir, 'ca.crt')
 $FontCode = New-Object System.Drawing.Font('Consolas', 13, [System.Drawing.FontStyle]::Bold)
@@ -748,7 +748,7 @@ $hintLbl = New-DarkLabel $viewMain '' 28 382 414 40 $FontSmall $ColFaint
 $hintLbl.TextAlign = 'TopCenter'
 
 # ---------- settings view ----------
-# CHANGED (1.8.0): rows with switches, like Frivo's Settings, instead of
+# CHANGED (2.0.0): rows with switches, like Frivo's Settings, instead of
 # radio buttons and checkboxes.
 # [string] first: in Windows PowerShell 5.1 a bare [char] on the left of +
 # is treated as a number and the script dies trying to convert the text.
@@ -810,7 +810,7 @@ $miShow  = $trayMenu.Items.Add('Show launcher')
 [void] $trayMenu.Items.Add('-')
 $miQuit  = $trayMenu.Items.Add(('Stop {0} and quit' -f $AppName))
 $notify.ContextMenuStrip = $trayMenu
-# CHANGED (1.8.0): no tray icon in app mode; the app has its own.
+# CHANGED (2.0.0): no tray icon in app mode; the app has its own.
 $notify.Visible = -not $script:appMode
 
 $script:quitting     = $false
@@ -825,7 +825,7 @@ function Open-Dashboard {
     try { Start-Process $localUrl } catch { }
 }
 
-# NEW (1.8.0): app mode opens the app instead of this window.
+# NEW (2.0.0): app mode opens the app instead of this window.
 function Test-AppRunning {
     $path = [string] $script:settings.appPath
     if (-not $path) { return $false }
@@ -854,7 +854,7 @@ function Open-App {
 }
 
 function Show-Launcher {
-    if ($script:appMode) {   # NEW (1.8.0)
+    if ($script:appMode) {   # NEW (2.0.0)
         if ($script:state -notin @('running', 'starting')) { Start-Server }
         Open-App
         return
@@ -885,7 +885,7 @@ function Show-UpdateResult {
         so a failed one says why, in the one place still on screen when the
         browser could not reconnect.
     #>
-    if ($script:appMode) { return }   # NEW (1.8.0): the app says it instead
+    if ($script:appMode) { return }   # NEW (2.0.0): the app says it instead
     try {
         $programData = if ($env:ProgramData) { $env:ProgramData } else { 'C:\ProgramData' }
         $path = [System.IO.Path]::Combine($programData, 'Frivo', 'Updates', 'status.json')
@@ -922,7 +922,7 @@ function Update-Status {
 
     switch ($script:state) {
         'running' {
-            Set-StatusPill 'Running' $ColSignal   # CHANGED (1.8.0)
+            Set-StatusPill 'Running' $ColSignal   # CHANGED (2.0.0)
             $btnOpen.Enabled = $true
             $btnOpen.Text = ('Open {0}' -f $AppName)
             $btnPower.Text = ('Stop {0}' -f $AppName)
@@ -930,20 +930,20 @@ function Update-Status {
             $hintLbl.Text = ''
         }
         'starting' {
-            Set-StatusPill 'Starting…' $ColWarn   # CHANGED (1.8.0)
+            Set-StatusPill 'Starting…' $ColWarn   # CHANGED (2.0.0)
             $btnOpen.Enabled = $false
             $btnPower.Enabled = $false
             $hintLbl.Text = 'The first start after installing can take a few extra seconds.'
         }
         'stopped' {
-            Set-StatusPill 'Stopped' $ColFaint   # CHANGED (1.8.0)
+            Set-StatusPill 'Stopped' $ColFaint   # CHANGED (2.0.0)
             $btnOpen.Enabled = $true
             $btnOpen.Text = ('Start {0}' -f $AppName)
             $btnPower.Enabled = $false
             $hintLbl.Text = ''
         }
         'failed' {
-            Set-StatusPill 'Not running' $ColAccent   # CHANGED (1.8.0)
+            Set-StatusPill 'Not running' $ColAccent   # CHANGED (2.0.0)
             $btnOpen.Enabled = $true
             $btnOpen.Text = ('Start {0}' -f $AppName)
             $btnPower.Enabled = $false
@@ -951,7 +951,7 @@ function Update-Status {
         }
     }
 
-    # CHANGED (1.8.0): never in app mode, where the app is the window.
+    # CHANGED (2.0.0): never in app mode, where the app is the window.
     if ($script:state -eq 'running' -and $script:settings.openBrowser -and -not $script:appMode -and -not $script:autoOpenDone) {
         $script:autoOpenDone = $true
         Open-Dashboard
@@ -975,7 +975,7 @@ $btnPower.Add_Click({
 $copy1.Add_Click({
     try { [System.Windows.Forms.Clipboard]::SetText($localUrl); $copy1.Text = 'Copied' } catch { }
 })
-if ($btnQr) { $btnQr.Add_Click({ Show-QrCode }) }   # NEW (1.8.0)
+if ($btnQr) { $btnQr.Add_Click({ Show-QrCode }) }   # NEW (2.0.0)
 if ($copy2) {
     $copy2.Add_Click({
         try { [System.Windows.Forms.Clipboard]::SetText($lanUrl); $copy2.Text = 'Copied' } catch { }
@@ -983,7 +983,7 @@ if ($copy2) {
 }
 
 $btnSettings.Add_Click({
-    # CHANGED (1.8.0): switches
+    # CHANGED (2.0.0): switches
     Set-FrivoSwitch $swKeep ($script:settings.closeAction -eq 'keep')
     Set-FrivoSwitch $swStartup (Test-StartupEnabled)
     Set-FrivoSwitch $swAutoOpen ([bool] $script:settings.openBrowser)
@@ -1139,7 +1139,7 @@ function Watch-UpdateStatus {
 }
 
 # Reset the Copy buttons and poll the server.
-$script:appModeTick = 0   # NEW (1.8.0)
+$script:appModeTick = 0   # NEW (2.0.0)
 $timer = New-Object System.Windows.Forms.Timer
 $timer.Interval = 1200
 $timer.Add_Tick({
@@ -1147,19 +1147,19 @@ $timer.Add_Tick({
     try { Watch-UpdateStatus } catch { }   # NEW (1.7.0)
     if ($copy1.Text -eq 'Copied') { $copy1.Text = 'Copy' }
     if ($copy2 -and $copy2.Text -eq 'Copied') { $copy2.Text = 'Copy' }
-    Update-PairingCode   # NEW (1.8.0)
+    Update-PairingCode   # NEW (2.0.0)
     # A second launcher was started — bring this one forward instead.
     if ($showSignal.WaitOne(0)) {
         [void] $showSignal.Reset()
         Show-Launcher
     }
-    # NEW (1.8.0): a second launcher started in the background: just make
+    # NEW (2.0.0): a second launcher started in the background: just make
     # sure the server is running.
     if ($startSignal.WaitOne(0)) {
         [void] $startSignal.Reset()
         if ($script:state -notin @('running', 'starting')) { Start-Server; Update-Status }
     }
-    # NEW (1.8.0): the Frivo app's Stop or Quit: stop the server and leave.
+    # NEW (2.0.0): the Frivo app's Stop or Quit: stop the server and leave.
     if ($stopSignal.WaitOne(0)) {
         [void] $stopSignal.Reset()
         try { Add-Content -LiteralPath $LauncherLog -Value ('{0} stop asked for by the Frivo app' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')) } catch { }
@@ -1171,7 +1171,7 @@ $timer.Add_Tick({
         [System.Windows.Forms.Application]::Exit()
         return
     }
-    # NEW (1.8.0): the app was set to another PC, or uninstalled, while this
+    # NEW (2.0.0): the app was set to another PC, or uninstalled, while this
     # launcher ran without a tray icon. Bring the icon back so this Frivo can
     # still be found and stopped.
     $script:appModeTick++
@@ -1210,7 +1210,7 @@ Update-Status
 Show-UpdateResult   # NEW (updates)
 
 if ($script:appMode) {
-    # NEW (1.8.0): no window and no tray icon. Opens the app unless it's
+    # NEW (2.0.0): no window and no tray icon. Opens the app unless it's
     # already open (it usually is: it's what started this launcher). From
     # the sign-in entry or after an update it opens in the tray, not on top
     # of everything.

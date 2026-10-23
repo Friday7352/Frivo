@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""NEW (1.8.0): Settings › Other devices and what the Frivo app uses.
+"""NEW (2.0.0): Settings › Other devices and what the Frivo app uses.
 
   * /api/hello says it's Frivo, with the PC's name
   * /api/devices gives the network addresses and the pairing code

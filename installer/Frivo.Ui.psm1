@@ -88,7 +88,7 @@ function Get-FrivoTheme {
         One object with every colour and font, so a window never invents
         its own shade of anything.
     #>
-    # CHANGED (1.8.0): Frivo's colours as they are now (app/static/style.css,
+    # CHANGED (2.0.0): Frivo's colours as they are now (app/static/style.css,
     # dark), so setup, the uninstaller and the launcher look like Frivo.
     return [pscustomobject] @{
         Bg      = [System.Drawing.Color]::FromArgb(15, 16, 19)     # --bg
@@ -418,7 +418,7 @@ function New-FrivoTextBox {
 
 function New-FrivoSwitch {
     <#
-        NEW (1.8.0): an on/off switch like Frivo's own (a rounded track, red
+        NEW (2.0.0): an on/off switch like Frivo's own (a rounded track, red
         when on, with a white knob), instead of a checkbox. It IS a checkbox
         underneath, drawn over, so Tab reaches it, Space flips it and screen
         readers know what it is. $OnChange gets the new value when the person

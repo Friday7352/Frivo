@@ -1,6 +1,6 @@
 {
   "name": "frivo-app",
-  "productName": "Frivo App",
+  "productName": "Frivo",
   "version": "1.0.0",
   "description": "Frivo in its own window: runs Frivo on this PC, or connects to Frivo on another PC on your network.",
   "author": "Friday",
@@ -11,7 +11,7 @@
     "appId": "com.friday7352.frivo.app",
     "repository": "Friday7352/Frivo",
     "port": 5000,
-    "minimumFrivo": "1.8.0"
+    "minimumFrivo": "2.0.0"
   },
   "scripts": {
     "start": "electron .",
@@ -26,7 +26,7 @@
   },
   "build": {
     "appId": "com.friday7352.frivo.app",
-    "productName": "Frivo App",
+    "productName": "Frivo",
     "executableName": "FrivoApp",
     "copyright": "Copyright (c) 2026 Friday",
     "directories": {
@@ -55,7 +55,7 @@
       "oneClick": true,
       "perMachine": false,
       "shortcutName": "Frivo",
-      "uninstallDisplayName": "Frivo App",
+      "uninstallDisplayName": "Frivo",
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "runAfterFinish": true,

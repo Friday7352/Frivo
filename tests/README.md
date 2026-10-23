@@ -363,7 +363,7 @@ Run against the 1.4.x code, seven of these checks fail.
 
 ## test-response-styles.py (1.5.0)
 
-`python3 tests/test-response-styles.py` checks that Response, Echo and Mimic behave as described in `docs/RELEASE-1.5.0.md`. A script stands in for the model, so nothing goes over the network.
+`python3 tests/test-response-styles.py` checks that Response, Echo and Mimic behave as described in `docs/releases/RELEASE-1.5.0.md`. A script stands in for the model, so nothing goes over the network.
 
 - **Mimic:** in English, sends exactly what was typed, makes no model call, and needs no key. In another language, it makes one literal translation at temperature 0, with no personality or earlier turns sent.
 - **Echo's word check** (`echo_keeps_words`): spelling, grammar, shorthand and emphasis are allowed. Added words, removed words and synonyms are caught.
@@ -458,22 +458,41 @@ Double-click `tests/check-windows-voices.bat` on a Windows PC. It runs the real 
 
 ## test-app-setup.ps1
 
-NEW (1.8.0). Setup's part in the Frivo app, on Linux or Windows: picking the
+NEW (2.0.0). Setup's part in the Frivo app, on Linux or Windows: picking the
 app's release from GitHub's list, the checked download (a wrong file is
 refused and deleted), app mode in `launcher.json`, telling the app Frivo runs
 here (in a form the app can read), the app's install folder agreeing with
 `desktop/package.json`, and setup's and the uninstaller's rules from source:
 a silent update never downloads the app, "Just the app" isn't offered over
 an existing Frivo, and a problem with the app never undoes installing Frivo.
-Also the "Frivo (at startup)" task (what it runs, no stored password, never
+Also the app built with this setup (Build.bat) being used from beside
+`FrivoSetup.exe` only when its fingerprint matches, and the "Frivo (at startup)" task (what it runs, no stored password, never
 as administrator, no time limit, removed only when it's this install's), and
 the launcher's pairing code and offline QR code.
 
     pwsh -NoProfile -File tests/test-app-setup.ps1
 
+## test-audio-settings.py
+
+NEW (2.0.0). Settings › Audio in a real browser with fake devices: both device
+lists, the volume, the output device moving the reply mixer and being kept,
+the mic test lighting its level, Check moving the Listening meter, both
+stopping when Settings closes, and Dictation and Listening leading there.
+
+    python3 tests/test-audio-settings.py
+
+## test-setup-backup.py
+
+NEW (2.0.0). The backup setup and the uninstaller make (`New-FrivoBackup`):
+Frivo's own backup format, keys left out unless asked, saved replies found
+where Settings › Storage put them, voices only when asked, and Frivo's
+Restore bringing it all back. Needs pwsh.
+
+    python3 tests/test-setup-backup.py
+
 ## test-devices.py
 
-NEW (1.8.0). Settings › Other devices and what the app uses: `/api/hello`,
+NEW (2.0.0). Settings › Other devices and what the app uses: `/api/hello`,
 `/api/devices`, the QR code and the certificate download (never its key),
 and the pairing code worked out the same way by the server, the app and the
 launcher.
@@ -482,7 +501,7 @@ launcher.
 
 ## The Frivo app (desktop\)
 
-NEW (1.8.0). The app has its own tests, run from `desktop\` after `npm ci`:
+NEW (2.0.0). The app has its own tests, run from `desktop\` after `npm ci`:
 
     npm test             unit tests: addresses, GitHub releases and checked
                          downloads, certificate pinning, settings, and what

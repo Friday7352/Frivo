@@ -1,5 +1,5 @@
 ﻿<#
-    NEW (1.8.0): setup's part in the Frivo app. Runs on Linux or Windows;
+    NEW (2.0.0): setup's part in the Frivo app. Runs on Linux or Windows;
     nothing here touches the registry, the network or scheduled tasks.
 
       - picking the app's newest release from GitHub's list, and only one
@@ -28,7 +28,7 @@ function Asset($name, $tag, $digest = "sha256:$sha", $repoPrefix = $prefix) {
     [ordered] @{ name = $name; size = 10; digest = $digest; browser_download_url = "$repoPrefix$tag/$name" }
 }
 $releases = @(
-    [ordered] @{ tag_name = 'v1.8.0'; assets = @(Asset 'FrivoSetup.exe' 'v1.8.0') }
+    [ordered] @{ tag_name = 'v2.0.0'; assets = @(Asset 'FrivoSetup.exe' 'v2.0.0') }
     [ordered] @{ tag_name = 'app-v1.0.0'; assets = @(Asset 'FrivoApp-Setup-1.0.0.exe' 'app-v1.0.0') }
     [ordered] @{ tag_name = 'app-v1.2.0'; prerelease = $true; assets = @(Asset 'FrivoApp-Setup-1.2.0.exe' 'app-v1.2.0') }
     [ordered] @{ tag_name = 'app-v1.1.0'; assets = @(Asset 'FrivoApp-Setup-1.1.0.exe' 'app-v1.1.0') }
@@ -136,7 +136,7 @@ $setupModule = Get-Content -LiteralPath (Join-Path $root 'installer/Frivo.Setup.
 Check 'the app is never run as administrator when nobody is signed in' ($setupModule -match 'Nobody is signed in to this PC')
 
 
-# NEW (1.8.0): starting with Windows, and before anyone signs in
+# NEW (2.0.0): starting with Windows, and before anyone signs in
 $boot = Get-FrivoBootTaskAction -InstallDir 'C:\Program Files\Frivo\' -DataDir 'C:\Users\Sam Lee\AppData\Roaming\Frivo'
 Check "the at-startup task runs Frivo's own pythonw.exe (the firewall rule's program)" ($boot.Path -eq 'C:\Program Files\Frivo\.venv\Scripts\pythonw.exe') $boot.Path
 Check "with Frivo's data folder given, quoted" ($boot.Arguments -eq 'app.py --data-dir "C:\Users\Sam Lee\AppData\Roaming\Frivo"') $boot.Arguments
@@ -155,6 +155,65 @@ $launcher = Get-Content -LiteralPath (Join-Path $root 'installer/Launcher.ps1') 
 Check "stopping Frivo in the launcher ends the task's copy too" ($launcher -match "GetTask\('Frivo \(at startup\)'\)\.Stop\(0\)")
 Check 'the launcher shows the pairing code' ($launcher -match 'Get-FrivoPairingCode -CertificatePath \$CaCertPath')
 Check 'and makes the QR code offline, with Frivo''s Python' ($launcher -match 'segno\.make\(sys\.argv\[1\]')
+
+
+# NEW (2.0.0): adding the app (or Frivo) later, backups, keeping your data
+Check 'setup says when Frivo is here without the app, and that nothing needs uninstalling' ($install -match 'Frivo is installed here without the app\. To add it, choose the first option: nothing needs uninstalling')
+Check 'and when the app is here without Frivo' ($install -match 'The Frivo app is already installed here\. Choose the first option to add Frivo itself')
+Check 'setup offers a backup before an update or repair' ($install -match '\$chkSetupBackup = New-FrivoCheck' -and $install -match '\$script:wantBackup = \$chkSetupBackup\.Visible -and \$chkSetupBackup\.Checked')
+Check 'and makes it before Install-Frivo stops or changes anything' ($install -match '(?s)if \(\$script:wantBackup\).{0,3000}\$script:launcherPath = Install-Frivo')
+Check 'a failed backup stops setup unless you say to go on' ($install -match 'Setup stopped before changing anything, since the backup could not be made')
+Check 'uninstalling asks keep or delete, keep by default' ($uninstall -match '\$radioKeep = New-FrivoRadio .*-Checked \$true' -and $uninstall -match '\$radioDelete = New-FrivoRadio')
+Check 'with a backup first' ($uninstall -match '\$chkBackup = New-FrivoCheck' -and $uninstall -match 'New-FrivoBackup -DataDir \$DataDir')
+Check 'and settings are kept if the backup fails' ($uninstall -match 'Kept your settings and saves, since the backup could not be made')
+Check 'a silent uninstall can make one too, and -RemoveApp survives elevation' ($uninstall -match "if \(\`$Backup\)\s+\{ \`$relaunch \+= '-Backup' \}" -and $uninstall -match "if \(\`$RemoveApp\)\s+\{ \`$relaunch \+= '-RemoveApp' \}")
+$folder = Get-FrivoBackupFolder -RoamingAppData $env:APPDATA
+Check 'backups go to Documents\Frivo backups' ($folder -match 'Frivo backups$') $folder
+
+
+# NEW (2.0.0): the app built with this setup (Build.bat), used from beside it
+$src = Get-Content -LiteralPath (Join-Path $root 'installer/Install.ps1') -Raw
+$ast = [System.Management.Automation.Language.Parser]::ParseInput($src, [ref] $null, [ref] $null)
+$fn = $ast.Find({ $args[0] -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $args[0].Name -eq 'Find-FrivoLocalAppInstaller' }, $true)
+. ([scriptblock]::Create($fn.Extent.Text))
+$pkg = Join-Path $work 'pkg'
+$ScriptDir = Join-Path $pkg 'installer'
+$PackageDir = $pkg
+$beside = Join-Path $work 'Downloads'
+New-Item -ItemType Directory -Path $ScriptDir, $beside -Force | Out-Null
+$appFile = Join-Path $beside 'FrivoApp-Setup-1.2.0.exe'
+[System.IO.File]::WriteAllText($appFile, 'the app built with this setup')
+Check 'without bundled-app.json, nothing local is used' ($null -eq (Find-FrivoLocalAppInstaller))
+[System.IO.File]::WriteAllText((Join-Path $pkg 'setup-folder.txt'), $beside)
+$good = (Get-FileHash -LiteralPath $appFile -Algorithm SHA256).Hash
+[System.IO.File]::WriteAllText((Join-Path $ScriptDir 'bundled-app.json'), (@{ name = 'FrivoApp-Setup-1.2.0.exe'; sha256 = $good } | ConvertTo-Json))
+$found = Find-FrivoLocalAppInstaller
+Check 'the app built with this setup is found beside FrivoSetup.exe' ($found -and $found.Path -eq $appFile -and $found.Version -eq [version] '1.2.0') $found
+[System.IO.File]::WriteAllText($appFile, 'something else with the same name')
+Check 'a file with the right name but other contents is never used' ($null -eq (Find-FrivoLocalAppInstaller))
+[System.IO.File]::WriteAllText((Join-Path $beside 'FrivoApp-Setup-9.9.9.exe'), 'x')
+Check 'nor any other FrivoApp-Setup file in that folder' ($null -eq (Find-FrivoLocalAppInstaller))
+$build = Get-Content -LiteralPath (Join-Path $root 'build/Build.ps1') -Raw
+Check 'Build.bat writes the app''s fingerprint into the setup it builds' ($build -match 'installer\\bundled-app\.json' -and $build -match "Get-FileHash -LiteralPath \`$appBuilt -Algorithm SHA256")
+Check 'and puts the app beside FrivoSetup.exe' ($build -match 'Copy-Item -LiteralPath \$appBuilt -Destination \(Join-Path \$dist \$appName\)')
+$iss = Get-Content -LiteralPath (Join-Path $root 'build/Frivo.iss') -Raw
+Check 'setup tells Install.ps1 the folder it was run from' ($iss -match "setup-folder\.txt'\), ExpandConstant\('\{src\}'\)")
+
+
+# NEW (2.0.0): one "Frivo" in Apps & features
+$appPkg = Get-Content -LiteralPath (Join-Path $root 'desktop/package.json') -Raw | ConvertFrom-Json
+Check 'the app is called Frivo' ($appPkg.productName -eq 'Frivo' -and $appPkg.build.productName -eq 'Frivo' -and $appPkg.build.nsis.uninstallDisplayName -eq 'Frivo')
+Check 'but keeps its own settings folder, not Frivo''s' ((Get-Content -LiteralPath (Join-Path $root 'desktop/src/main.js') -Raw) -match "path\.join\(app\.getPath\('appData'\), 'Frivo App'\)")
+$oldDir = Join-Path $work 'oldapp'
+New-Item -ItemType Directory -Path (Join-Path $oldDir 'Programs/frivo-app') -Force | Out-Null
+[System.IO.File]::WriteAllText((Join-Path $oldDir 'Programs/frivo-app/Uninstall Frivo App.exe'), 'x')
+$oldPaths = Get-FrivoAppPaths -LocalAppData $oldDir
+Check 'an app from before the rename is still found and removed by its old uninstaller' ((& $norm $oldPaths.Uninstaller) -like '*/Uninstall Frivo App.exe') $oldPaths.Uninstaller
+$nsh = Get-Content -LiteralPath (Join-Path $root 'desktop/build/installer.nsh') -Raw
+Check 'with Frivo installed, the app''s installer hides its own entry' ($nsh -match 'Uninstall\\Frivo" "DisplayName"' -and $nsh -match 'WriteRegDWORD SHELL_CONTEXT "\$\{UNINSTALL_REGISTRY_KEY\}" "SystemComponent" 1')
+Check 'and setup does too' ($install -match 'Set-FrivoAppListed -User \$person\.User -Listed \$false')
+$uninstall = Get-Content -LiteralPath (Join-Path $root 'installer/Uninstall.ps1') -Raw
+Check 'uninstalling Frivo but keeping the app lists the app again' ($uninstall -match 'Set-FrivoAppListed -User \(Get-FrivoDesktopUser\)\.User -Listed \$true')
 
 Remove-Item -LiteralPath $work -Recurse -Force
 Write-Host ''
