@@ -107,6 +107,15 @@ $stopSignal = New-Object System.Threading.EventWaitHandle($false,
     [System.Threading.EventResetMode]::ManualReset, 'Local\FrivoLauncherStop')
 [void] $stopSignal.Reset()
 
+# NEW (2.0.0): the Server page's Restart and Stop (app.py, /api/server/*).
+# Stop leaves the launcher running, with Start, rather than closing it.
+$restartSignal = New-Object System.Threading.EventWaitHandle($false,
+    [System.Threading.EventResetMode]::ManualReset, 'Local\FrivoLauncherRestart')
+[void] $restartSignal.Reset()
+$haltSignal = New-Object System.Threading.EventWaitHandle($false,
+    [System.Threading.EventResetMode]::ManualReset, 'Local\FrivoLauncherStopServer')
+[void] $haltSignal.Reset()
+
 # ==================================================================
 # Settings
 # ==================================================================
@@ -806,6 +815,7 @@ if (Test-Path -LiteralPath $IconPath) {
 }
 $trayMenu = New-Object System.Windows.Forms.ContextMenuStrip
 $miOpen  = $trayMenu.Items.Add(('Open {0}' -f $AppName))
+$miChat  = $trayMenu.Items.Add('Open chat')   # NEW (2.0.0)
 $miShow  = $trayMenu.Items.Add('Show launcher')
 [void] $trayMenu.Items.Add('-')
 $miQuit  = $trayMenu.Items.Add(('Stop {0} and quit' -f $AppName))
@@ -821,7 +831,14 @@ $script:autoOpenDone = $false
 # Behaviour
 # ==================================================================
 
+# CHANGED (2.0.0): opens the Server page: who's connected, whether it's all
+# working, and how to connect a device. Its "Open chat" (and the tray's) is
+# the chat.
 function Open-Dashboard {
+    try { Start-Process ($localUrl + '/server') } catch { }
+}
+
+function Open-Chat {
     try { Start-Process $localUrl } catch { }
 }
 
@@ -1059,6 +1076,7 @@ $btnData.Add_Click({
 })
 
 $miOpen.Add_Click({ Open-Dashboard })
+$miChat.Add_Click({ Open-Chat })   # NEW (2.0.0)
 $miShow.Add_Click({ Show-Launcher })
 $miQuit.Add_Click({
     $script:quitting = $true
@@ -1170,6 +1188,20 @@ $timer.Add_Tick({
         $form.Close()
         [System.Windows.Forms.Application]::Exit()
         return
+    }
+    # NEW (2.0.0): the Server page's Restart and Stop.
+    if ($restartSignal.WaitOne(0)) {
+        [void] $restartSignal.Reset()
+        try { Add-Content -LiteralPath $LauncherLog -Value ('{0} restart asked for from the Server page' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')) } catch { }
+        Stop-Server
+        Start-Server
+        Update-Status
+    }
+    if ($haltSignal.WaitOne(0)) {
+        [void] $haltSignal.Reset()
+        try { Add-Content -LiteralPath $LauncherLog -Value ('{0} stop asked for from the Server page' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')) } catch { }
+        Stop-Server
+        Update-Status
     }
     # NEW (2.0.0): the app was set to another PC, or uninstalled, while this
     # launcher ran without a tray icon. Bring the icon back so this Frivo can

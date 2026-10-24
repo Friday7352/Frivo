@@ -1256,7 +1256,7 @@
               <!-- VRChat -->
               <section class="settings-section" data-settings-section="vrchat">
                 <h3 class="settings-section-title">VRChat</h3>
-                <p class="settings-section-sub">Through FrivOSC, which runs on the PC you play VRChat on. Its setup asks for this Frivo's address once.</p>
+                <p class="settings-section-sub">Through the Frivo app on the PC you play VRChat on: FrivOSC is built into it, and connects by itself while VRChat runs. (The separate FrivOSC still works too.)</p>
                 <div class="settings-card-home" id="oscSettingsHome"></div>
                 <div class="settings-card" id="oscSettings">
                   <label class="srow">
@@ -1579,6 +1579,14 @@
                     </span>
                     <span class="srow-value srow-value--mono dev-code" id="devCode">—</span>
                   </div>
+                  <!-- NEW (2.0.0): the Server page -->
+                  <a class="srow" id="devServerRow" href="/server">
+                    <span class="srow-main srow-main--flex">
+                      <span class="srow-label">Server page</span>
+                      <span class="srow-sub">Who's using Frivo right now, whether everything's working, the graphics card, and what Frivo logged lately.</span>
+                    </span>
+                    <span class="srow-chevron"><svg class="icon-16"><use href="#i-chevron"/></svg></span>
+                  </a>
                 </div>
                 <div id="devTrust">
                 <h3 class="settings-section-title backup-title">Trust Frivo on a phone</h3>
@@ -1667,6 +1675,19 @@
                     </span>
                   </div>
                 </div>
+                <!-- NEW (2.0.0): FrivOSC, built into the app -->
+                <div class="settings-card">
+                  <label class="srow" id="appVrchatRow">
+                    <span class="srow-main srow-main--flex">
+                      <span class="srow-label">VRChat on this PC</span>
+                      <span class="srow-sub" id="appVrchatSub">Chatbox and microphone sync, while VRChat runs here.</span>
+                    </span>
+                    <span class="switch">
+                      <input type="checkbox" id="appVrchatToggle">
+                      <span class="switch-track" aria-hidden="true"></span>
+                    </span>
+                  </label>
+                </div>
                 <div class="settings-card">
                   <div class="srow">
                     <span class="srow-main srow-main--flex"><span class="srow-label">App version</span></span>
@@ -1675,7 +1696,7 @@
                   <button class="srow" type="button" id="appUpdateRow">
                     <span class="srow-main srow-main--flex">
                       <span class="srow-label">Check for app updates</span>
-                      <span class="srow-sub">The app checks by itself every few hours. Frivo's own updates are under Updates.</span>
+                      <span class="srow-sub">The app updates from the Frivo it's connected to, and checks by itself every few hours. Frivo's own updates are under Updates.</span>
                     </span>
                     <span class="srow-value" id="appUpdateValue"></span>
                     <span class="srow-chevron"><svg class="icon-16"><use href="#i-chevron"/></svg></span>
@@ -1746,8 +1767,8 @@
                       <span class="srow-label">Frivo app for Windows</span>
                       <span class="srow-sub">Frivo in its own window, with a tray icon and no browser tab. It runs Frivo on this PC, or connects to Frivo on another PC on your network. Your settings stay where they are.</span>
                     </span>
-                    <a class="btn-ghost btn-sm app-offer-link" id="appOfferLink" target="_blank" rel="noopener"
-                       href="https://github.com/Friday7352/Frivo/releases?q=app-v&amp;expanded=true">
+                    <!-- CHANGED (2.0.0): from this Frivo, which carries the app -->
+                    <a class="btn-ghost btn-sm app-offer-link" id="appOfferLink" href="/api/app/installer" download>
                       <svg class="icon-14" aria-hidden="true"><use href="#i-download"/></svg>Get the app
                     </a>
                     <button type="button" class="app-offer-close" id="appOfferClose" aria-label="Don't show this again" title="Don't show this again">

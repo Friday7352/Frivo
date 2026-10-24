@@ -242,6 +242,19 @@ def main():
 
     shutil.rmtree(workspace, ignore_errors=True)
 
+    # NEW (2.0.0): the Frivo app is part of Frivo and goes out inside
+    # FrivoSetup.exe, so it carries Frivo's version. Other PCs only take the
+    # app's update from Frivo when that version moves.
+    import json
+    for rel in ("desktop/package.json", "desktop/package-lock.json"):
+        with open(os.path.join(ROOT, rel), encoding="utf-8") as fh:
+            data = json.load(fh)
+        got = data.get("version")
+        check("%s has Frivo's version" % rel, got == version, got)
+        if rel.endswith("lock.json"):
+            got = data.get("packages", {}).get("", {}).get("version")
+            check("and so does its root package", got == version, got)
+
     print()
     if failures:
         print("%d failure(s): %s" % (len(failures), ", ".join(failures)))

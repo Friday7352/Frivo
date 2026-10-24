@@ -41,6 +41,7 @@ if (location.protocol === 'file:') {
       ipcRenderer.invoke('app:hotkey-ready').then((action) => { if (action) callback(String(action)); }).catch(() => {});
     },
     pauseHotkeys: (paused) => ipcRenderer.invoke('app:pause-hotkeys', Boolean(paused)),
+    setVrchat: (on) => ipcRenderer.invoke('app:set-vrchat', Boolean(on)),   // NEW (2.0.0)
     onState: (callback) => {
       ipcRenderer.on('app:state', (event, value) => callback(value));
     },

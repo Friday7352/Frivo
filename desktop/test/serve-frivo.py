@@ -31,6 +31,14 @@ for name in ("app.py", "voice_pack.py", "cleanup_rules.py", "builtin_ai.py"):
     shutil.copy(os.path.join(repo_app, name), os.path.join(work, name))
 shutil.copytree(os.path.join(repo_app, "static"), os.path.join(work, "static"))
 shutil.copytree(os.path.join(repo_app, "templates"), os.path.join(work, "templates"))
+# NEW (2.0.0): the copy of the app setup leaves with Frivo, which apps on
+# other PCs update from. FRIVO_TEST_APP_OFFER is the version it claims.
+if os.environ.get("FRIVO_TEST_APP_OFFER"):
+    os.makedirs(os.path.join(work, "app-installer"))
+    with open(os.path.join(work, "app-installer", "FrivoApp-Setup.exe"), "wb") as f:
+        f.write(b"not really the app " * 1000)
+    with open(os.path.join(work, "app-installer", "app.json"), "w") as f:
+        f.write('{"version": "%s"}' % os.environ["FRIVO_TEST_APP_OFFER"])
 
 
 def make_chain(folder, forged=False):

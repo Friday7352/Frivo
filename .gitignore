@@ -59,8 +59,8 @@ desktop/node_modules/
 desktop/dist/
 # The copy of Node.js Build-App.bat downloads to build the app.
 desktop/.tools/
-# NEW (2.0.0): written by Build.bat for the setup it builds
-installer/bundled-app.json
+# NEW (2.0.0): the app's installer, put there by Build.bat for FrivoSetup.exe to carry
+build/app/
 # The app's test certificates: public certificates only, no private keys
 # (desktop/test/fixtures/README.md). Kept, despite *.pem above.
 !desktop/test/fixtures/*.pem

@@ -456,17 +456,34 @@ Double-click `tests/check-windows-voices.bat` on a Windows PC. It runs the real 
 
 - `test-voice-remove.py`: removing a voice from your ElevenLabs voices. Refused while a profile uses it, refused for free voices and bad ids, its anchors go with it, and ElevenLabs refusing is reported.
 
+## test-server-page.py
+
+NEW (2.0.0). The Server page (`/server`): who's using Frivo (phone, PC or the
+Frivo app, which browser, and what it's doing from what it asks for; the
+Server page's own polling doesn't count), when a device stops being
+connected, Recent activity from `server.log` with levels, `/api/server/status`,
+Restart and Stop refused from another device (and Stop ending Frivo when
+there's no launcher), the launcher's events and links, and the page in a
+browser at desktop and phone width when Playwright is installed.
+
+## test-app-download.py
+
+NEW (2.0.0). Frivo handing out the app it was installed with, which apps on
+other PCs update from: `/api/app/latest` is 404 without a copy (or with a bad
+`app.json`), and otherwise gives the version, name, size and SHA-256 of
+exactly the file `/api/app/installer` sends.
+
 ## test-app-setup.ps1
 
-NEW (2.0.0). Setup's part in the Frivo app, on Linux or Windows: picking the
-app's release from GitHub's list, the checked download (a wrong file is
-refused and deleted), app mode in `launcher.json`, telling the app Frivo runs
+NEW (2.0.0). Setup's part in the Frivo app, on Linux or Windows: finding the
+app setup carries (in its payload, else the newest one `Build.bat` made),
+`Build.ps1` and `Frivo.iss` packing it in, the copy left with Frivo for other
+PCs, nothing fetched from GitHub, app mode in `launcher.json`, telling the app Frivo runs
 here (in a form the app can read), the app's install folder agreeing with
 `desktop/package.json`, and setup's and the uninstaller's rules from source:
-a silent update never downloads the app, "Just the app" isn't offered over
+"Just the app" isn't offered over
 an existing Frivo, and a problem with the app never undoes installing Frivo.
-Also the app built with this setup (Build.bat) being used from beside
-`FrivoSetup.exe` only when its fingerprint matches, and the "Frivo (at startup)" task (what it runs, no stored password, never
+Also the "Frivo (at startup)" task (what it runs, no stored password, never
 as administrator, no time limit, removed only when it's this install's), and
 the launcher's pairing code and offline QR code.
 
@@ -480,6 +497,15 @@ the mic test lighting its level, Check moving the Listening meter, both
 stopping when Settings closes, and Dictation and Listening leading there.
 
     python3 tests/test-audio-settings.py
+
+## test-tls-stall.py
+
+NEW (2.0.0). Silent connections can't freeze Frivo: with several open, requests
+are still answered at once, and a client that waits before its handshake is
+still served, over https. (cheroot did the handshake on its accepting thread,
+so one silent connection held up everyone for its 3-minute timeout.)
+
+    python3 tests/test-tls-stall.py
 
 ## test-setup-backup.py
 
@@ -503,7 +529,7 @@ launcher.
 
 NEW (2.0.0). The app has its own tests, run from `desktop\` after `npm ci`:
 
-    npm test             unit tests: addresses, GitHub releases and checked
+    npm test             unit tests: addresses, Frivo's GitHub releases, checked
                          downloads, certificate pinning, settings, and what
                          the app writes to Frivo's launcher.json
     npm run test:e2e     the app itself against a real Frivo (started from
@@ -513,7 +539,9 @@ NEW (2.0.0). The app has its own tests, run from `desktop\` after `npm ci`:
 
 The end-to-end test covers the first run, finding Frivo on the network,
 pairing with a code (a wrong one refused, the fingerprint as the fallback),
-shortcuts in Settings › App and a hotkey pressing Frivo's button, Frivo's page with the app bridge and Settings › App, losing and
+shortcuts in Settings › App and a hotkey pressing Frivo's button, the
+built-in FrivOSC with a stand-in VRChat (mute reported to Frivo, Frivo's
+text in the chatbox), Frivo's page with the app bridge and Settings › App, losing and
 getting back the connection, the trusted certificate remembered and a changed
 one caught, an address with nothing there, and "this PC" with a stand-in
 address. The Windows-only parts (the launcher's app mode, the registry, the

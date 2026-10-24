@@ -2277,6 +2277,10 @@ html[data-theme="light"] .rail-theme .rail-sun { display: block; }
   text-overflow: ellipsis;
 }
 .status-pop .service-status.is-down .service-status-detail { color: var(--alert); white-space: normal; }
+/* NEW (2.0.0): resting, not wrong (FrivOSC while VRChat is closed). */
+.status-pop .service-status.is-idle { color: var(--ink); background: transparent; }
+.status-pop .service-status.is-idle::before { background: var(--ink-faint); box-shadow: 0 0 0 3px var(--fill); }
+.status-pop .service-status.is-idle .service-status-detail { color: var(--ink-faint); white-space: normal; }
 .status-pop .service-status-link {
   grid-area: link;
   padding: 4px 9px;
@@ -2329,6 +2333,10 @@ html[data-theme="light"] .rail-theme .rail-sun { display: block; }
 .popover--osc .srow { padding: 9px 0; min-height: 0; }
 /* The chips sit above the message box, so their popovers open upwards. */
 .session-strip .popover { top: auto; bottom: calc(100% + 8px); }
+/* NEW (2.0.0): placed against the window when it wouldn't fit beside its
+   chip (fitPopover in app.js). */
+.popover.is-fitted { position: fixed; }
+.session-strip .popover.is-fitted { top: auto; }
 @keyframes pop-in {
   from { opacity: 0; transform: translateY(4px) scale(0.98); }
   to   { opacity: 1; transform: none; }
@@ -2952,6 +2960,9 @@ html[data-theme="light"] .rail-theme .rail-sun { display: block; }
 button.srow { border-radius: 0; }
 button.srow:hover { background: transparent; }
 button.srow:hover .srow-label { color: var(--accent); }
+/* NEW (2.0.0): a row that goes to another page (Settings › Other devices › Server page). */
+a.srow { text-decoration: none; cursor: pointer; box-sizing: border-box; }
+a.srow:hover .srow-label { color: var(--accent); }
 button.srow:active { background: transparent; }
 .srow-label { font-weight: 500; }
 .srow-sub { margin-top: 2px; }

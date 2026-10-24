@@ -66,22 +66,22 @@ isn't throttled in the background, so dictation keeps going behind a game.
 
 ## Installed by Frivo's setup
 
-NEW (Frivo 2.0.0). `FrivoSetup.exe` asks what the PC is for: Frivo in the
-app (the default), Frivo without the app, or just the app. For the app it
-looks up the newest `app-v…` release, downloads `FrivoApp-Setup-<version>.exe`,
-checks it against GitHub's SHA-256 (`Select-FrivoAppRelease` and
-`Save-FrivoDownload` in `installer\Frivo.Update.psm1`), and runs it silently
-as the person signed in at the PC (`Invoke-FrivoAsDesktopUser` in
-`installer\Frivo.Setup.psm1`). For Frivo in the app it then sets app mode in
+NEW (Frivo 2.0.0). The app comes inside `FrivoSetup.exe` (`Build.bat` puts
+it in `build\app\`, which `build\Frivo.iss` packs into setup's payload).
+Setup asks what the PC is for: Frivo in the app (the default), Frivo without
+the app, or just the app. For the app it runs the bundled
+`FrivoApp-Setup.exe` silently as the person signed in at the PC
+(`Install-FrivoApp` in `installer\Install.ps1`, through
+`Invoke-FrivoAsDesktopUser` in `installer\Frivo.Setup.psm1`), unless a newer
+app is already installed. For Frivo in the app it then sets app mode in
 `launcher.json` and tells the app Frivo runs here (`mode: "local"` in its
 `app-settings.json`), so the app opens straight to Frivo. The choice is kept
-in Frivo's Apps & features entry (`FrivoRole`) for updates and Repair; a
-silent in-app update never downloads the app. Uninstalling Frivo offers to
-remove the app too.
+in Frivo's Apps & features entry (`FrivoRole`) for updates and Repair.
+Uninstalling Frivo offers to remove the app too.
 
-**So publish an app release before (or with) a Frivo release that should
-install it**: setup can only download an app release that exists. Without
-one, setup still installs Frivo and says the app couldn't be installed.
+Setup also leaves a copy of the app's installer with Frivo
+(`app-installer\FrivoApp-Setup.exe` and `app.json`), including on silent
+updates. That's what Frivo hands out to other PCs.
 
 The folder, program and uninstaller names setup looks for come from
 `package.json` (`name`, `build.executableName`, `productName`);
@@ -100,34 +100,34 @@ Frivo and show up in the app with no app update.
 
 ## Updates
 
-The app's releases live in the Frivo repository too, tagged `app-v1.0.0` and
-so on, with `FrivoApp-Setup-1.0.0.exe` attached. Frivo's own updater ignores
-those tags (they aren't plain versions), and the app ignores Frivo's. The app
-checks 20 seconds after starting and every six hours, downloads a newer
-version, checks its SHA-256 against the one GitHub publishes, and installs it
-when you choose **Restart to update** (Settings › App or the tray menu).
-Frivo keeps running through an app update.
+The app updates from the Frivo it's connected to, not from GitHub. Frivo
+answers `/api/app/latest` (`{version, name, size, sha256}`, from the copy
+setup left in `app-installer\`) and `/api/app/installer` (the file). The app
+looks 8 seconds after it connects and every six hours; if Frivo carries a
+newer version, it downloads it, checks its SHA-256 as it arrives
+(`downloadChecked` in `src/github.js`), and installs it when you choose
+**Restart to update** (Settings › App or the tray menu). Frivo keeps running
+through an app update. On the PC Frivo runs on, setup has already updated the
+app, so there's nothing to fetch. In a browser, Frivo's page offers the same
+file as a download.
 
-## Building and publishing
+The app's version is Frivo's: keep `"version"` in `package.json` the same as
+the `VERSION` file (`tests/test-version.py` checks). An app whose version
+didn't change isn't offered to other PCs.
 
-1. Change `"version"` in `package.json` (the app's own version, separate from
-   Frivo's `VERSION` file).
-2. Run `Build.bat` in the repository root. It runs the app's tests, builds
-   the app and `FrivoSetup.exe`, and puts both in `dist\`. Nothing needs
-   installing first: the first time, it downloads a copy of Node.js (pinned
-   in `build\Build-App.ps1`, checked against nodejs.org's SHA-256) into
-   `desktop\.tools`, and uses only that.
-3. Make a GitHub release tagged `app-v<version>` (for example `app-v1.0.1`),
-   not a pre-release or a draft, and attach that file with its name unchanged.
-4. **Untick "Set as the latest release".** GitHub's "latest release" link is
-   what Frivo's README and download links point at, and it should stay on
-   Frivo's newest release, not the app's.
+## Building
+
+Run `Build.bat` in the repository root. It runs the app's tests, builds the
+app, and puts it inside `dist\FrivoSetup.exe`, the only file to publish.
+Nothing needs installing first: the first time, it downloads a copy of
+Node.js (pinned in `build\Build-App.ps1`, checked against nodejs.org's
+SHA-256) into `desktop\.tools`, and uses only that.
 
 Run it without installing: `npm ci` then `npm start` in `desktop\`. Run the
 unit tests with `npm test`.
 
-The installer is not code-signed, so Windows SmartScreen warns the first time
-someone runs it (*More info › Run anyway*), the same as `FrivoSetup.exe`.
+Setup is not code-signed, so Windows SmartScreen warns the first time
+someone runs it (*More info › Run anyway*).
 
 ## Files
 
@@ -138,7 +138,8 @@ someone runs it (*More info › Run anyway*), the same as `FrivoSetup.exe`.
 | `src/trust.js` | Trusting Frivo's certificate on another PC |
 | `src/pairing.js` | Pairing codes (the same as `app.py` and the launcher work out) |
 | `src/discovery.js` | Finding Frivo on the network |
-| `src/github.js` | Releases on GitHub, and downloads checked against their SHA-256 |
+| `src/osc.js` | FrivOSC, built in: VRChat's chatbox and microphone (ported from the FrivOSC repository's `frivosc_service.py`) |
+| `src/github.js` | Frivo's releases on GitHub, and downloads checked against their SHA-256 |
 | `src/address.js` | Turning what's typed into Frivo's address |
 | `src/settings.js` | The app's own settings, in `%APPDATA%\Frivo App` |
 | `src/preload.js` | `window.frivoApp` and `window.frivoShell` |

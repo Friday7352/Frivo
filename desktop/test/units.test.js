@@ -1,5 +1,5 @@
 'use strict';
-// The app's parts that don't need a window: addresses, GitHub releases,
+// The app's parts that don't need a window: addresses, Frivo's GitHub releases,
 // certificates, settings, and what it writes to Frivo's launcher.json.
 // Run with: npm test (from desktop\).
 
@@ -69,14 +69,6 @@ const RELEASES = [
   { tag_name: 'v1.6.1', assets: [asset('FrivoSetup.exe')] },
 ];
 
-test('releases: the app\'s newest checkable update, and only if newer', () => {
-  const found = gh.newerApp(RELEASES, '1.0.0', REPO);
-  assert.strictEqual(found.version, '1.2.0');
-  assert.strictEqual(found.sha256, 'b'.repeat(64));
-  assert.strictEqual(gh.newerApp(RELEASES, '1.2.0', REPO), null);
-  assert.strictEqual(gh.newerApp(RELEASES, '2.0.0', REPO), null);
-});
-
 test('releases: Frivo\'s setup ignores app releases, unchecked files and other repos', () => {
   const found = gh.latestFrivo(RELEASES, REPO);
   assert.strictEqual(found.version, '1.7.0');
@@ -114,6 +106,19 @@ test('downloads: kept only when the fingerprint matches', async () => {
 
   await assert.rejects(gh.downloadVerified(fakeFetch(body), { ...ok, url: 'https://evil.example/FrivoSetup.exe' }, dest2, REPO), /releases/);
   await assert.rejects(gh.downloadVerified(fakeFetch(body), { ...ok, sha256: null }, dest2, REPO), /fingerprint/);
+});
+
+// NEW (2.0.0): the app's own update, from the Frivo it's connected to.
+test('downloads: the app\'s update from Frivo is checked the same way', async () => {
+  const dir = tmp();
+  const body = Buffer.from('frivo app');
+  const sha = crypto.createHash('sha256').update(body).digest('hex');
+  const dest = path.join(dir, 'FrivoApp-Setup-2.0.1.exe');
+  await gh.downloadChecked(fakeFetch(body), 'https://192.168.1.5:5000/api/app/installer', sha.toUpperCase(), body.length, dest);
+  assert.strictEqual(fs.readFileSync(dest, 'utf8'), 'frivo app');
+  const dest2 = path.join(dir, 'Wrong.exe');
+  await assert.rejects(gh.downloadChecked(fakeFetch(body), 'https://x:5000/api/app/installer', 'e'.repeat(64), 0, dest2), /fingerprint/);
+  assert.ok(!fs.existsSync(dest2) && !fs.existsSync(`${dest2}.partial`));
 });
 
 test('certificates: fingerprints shown in short groups', () => {
@@ -267,4 +272,49 @@ test('pairing only trusts a real self-signed authority', () => {
   const der = Buffer.from(fx('frivo-ca.pem').replace(/-----[^-]+-----/g, '').replace(/\s+/g, ''), 'base64');
   der[der.length - 5] ^= 0xff;
   assert.equal(trust.isSelfSignedAuthority(trust.derToPem(der)), false);
+});
+
+// NEW (2.0.0): FrivOSC built in (src/osc.js), ported from frivosc_service.py.
+test('osc: messages are encoded the way VRChat (and FrivOSC) expect', () => {
+  const { oscMessage, oscParseMessage } = require('../src/osc');
+  // The exact bytes frivosc_service.py makes for the same message.
+  assert.equal(oscMessage('/chatbox/input', 'hi', true, false).toString('hex'),
+    '2f63686174626f782f696e70757400002c7354460000000068690000');
+  const [address, args] = oscParseMessage(oscMessage('/avatar/parameters/MuteSelf', true));
+  assert.equal(address, '/avatar/parameters/MuteSelf');
+  assert.deepEqual(args, [true]);
+  assert.deepEqual(oscParseMessage(oscMessage('/x', 7, 1.5, 'word')), ['/x', [7, 1.5, 'word']]);
+  assert.deepEqual(oscParseMessage(Buffer.from('not osc at all')), ['', []]);
+  assert.deepEqual(oscParseMessage(Buffer.alloc(0)), ['', []]);
+});
+
+test('osc: chatbox pages match FrivOSC exactly', () => {
+  const { chatboxPages, CHATBOX_LIMIT } = require('../src/osc');
+  // Made by chatbox_pages() in frivosc_service.py.
+  const cases = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', 'chatbox-pages.json'), 'utf8'));
+  for (const [text, expected] of cases) {
+    const got = chatboxPages(text);
+    assert.deepEqual(got, expected, `pages for ${JSON.stringify(text.slice(0, 40))}`);
+    for (const page of got) assert.ok(page.length <= CHATBOX_LIMIT, page);
+  }
+});
+
+test('osc: the bridge only talks to Frivo while VRChat runs here', async () => {
+  const { FrivOSC } = require('../src/osc');
+  const calls = [];
+  let vrchat = false;
+  const bridge = new FrivOSC({
+    listenPort: 39101, sendPort: 39100, version: 't', hostname: 'h',
+    request: async (method, p) => { calls.push(p); return {}; },
+    vrchatRunning: async () => vrchat,
+    standaloneRunning: () => false,
+  });
+  bridge.setEnabled(true);
+  bridge.setConnection('https://localhost:5000');
+  await new Promise((r) => setTimeout(r, 1300));
+  assert.equal(calls.length, 0, 'no VRChat, no calls');
+  assert.match(bridge.status().text, /VRChat runs/);
+  bridge.setEnabled(false);
+  bridge.close();
+  vrchat = true;
 });

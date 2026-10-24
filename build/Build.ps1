@@ -1,16 +1,11 @@
 ﻿<#
     Frivo — the one build
     ------------------------------------------------------------------
-    NEW (2.0.0): run through Build.bat at the repo root. Makes everything,
-    into dist\:
-
-      dist\FrivoSetup.exe                 the installer. The one people run.
-      dist\FrivoApp-Setup-<version>.exe   the Frivo app, which FrivoSetup.exe
-                                          installs. Not run by hand: it's
-                                          uploaded to GitHub for setup to
-                                          download, and setup uses it from
-                                          here when you test a build on
-                                          this PC.
+    NEW (2.0.0): run through Build.bat at the repo root. Makes
+    dist\FrivoSetup.exe, the one installer, with the Frivo app inside it.
+    That's the one file to publish: setup installs the app from inside
+    itself, and the app updates itself from the Frivo it's connected to,
+    which keeps the app's installer beside it.
 
     The app is only rebuilt when something in desktop\ changed since the
     last build (it takes a few minutes); -RebuildApp forces it. Its steps
@@ -74,33 +69,33 @@ if ($RebuildApp -or -not (Test-Path -LiteralPath $appBuilt -PathType Leaf) -or $
     Write-Host ('=== The Frivo app {0}: unchanged since its last build, so that one is used ===' -f $appVersion)
 }
 
-# ---- 2. FrivoSetup.exe ----
-# It carries the app file's name and SHA-256, so it installs that exact
-# file when it's beside it, and never any other.
-$bundled = [ordered] @{ name = $appName; sha256 = (Get-FileHash -LiteralPath $appBuilt -Algorithm SHA256).Hash; version = $appVersion }
-$bundledPath = Join-Path $root 'installer\bundled-app.json'
-[System.IO.File]::WriteAllText($bundledPath, ($bundled | ConvertTo-Json), (New-Object System.Text.UTF8Encoding($false)))
+# ---- 2. FrivoSetup.exe, with the app inside ----
+# build\app\ is what Frivo.iss packs into the setup (installer\app\ in its
+# payload): the app's installer under one fixed name, and its version.
+$payload = Join-Path $here 'app'
+if (Test-Path -LiteralPath $payload) { Remove-Item -LiteralPath $payload -Recurse -Force }
+New-Item -ItemType Directory -Path $payload -Force | Out-Null
+Copy-Item -LiteralPath $appBuilt -Destination (Join-Path $payload 'FrivoApp-Setup.exe') -Force
+[System.IO.File]::WriteAllText((Join-Path $payload 'app.json'), (@{ version = $appVersion } | ConvertTo-Json),
+    (New-Object System.Text.UTF8Encoding($false)))
+# Left over from builds that put the app beside setup instead.
+foreach ($old in @((Join-Path $root 'installer\bundled-app.json'))) {
+    if (Test-Path -LiteralPath $old) { Remove-Item -LiteralPath $old -Force }
+}
+if (Test-Path -LiteralPath $dist) {
+    Get-ChildItem -LiteralPath $dist -Filter 'FrivoApp-Setup-*.exe' -File | Remove-Item -Force
+}
+
 Write-Host ''
 Write-Host '=== FrivoSetup.exe ==='
 & (Join-Path $here 'Build-Installer.ps1')
 
-# ---- 3. the app beside it ----
-New-Item -ItemType Directory -Path $dist -Force | Out-Null
-Get-ChildItem -LiteralPath $dist -Filter 'FrivoApp-Setup-*.exe' -File |
-    Where-Object { $_.Name -ne $appName } | Remove-Item -Force
-Copy-Item -LiteralPath $appBuilt -Destination (Join-Path $dist $appName) -Force
-
 $frivoVersion = (Get-Content -LiteralPath (Join-Path $root 'VERSION') -Raw).Trim()
+$size = (Get-Item -LiteralPath (Join-Path $dist 'FrivoSetup.exe')).Length / 1MB
 Write-Host ''
 Write-Host '=================================================================='
-Write-Host ' Done. In dist\:'
+Write-Host (' Done: dist\FrivoSetup.exe ({0:N0} MB), with the Frivo app {1} inside.' -f $size, $appVersion)
 Write-Host ''
-Write-Host '   FrivoSetup.exe          Run this. It installs Frivo, the app, or both.'
-Write-Host ('   {0}  Leave it beside FrivoSetup.exe: setup' -f $appName)
-Write-Host '                           installs the app from it on this PC.'
-Write-Host ''
-Write-Host ' To publish:'
-Write-Host ('   1. GitHub release app-v{0} with {1}' -f $appVersion, $appName)
-Write-Host '      ("Set as the latest release" unticked). Only when the app changed.'
-Write-Host ('   2. GitHub release v{0} with FrivoSetup.exe.' -f $frivoVersion)
+Write-Host ' Run it to install or update Frivo, the app, or both.'
+Write-Host (' To publish: a GitHub release v{0} with FrivoSetup.exe. That''s all.' -f $frivoVersion)
 Write-Host '=================================================================='

@@ -1,7 +1,7 @@
 {
   "name": "frivo-app",
   "productName": "Frivo",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "Frivo in its own window: runs Frivo on this PC, or connects to Frivo on another PC on your network.",
   "author": "Friday",
   "license": "MIT",

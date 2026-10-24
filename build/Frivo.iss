@@ -58,6 +58,8 @@ MinVersion=10.0
 ; reply audio, anchors, tag taste, the voice library cache, the built-in AI and certificates.
 Source: "..\app\*";       DestDir: "{tmp}\FrivoSetupPayload\app";       Flags: ignoreversion recursesubdirs createallsubdirs deleteafterinstall; Excludes: "config.json,profiles.json,usage.json,launcher.json,*.log,__pycache__\*,*.pyc,\voices\*,\audio_cache\*,\saved\*,\anchors\*,\voice_library\*,\builtin_ai\*,voice_anchors.json,tag_taste.json,*.pem,ca.crt"
 Source: "..\installer\*"; DestDir: "{tmp}\FrivoSetupPayload\installer"; Flags: ignoreversion recursesubdirs createallsubdirs deleteafterinstall
+; NEW (2.0.0): the Frivo app, inside the setup (build\app\, made by Build.bat)
+Source: "app\*";         DestDir: "{tmp}\FrivoSetupPayload\installer\app"; Flags: ignoreversion deleteafterinstall skipifsourcedoesntexist
 Source: "FrivoHost.exe";   DestDir: "{tmp}\FrivoSetupPayload\installer"; Flags: ignoreversion deleteafterinstall
 Source: "..\README.md";   DestDir: "{tmp}\FrivoSetupPayload";           Flags: ignoreversion deleteafterinstall
 ; Install.ps1 reads this for the Apps & features entry and the welcome page.
@@ -106,14 +108,6 @@ end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
-  { NEW (2.0.0): the folder FrivoSetup.exe was run from, for Install.ps1.
-    A Frivo app installer beside it (dist\ after Build.bat) is installed
-    from there instead of being downloaded from GitHub. }
-  if CurStep = ssInstall then
-  begin
-    ForceDirectories(ExpandConstant('{tmp}\FrivoSetupPayload'));
-    SaveStringToFile(ExpandConstant('{tmp}\FrivoSetupPayload\setup-folder.txt'), ExpandConstant('{src}'), False);
-  end;
   if (CurStep = ssPostInstall) and WizardSilent then
     RunSilentUpdate;
 end;

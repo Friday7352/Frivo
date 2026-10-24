@@ -26,7 +26,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 function serve(port, https) {
   const mode = https === true ? 'https' : (https || 'http');
   const p = spawn(PYTHON, [path.join(__dirname, 'serve-frivo.py'), String(port), mode],
-    { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, FRIVO_TEST_CERTS: CERTS } });
+    { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, FRIVO_TEST_CERTS: CERTS, FRIVO_TEST_APP_OFFER: '99.0.0' } });
   children.push(p);
   return p;
 }
@@ -45,7 +45,7 @@ const shot = (win, name) => win.screenshot({ path: path.join(SHOTS, name) });
   check('test Frivo is up', await waitUp('http://127.0.0.1:5095/static/icon.png') || await waitUpTls());
 
   // ---- first run
-  let { app, win } = await launch(userData, { FRIVO_APP_DISCOVER_HOSTS: '127.0.0.1:5095,127.0.0.1:5097' });
+  let { app, win } = await launch(userData, { FRIVO_APP_DISCOVER_HOSTS: '127.0.0.1:5095,127.0.0.1:5097', FRIVO_APP_VRCHAT: 'always', FRIVO_APP_OSC_PORTS: '9111,9110', FRIVO_APP_UPDATE_TEST: '1' });
   await win.waitForSelector('text=Where does Frivo run?', { timeout: 15000 });
   await win.setViewportSize({ width: 900, height: 760 }).catch(() => {});
   check('first run asks where Frivo runs', true);
@@ -111,6 +111,16 @@ const shot = (win, name) => win.screenshot({ path: path.join(SHOTS, name) });
   await win.evaluate(() => window.frivoApp.setCloseAction('tray'));
   await shot(win, 'app_frivo.png');
 
+  // NEW (2.0.0): the app's update comes from the Frivo it's connected to
+  let upd = null;
+  for (let i = 0; i < 60; i++) {
+    upd = await app.evaluate(() => global.__frivoApp.state.update);
+    if (/ready|error/.test(upd.state)) break;
+    await sleep(500);
+  }
+  check("the app's update is fetched from Frivo", upd.state === 'ready' && upd.version === '99.0.0', upd);
+  check('and kept, checked, under its version', upd.file && fs.existsSync(upd.file) && /FrivoApp-Setup-99\.0\.0\.exe$/.test(upd.file), upd.file);
+
   // Settings › App: only in the app
   await win.click('#settingsToggle');
   check('Settings has an App section in the app', await win.isVisible('#appNavBtn'));
@@ -162,6 +172,35 @@ const shot = (win, name) => win.screenshot({ path: path.join(SHOTS, name) });
   const hk3 = await win.evaluate(() => window.frivoApp.getState());
   check('closing Settings stops waiting for keys, and typing works', typedOk && hk3.hotkeys.dictate === 'CommandOrControl+Alt+D', { typedOk, hk: hk3.hotkeys });
   await win.evaluate(() => { const m = document.getElementById('messageRich'); m.textContent = ''; m.dispatchEvent(new Event('input', { bubbles: true })); });
+  // NEW (2.0.0): FrivOSC built in. A stand-in VRChat on ports 9111 (to the
+  // app) and 9110 (from the app); the app is told VRChat is running.
+  {
+    const dgram = require('dgram');
+    const { oscMessage, oscParseMessage } = require('../src/osc');
+    const vrchat = dgram.createSocket('udp4');
+    const heard = [];
+    vrchat.on('message', (m) => heard.push(oscParseMessage(m)));
+    await new Promise((r) => vrchat.bind(9110, '127.0.0.1', r));
+    await win.evaluate(() => fetch('/api/frivosc/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ osc_enabled: true }) }));
+    const sendMute = (on) => new Promise((r) => vrchat.send(oscMessage('/avatar/parameters/MuteSelf', on), 9111, '127.0.0.1', r));
+    let status = null;
+    for (let i = 0; i < 20; i++) {
+      await sendMute(true);
+      await sleep(500);
+      status = await win.evaluate(() => fetch('/api/frivosc/status').then((r) => r.json()));
+      if (status.connected && status.muted === true) break;
+    }
+    check('the app connects VRChat to Frivo (built-in FrivOSC)', status && status.connected && /Frivo app/.test(status.version), status);
+    check('and reports the microphone', status && status.muted === true, status);
+    const sent = await win.evaluate(() => fetch('/api/osc/chatbox', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: 'hello from frivo', speaking: false }) }).then((r) => r.json()));
+    for (let i = 0; i < 20 && !heard.some(([a, args]) => a === '/chatbox/input'); i++) await sleep(250);
+    const box = heard.find(([a]) => a === '/chatbox/input');
+    check("and puts Frivo's text in VRChat's chatbox", sent.ok && box && box[1][0] === 'hello from frivo', { sent, heard });
+    const st = await win.evaluate(() => window.frivoApp.getState());
+    check('Settings › App says so', st.vrchat && st.vrchat.active && /Connected to VRChat/.test(st.vrchat.text), st.vrchat);
+    vrchat.close();
+  }
+
   // a hotkey pressed anywhere presses Frivo's own button
   await win.evaluate(() => { window.__sent = 0; document.getElementById('sendBtn').addEventListener('click', () => { window.__sent += 1; }); });
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.send('app:hotkey', 'send'));

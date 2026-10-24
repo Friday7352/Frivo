@@ -619,123 +619,144 @@ function Save-InstallSettings {
     if ($Role) { Set-ItemProperty -Path $RegKey -Name 'FrivoRole' -Value $Role -Type String }
 }
 
-function Find-FrivoLocalAppInstaller {
+function Get-FrivoStandaloneOSC {
     <#
-        NEW (2.0.0): the Frivo app installer built together with this setup
-        (Build.bat): beside FrivoSetup.exe, as Build.bat leaves it in dist\,
-        or, running from the source tree, in dist\ or desktop\dist\.
-        bundled-app.json, which Build.bat writes into the setup, names it
-        and gives its SHA-256, and only a file that matches is used: any
-        other FrivoApp-Setup file that happens to be in the same folder (a
-        Downloads folder, say) is never run. $null when there isn't one.
+        NEW (2.0.0): the separate FrivOSC, if it's installed here: its
+        uninstaller script, or $null. FrivOSC is built into the Frivo app
+        now, so with the app here it's no longer needed.
     #>
-    $expected = $null
     try {
-        $expected = Get-Content -LiteralPath (Join-Path $ScriptDir 'bundled-app.json') -Raw -ErrorAction Stop | ConvertFrom-Json
-    } catch { return $null }
-    if (-not $expected -or -not $expected.name -or [string] $expected.sha256 -notmatch '^[0-9a-fA-F]{64}$') { return $null }
-    $m = [regex]::Match([string] $expected.name, '^FrivoApp-Setup-(\d+\.\d+\.\d+)\.exe$')
-    if (-not $m.Success) { return $null }
-    $folders = @()
-    $marker = Join-Path $PackageDir 'setup-folder.txt'
-    if (Test-Path -LiteralPath $marker -PathType Leaf) {
-        try { $folders += ([System.IO.File]::ReadAllText($marker)).Trim() } catch { }
-    }
-    $folders += (Join-Path $PackageDir 'dist')
-    $folders += (Join-Path $PackageDir 'desktop\dist')
-    foreach ($folder in $folders) {
-        if (-not $folder) { continue }
-        $path = Join-Path $folder ([string] $expected.name)
-        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { continue }
-        $actual = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash
-        if (-not $actual.Equals([string] $expected.sha256, [System.StringComparison]::OrdinalIgnoreCase)) {
-            Write-SetupLog ('app: {0} is not the app built with this setup; ignored' -f $path)
-            continue
-        }
-        return [pscustomobject] @{ Path = $path; Version = [version] $m.Groups[1].Value; Name = [string] $expected.name }
-    }
+        $key = Get-ItemProperty -LiteralPath 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\FrivOSC' -ErrorAction Stop
+        $folder = [string] $key.InstallLocation
+        if (-not $folder) { return $null }
+        $script = Join-Path $folder 'FrivOSC-Uninstall.ps1'
+        if (Test-Path -LiteralPath $script -PathType Leaf) { return $script }
+    } catch { }
     return $null
+}
+
+function Remove-FrivoStandaloneOSC {
+    <#
+        NEW (2.0.0): uninstalls the separate FrivOSC (its own uninstaller,
+        silently), once the app that replaces it is installed. Never fatal.
+    #>
+    param([scriptblock] $Log)
+    $script = Get-FrivoStandaloneOSC
+    if (-not $script) { return }
+    & $Log 'Removing the separate FrivOSC (it''s built into the Frivo app now)...'
+    try {
+        # The folder is passed in: FrivOSC 1.2.0's uninstaller can't work it
+        # out under Windows PowerShell and stops before doing anything.
+        $folder = Split-Path -Parent $script
+        $p = Start-Process -FilePath 'powershell.exe' -WindowStyle Hidden -PassThru -Wait -ArgumentList @(
+            '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"{0}"' -f $script), '-Silent',
+            '-InstallPath', ('"{0}"' -f $folder))
+        if (Get-FrivoStandaloneOSC) {
+            & $Log 'The separate FrivOSC could not be removed. Remove it from Apps & features; the app stands aside while it runs.'
+            Write-SetupLog ('FrivOSC uninstall exit code {0}' -f $p.ExitCode)
+        } else {
+            Write-SetupLog 'FrivOSC removed'
+        }
+    } catch {
+        Write-SetupLog ('FrivOSC uninstall failed: ' + $_.Exception.Message)
+        & $Log 'The separate FrivOSC could not be removed. Remove it from Apps & features.'
+    }
+}
+
+function Get-FrivoBundledApp {
+    <#
+        NEW (2.0.0): the Frivo app that comes inside this setup
+        (installer\app\FrivoApp-Setup.exe and app.json, put there by
+        Build.bat). Running from the source tree without a build, the newest
+        desktop\dist\FrivoApp-Setup-<version>.exe instead. $null when there
+        isn't one.
+    #>
+    $folder = Join-Path $ScriptDir 'app'
+    $exe = Join-Path $folder 'FrivoApp-Setup.exe'
+    if (Test-Path -LiteralPath $exe -PathType Leaf) {
+        try {
+            $meta = Get-Content -LiteralPath (Join-Path $folder 'app.json') -Raw -ErrorAction Stop | ConvertFrom-Json
+            if ([string] $meta.version -match '^\d+\.\d+\.\d+$') {
+                return [pscustomobject] @{ Path = $exe; Version = [version] [string] $meta.version; Folder = $folder }
+            }
+        } catch { }
+    }
+    $best = $null
+    $dist = Join-Path $PackageDir 'desktop\dist'
+    if (Test-Path -LiteralPath $dist -PathType Container) {
+        foreach ($file in @(Get-ChildItem -LiteralPath $dist -Filter 'FrivoApp-Setup-*.exe' -File -ErrorAction SilentlyContinue)) {
+            $m = [regex]::Match($file.Name, '^FrivoApp-Setup-(\d+\.\d+\.\d+)\.exe$')
+            if (-not $m.Success) { continue }
+            $version = [version] $m.Groups[1].Value
+            if (-not $best -or $version -gt $best.Version) {
+                $best = [pscustomobject] @{ Path = $file.FullName; Version = $version; Folder = '' }
+            }
+        }
+    }
+    return $best
+}
+
+function Copy-FrivoAppInstaller {
+    <#
+        NEW (2.0.0): keeps the app's installer beside Frivo (app-installer\
+        in the install folder), on every install and update. Frivo hands it
+        to the app connected to it, which updates itself from it, and to a
+        browser on another PC (Settings > Updates). That's how the app stays
+        up to date with nothing but FrivoSetup.exe on GitHub.
+    #>
+    param([string] $Target, [scriptblock] $Log)
+    $bundled = Get-FrivoBundledApp
+    if (-not $bundled) { return }
+    try {
+        $dest = Join-Path $Target 'app-installer'
+        New-Item -ItemType Directory -Path $dest -Force | Out-Null
+        Copy-Item -LiteralPath $bundled.Path -Destination (Join-Path $dest 'FrivoApp-Setup.exe') -Force
+        $json = (@{ version = $bundled.Version.ToString(3) } | ConvertTo-Json)
+        [System.IO.File]::WriteAllText((Join-Path $dest 'app.json'), $json, (New-Object System.Text.UTF8Encoding($false)))
+    } catch {
+        Write-SetupLog ('app installer copy failed: ' + $_.Exception.Message)
+    }
 }
 
 function Install-FrivoApp {
     <#
-        NEW (2.0.0): the Frivo app (desktop\ in the repo). Downloads its
-        installer from Frivo's releases on GitHub, checks it against the
-        SHA-256 GitHub publishes, and runs it as the person signed in at this
-        PC: it's a per-person app, in their own AppData, and runs as them.
-        Skipped when it's already installed (it keeps itself up to date).
-        Returns the app's .exe; throws with a reason when it can't.
+        NEW (2.0.0): the Frivo app (desktop\ in the repo), from inside this
+        setup, run as the person signed in at this PC: it's a per-person
+        app, in their own AppData, and runs as them. Skipped when a newer
+        one is already installed. Returns the app's .exe; throws with a
+        reason when it can't.
+
+        CHANGED (2.0.0): it's inside FrivoSetup.exe now, not downloaded from
+        GitHub, so there's one file to publish and nothing to download here.
     #>
     param([scriptblock] $Log, [scriptblock] $OnProgress)
 
     $person = Get-FrivoDesktopUser
     $paths = Get-FrivoAppPaths -LocalAppData $person.LocalAppData
-    $local = Find-FrivoLocalAppInstaller   # NEW (2.0.0)
+    $bundled = Get-FrivoBundledApp
     if (Test-Path -LiteralPath $paths.Exe -PathType Leaf) {
-        # CHANGED (2.0.0): unless this setup came with the same or a newer
-        # one (the same version too: a build of app changes you're testing).
+        # Compared as three parts: Windows may report the exe's version as
+        # 1.0.0.0, and [version] 1.0.0.0 counts as newer than 1.0.0.
         $installed = $null
-        try { $installed = [version] ((Get-Item -LiteralPath $paths.Exe).VersionInfo.ProductVersion -replace '[^\d.].*$', '') } catch { }
-        if (-not $local -or ($installed -and $installed -gt $local.Version)) {
-            & $Log 'The Frivo app is already installed. It keeps itself up to date.'
+        try {
+            $v = [version] ((Get-Item -LiteralPath $paths.Exe).VersionInfo.ProductVersion -replace '[^\d.].*$', '')
+            $installed = [version]::new($v.Major, $v.Minor, [Math]::Max($v.Build, 0))
+        } catch { }
+        if (-not $bundled -or ($installed -and $installed -gt $bundled.Version)) {
+            & $Log 'The Frivo app is already installed.'
             return $paths.Exe
         }
-        & $Log ('Updating the Frivo app to {0}, which came with this setup...' -f $local.Version)
     }
-
-    # NEW (2.0.0): the app built with this setup, without going to GitHub.
-    if ($local) {
-        $folder = Join-Path $person.LocalAppData 'Temp\FrivoSetup'
-        New-Item -ItemType Directory -Path $folder -Force | Out-Null
-        $file = Join-Path $folder $local.Name
-        Copy-Item -LiteralPath $local.Path -Destination $file -Force
-        & $Log ('Installing the Frivo app {0} from {1}...' -f $local.Version, (Split-Path -Parent $local.Path))
-        Write-SetupLog ('app: installing {0}' -f $local.Path)
-        try {
-            $finished = Invoke-FrivoAsDesktopUser -User $person.User -FilePath $file -Arguments '/S' -Wait -TimeoutSeconds 300
-        } finally {
-            Remove-Item -LiteralPath $file -Force -ErrorAction SilentlyContinue
-        }
-        if (-not (Test-Path -LiteralPath $paths.Exe -PathType Leaf)) {
-            if (-not $finished) { throw 'The app''s installer did not finish in time.' }
-            throw ('The app''s installer ran, but the app is not where it should be: {0}' -f $paths.Exe)
-        }
-        & $Log ('The Frivo app {0} is installed.' -f $local.Version)
-        Write-SetupLog ('app installed at {0} for {1}' -f $paths.Exe, $person.User)
-        return $paths.Exe
-    }
-
-    $policy = Get-FrivoUpdatePolicy -Path (Join-Path $ScriptDir 'update-policy.json')
-    & $Log 'Looking up the Frivo app on GitHub...'
-    $previous = $ProgressPreference
-    $ProgressPreference = 'SilentlyContinue'
-    $release = $null
-    try {
-        [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
-        # Frivo's own releases share the list, so look a few pages down.
-        for ($page = 1; $page -le 5 -and -not $release; $page++) {
-            $response = Invoke-WebRequest -Uri (Get-FrivoAppReleasesApi -Policy $policy -Page $page) -UseBasicParsing `
-                -TimeoutSec 30 -UserAgent ('Frivo-Setup/' + $AppVersion)
-            $json = [string] $response.Content
-            $release = Select-FrivoAppRelease -Json $json -Policy $policy
-            if ($json.Trim() -eq '[]') { break }
-        }
-    } catch {
-        throw ('GitHub could not be reached: ' + $_.Exception.Message)
-    } finally {
-        $ProgressPreference = $previous
-    }
-    if (-not $release) { throw 'No release of the Frivo app was found on GitHub. To install it from this PC, run Build.bat and run dist\FrivoSetup.exe with the app file beside it.' }
+    if (-not $bundled) { throw 'This setup doesn''t include the Frivo app. Build it with Build.bat.' }
 
     # In the person's own temp folder: the installer runs as them, and
     # setup's own temp folder may not be theirs to read.
     $folder = Join-Path $person.LocalAppData 'Temp\FrivoSetup'
     New-Item -ItemType Directory -Path $folder -Force | Out-Null
-    $file = Join-Path $folder $release.Name
-    & $Log ('Downloading the Frivo app {0} ({1:N0} MB)...' -f $release.VersionText, [Math]::Max(1, $release.Size / 1MB))
-    Save-FrivoDownload -Url $release.DownloadUrl -Policy $policy -Target $file -Size $release.Size `
-        -Sha256 $release.Sha256 -UserAgent ('Frivo-Setup/' + $AppVersion) -OnProgress $OnProgress | Out-Null
-    & $Log 'Checked against the fingerprint GitHub publishes. Installing the app...'
+    $file = Join-Path $folder ('FrivoApp-Setup-{0}.exe' -f $bundled.Version.ToString(3))
+    Copy-Item -LiteralPath $bundled.Path -Destination $file -Force
+    & $Log ('Installing the Frivo app {0}...' -f $bundled.Version.ToString(3))
+    if ($OnProgress) { & $OnProgress 1 2 }
     try {
         $finished = Invoke-FrivoAsDesktopUser -User $person.User -FilePath $file -Arguments '/S' -Wait -TimeoutSeconds 300
     } finally {
@@ -745,7 +766,8 @@ function Install-FrivoApp {
         if (-not $finished) { throw 'The app''s installer did not finish in time.' }
         throw ('The app''s installer ran, but the app is not where it should be: {0}' -f $paths.Exe)
     }
-    & $Log ('The Frivo app {0} is installed.' -f $release.VersionText)
+    if ($OnProgress) { & $OnProgress 2 2 }
+    & $Log ('The Frivo app {0} is installed.' -f $bundled.Version.ToString(3))
     Write-SetupLog ('app installed at {0} for {1}' -f $paths.Exe, $person.User)
     return $paths.Exe
 }
@@ -1015,6 +1037,7 @@ function Install-Frivo {
         Write-FrivoInstallMarker -Path $Target
     }
     Copy-AppFiles -Target $Target -Log $Log
+    Copy-FrivoAppInstaller -Target $Target -Log $Log   # NEW (2.0.0)
     & $Progress 30
 
     if ($Action -eq 'Update') {
@@ -1146,6 +1169,7 @@ function Install-Frivo {
                 # the app opens straight to Frivo on this PC.
                 Set-FrivoLauncherAppPath -DataDir $script:SetupDataDir -AppPath $script:appExe
                 Set-FrivoAppMode -RoamingAppData (Get-FrivoDesktopUser).RoamingAppData -Mode 'local'
+                if ($script:removeStandaloneOSC) { Remove-FrivoStandaloneOSC -Log $Log }   # NEW (2.0.0)
             }
         } catch {
             $script:appProblem = $_.Exception.Message
@@ -1367,8 +1391,15 @@ $appOnlyNote = New-FrivoLabel -Theme $Theme -Parent $cardRole `
     -Text 'Connects to Frivo running on another PC on your network. Nothing else is installed here.' `
     -X 38 -Y 202 -W 516 -H 34 -Font $Theme.FontSmall -Color $Theme.Dim
 $roleNote = New-FrivoLabel -Theme $Theme -Parent $pageRole `
-    -Text 'The app (about 100 MB) is downloaded from Frivo''s releases on GitHub and checked before it''s installed. After that it keeps itself up to date.' `
+    -Text 'The app comes with this setup. After that it updates along with Frivo.' `
     -X 30 -Y 298 -W 560 -H 50 -Font $Theme.FontSmall -Color $Theme.Dim
+# NEW (2.0.0): FrivOSC is built into the app. With the separate one here,
+# offer to remove it (the app stands aside while it runs, so both would
+# otherwise sit there doing nothing).
+$chkRemoveOSC = New-FrivoCheck -Theme $Theme -Parent $pageRole `
+    -Text 'Remove the separate FrivOSC: it''s built into the Frivo app now' -X 30 -Y 298 -W 560 -Checked $true
+$chkRemoveOSC.Visible = $false
+$script:removeStandaloneOSC = $false
 
 # ---------- location ----------
 $pageLocation = New-Page
@@ -1512,12 +1543,22 @@ try {
 } catch { }
 if ($existing.State -eq 'Installed' -and $existingInstallSettings -and $existingInstallSettings.Role -eq 'Server' -and -not $script:appAlreadyHere) {
     $roleNote.ForeColor = $Theme.Ink
-    $roleNote.Text = 'Frivo is installed here without the app. To add it, choose the first option: nothing needs uninstalling, and your settings, profiles and saved replies stay. The app is downloaded from GitHub and checked first.'
+    $roleNote.Text = 'Frivo is installed here without the app. To add it, choose the first option: nothing needs uninstalling, and your settings, profiles and saved replies stay. The app comes with this setup.'
 } elseif ($script:appAlreadyHere -and $existing.State -eq 'None') {
     $roleNote.ForeColor = $Theme.Ink
     $roleNote.Text = 'The Frivo app is already installed here. Choose the first option to add Frivo itself: the app is kept and opens straight to it.'
 } elseif ($script:appAlreadyHere) {
-    $roleNote.Text = 'The Frivo app is already installed here, so nothing is downloaded.'
+    $roleNote.Text = 'The Frivo app is already installed here. Setup updates it if this one is newer.'
+}
+
+# NEW (2.0.0): FrivOSC, now built into the app.
+if (Get-FrivoStandaloneOSC) {
+    $chkRemoveOSC.Visible = $true
+    $roleNote.Location = New-Object System.Drawing.Point(30, 324)
+    $roleNote.Height = 34
+    $syncRemoveOSC = { $chkRemoveOSC.Enabled = -not $radioServer.Checked }
+    $radioServer.Add_CheckedChanged($syncRemoveOSC)
+    & $syncRemoveOSC
 }
 
 # NEW (2.0.0): the backup box, only with something to back up. Ticked for
@@ -1615,6 +1656,9 @@ $btnNext.Add_Click({
     }
 
     # NEW (2.0.0): just the app: no destination or options to ask about.
+    if ($current.Panel -eq $pageRole) {   # NEW (2.0.0)
+        $script:removeStandaloneOSC = $chkRemoveOSC.Visible -and $chkRemoveOSC.Enabled -and $chkRemoveOSC.Checked
+    }
     if ($current.Panel -eq $pageRole -and $radioApp.Checked) {
         $script:appOnly = $true
         $script:index = $idxInstalling
@@ -1628,10 +1672,11 @@ $btnNext.Add_Click({
                 if ($total -gt 0) { $bar.SetValue([int] [Math]::Min(95, 2 + 93 * $done / $total)) }
                 [System.Windows.Forms.Application]::DoEvents()
             }
+            if ($script:removeStandaloneOSC) { Remove-FrivoStandaloneOSC -Log { param($m) Write-Log $m } }   # NEW (2.0.0)
             $bar.SetValue(100)
             Write-Log 'Done.'
             $chkLaunch.Text = 'Open the Frivo app now'
-            $doneAppNote.Text = 'The Frivo app is installed, with shortcuts named Frivo. Open it and type the address of the PC Frivo runs on (Frivo''s launcher there shows it). It keeps itself up to date.'
+            $doneAppNote.Text = 'The Frivo app is installed, with shortcuts named Frivo. Open it, pick the PC Frivo runs on, and type the pairing code its launcher shows. It also connects VRChat to Frivo while VRChat runs here, and keeps itself up to date.'
             $doneAppNote.Visible = $true
             $script:launcherPath = $script:appExe
             $script:index = $idxDone

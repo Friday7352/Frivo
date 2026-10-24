@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<!-- NEW (2.0.0): the Server page, at /server. For a PC that runs Frivo for
+     others: connecting a device, whether it's all working, who's using it,
+     the graphics card, and what Frivo logged lately. Filled in by
+     static/server.js from /api/server/status, /api/gpu and /api/local-status. -->
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Server · Frivo</title>
+  <link rel="icon" href="{{ url_for('static', filename='Frivo.ico') }}" sizes="any">
+  <link rel="apple-touch-icon" href="{{ url_for('static', filename='icon.png') }}">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v={{ asset_version }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='server.css') }}?v={{ asset_version }}">
+  <script>
+    (function () {
+      try {
+        var saved = localStorage.getItem("voice_console_theme");
+        document.documentElement.dataset.theme = saved === "light" ? "light" : "dark";
+      } catch (e) {
+        document.documentElement.dataset.theme = "dark";
+      }
+    })();
+  </script>
+</head>
+<body class="srv-body">
+<div class="srv">
+
+  <header class="srv-top">
+    <div class="srv-brand">
+      <img class="srv-logo" src="{{ url_for('static', filename='icon.png') }}" alt="" width="40" height="40">
+      <div class="srv-brand-text">
+        <h1 class="srv-title">Frivo Server</h1>
+        <span class="srv-meta" id="srvMeta">—</span>
+      </div>
+    </div>
+    <div class="srv-top-actions">
+      <span class="srv-pill" id="srvPill"><span class="srv-dot" aria-hidden="true"></span><span id="srvPillText">Checking…</span></span>
+      <a class="srv-btn" href="/">Open chat</a>
+      <button type="button" class="srv-btn" id="srvRestart">Restart</button>
+      <button type="button" class="srv-btn srv-btn--danger" id="srvStop">Stop Frivo</button>
+    </div>
+  </header>
+  <p class="srv-banner is-hidden" id="srvBanner" role="status"></p>
+
+  <div class="srv-row">
+    <section class="srv-card srv-connect" aria-labelledby="srvConnectTitle">
+      <img class="srv-qr" id="srvQr" alt="QR code for Frivo's network address" width="148" height="148">
+      <div class="srv-connect-text">
+        <h2 class="srv-h2" id="srvConnectTitle">Connect a phone or PC</h2>
+        <div class="srv-field">
+          <span class="srv-label">Address</span>
+          <span class="srv-mono" id="srvAddress">—</span>
+        </div>
+        <div class="srv-field" id="srvCodeField">
+          <span class="srv-label">Pairing code</span>
+          <span class="srv-mono srv-code" id="srvCode">—</span>
+        </div>
+        <div class="srv-btn-row">
+          <button type="button" class="srv-btn srv-btn--sm" id="srvCopy">Copy address</button>
+          <a class="srv-btn srv-btn--sm" href="/?settings=devices">Phone setup steps</a>
+        </div>
+      </div>
+    </section>
+
+    <section class="srv-card" aria-labelledby="srvHealthTitle">
+      <h2 class="srv-h2" id="srvHealthTitle">Health</h2>
+      <ul class="srv-checks" id="srvChecks"></ul>
+    </section>
+  </div>
+
+  <div class="srv-row">
+    <section class="srv-card" aria-labelledby="srvDevicesTitle">
+      <div class="srv-card-head">
+        <h2 class="srv-h2" id="srvDevicesTitle">Connected now</h2>
+        <span class="srv-aside" id="srvDevicesCount"></span>
+      </div>
+      <ul class="srv-devices" id="srvDevices"></ul>
+      <p class="srv-empty is-hidden" id="srvDevicesEmpty">No one's using Frivo right now. Devices show up here as soon as they open it.</p>
+    </section>
+
+    <section class="srv-card" aria-labelledby="srvGpuTitle">
+      <div class="srv-card-head">
+        <h2 class="srv-h2" id="srvGpuTitle">Graphics card</h2>
+        <span class="srv-aside" id="srvGpuUsed"></span>
+      </div>
+      <div id="srvGpuGraph" class="srv-graph"></div>
+      <p class="srv-empty is-hidden" id="srvGpuNone"></p>
+      <div class="srv-tiles" id="srvServices"></div>
+    </section>
+  </div>
+
+  <section class="srv-card" aria-labelledby="srvLogTitle">
+    <div class="srv-card-head">
+      <h2 class="srv-h2" id="srvLogTitle">Recent activity</h2>
+      <button type="button" class="srv-link" id="srvLogMore">Show more</button>
+    </div>
+    <div class="srv-log-box">
+      <ol class="srv-log" id="srvLog"></ol>
+    </div>
+    <p class="srv-empty is-hidden" id="srvLogEmpty">Nothing logged yet.</p>
+  </section>
+
+</div>
+<script src="{{ url_for('static', filename='server.js') }}?v={{ asset_version }}"></script>
+</body>
+</html>

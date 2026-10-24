@@ -17,15 +17,15 @@ Frivo in its own window for Windows, with a tray icon and no browser tab.
 - **Run Frivo here, without the app.** Frivo and its launcher, used in a browser, as before. For a PC that phones and other PCs connect to.
 - **Just the Frivo app.** For a PC that connects to Frivo on another PC. Nothing else is installed: no Python, voices, certificate or firewall rule. The first time it opens, pick the other PC from the list of Frivo found on your network (or type its address) and type its pairing code; after that the app only accepts that Frivo at that address.
 
-Setup downloads the app (about 100 MB) from the app's releases on GitHub and checks it against the fingerprint GitHub publishes before installing it, so `FrivoSetup.exe` and Frivo's own updates stay small. If the download fails, Frivo is still installed and works in your browser; run setup again to add the app. Updating an existing Frivo keeps what it was; choose the app on the "How you'll use Frivo" page to add it. The app is also a separate download (`FrivoApp-Setup-1.0.0.exe`, tagged `app-v1.0.0`) for anyone who wants just it.
+The app comes inside `FrivoSetup.exe`, so there's one file to download whichever you pick, and nothing to fetch during setup. That makes setup bigger (about 125 MB) and every update the same size. Updating an existing Frivo keeps what it was; choose the app on the "How you'll use Frivo" page to add it.
 
 What else it does:
 
-- **Same Frivo.** The app shows Frivo's own pages, so every Frivo update shows up in it straight away. The app only updates itself when its own parts change, and asks before restarting to do it.
+- **Same Frivo, same version.** The app shows Frivo's own pages, so every Frivo update shows up in it straight away. Updating Frivo updates the app on the same PC. An app on another PC gets its update from the Frivo it's connected to (not from GitHub), and asks before restarting to install it.
 - **Settings › App** (only in the app): where Frivo runs, the network address for phones, Stop Frivo, Start with Windows, what closing the window does, and the app's own updates. The same things are on the tray icon's menu.
 - **Closing the window** keeps Frivo running in the tray, so phones and other devices stay connected. **Quit** in the tray stops it. You can change this.
 - **When Frivo drops out**, the app says so and reconnects by itself, including through an in-app Frivo update.
-- **Nothing changes for browsers and phones.** In a browser on Windows, Settings › Updates offers the app, once, with a way to hide it.
+- **Nothing changes for browsers and phones.** In a browser on Windows, Settings › Updates offers the app, once, with a way to hide it. The download comes from that Frivo.
 - **Existing installs** just add the app. It finds the Frivo that's already here and uses it; settings, profiles, saved replies, voices and keys stay where they are.
 - **Uninstalling Frivo** offers to remove the app too, ticked when setup installed them together.
 
@@ -39,7 +39,7 @@ The app is called just **Frivo**. With Frivo installed on the same PC, Apps & fe
 
 ## One build
 
-`Build.bat` builds everything: `dist\FrivoSetup.exe`, the one installer, and beside it the app file it installs. Setup installs the app from that file when it's there (only that exact file: setup carries its fingerprint), so a build can be tried on the PC that built it before anything is published. The separate `Build-App.bat` and `Build-Installer.bat` are gone.
+`Build.bat` builds everything into one file, `dist\FrivoSetup.exe`, with the app inside. That's the only file a release needs; there are no separate app releases. The separate `Build-App.bat` and `Build-Installer.bat` are gone.
 
 ## Adding the app later, backups, and uninstalling
 
@@ -53,6 +53,17 @@ The app is called just **Frivo**. With Frivo installed on the same PC, Apps & fe
 - **Pairing codes.** Connecting the app to another PC asks for a short code, like `K7Q4-MD2X-9P3R`, shown in that PC's launcher and in Frivo under **Settings › Other devices**. It proves it's your Frivo, without reading through certificate fingerprints. Comparing the certificate is still there under "No code?".
 - **Settings › Other devices** (new): this PC's network addresses with a **QR code** to scan with a phone, the pairing code, and Frivo's certificate to download, with steps for trusting it on an iPhone or Android phone so the browser stops warning. The launcher has a **QR code** button and shows the pairing code too.
 
+## The Server page
+
+For a PC that runs Frivo for other devices. The launcher's **Open Frivo** now opens it (the chat is one click away, and on the tray menu), and anyone can open it from **Settings › Other devices › Server page**, or at `/server`.
+
+- **Connect a phone or PC:** the address with its QR code, and the pairing code.
+- **Health:** whether other devices can reach it (and the firewall port), HTTPS and when its certificate runs out, whether it starts before anyone signs in, and whether an update is waiting.
+- **Connected now:** each phone, PC and Frivo app using it, by name where the network knows one, and what it's doing right now (dictating, speaking, writing a reply), or when it was last seen.
+- **Graphics card:** its memory over the last ten minutes when Ollama or Evora is in use, and how each service Frivo depends on is doing.
+- **Recent activity:** the last things Frivo logged, with warnings and errors marked.
+- **Restart** and **Stop**, which only work on the PC Frivo runs on. Stop leaves the launcher open, so Start is right there.
+
 ## Settings › Audio
 
 A new **Audio** section in Settings, laid out like Discord's Voice & Video:
@@ -62,6 +73,15 @@ A new **Audio** section in Settings, laid out like Discord's Voice & Video:
 - **Mic test**: press *Let's check*, say something, and watch the level and hear yourself back through your output device. **Test sound** plays a short chime on the output device.
 - **Listening input**: the Listening panel's audio source, with **Check** to see its level against the loudness gate before you start listening.
 - Device names show once Frivo is allowed to use the microphone, and the lists update by themselves when you plug something in, so there are no more Reload buttons. Dictation and Listening show the chosen device and lead here.
+
+## FrivOSC is built into the app
+
+The Frivo app now does FrivOSC's job itself: VRChat's chatbox, microphone sync, the typing dots and unmute-when-I-send. Run the app on the PC you play VRChat on and it connects VRChat to Frivo whenever VRChat is running, whether Frivo runs on that PC or another. Nothing else to install, no Python on the VRChat PC, and it talks to Frivo over the app's own trusted connection.
+
+- It only runs while VRChat is running, so the app on a PC without VRChat never picks up chatbox messages meant for the VRChat PC.
+- It can be turned off in Settings › App › **VRChat on this PC**, which also shows whether VRChat is connected and your mic state.
+- If the separate FrivOSC is installed, setup offers to remove it (ticked) when it installs the app. While the separate one is running, the app stands aside rather than both fighting over VRChat's port.
+- The separate FrivOSC keeps working for anyone using Frivo in a browser, without the app.
 
 ## Shortcuts in the app
 
@@ -78,4 +98,7 @@ Frivo's launcher, setup and uninstaller use Frivo's current colours. The launche
 
 ## Fixes
 
+- **Frivo no longer freezes for minutes at a time.** One connection that opened and then said nothing (a browser's speculative connection, a phone that dozed off) held up everyone else for up to three minutes: Frivo was running but answered nobody, and the app said it had stopped responding. Now such a connection waits on its own.
+- The app waits a little longer before deciding Frivo has stopped responding, so a busy moment isn't mistaken for it.
+- Frivo's server log no longer fills with a line every second from the launcher checking that Frivo is up.
 - The volume chip in the message box keeps one width from 5% to 150%.

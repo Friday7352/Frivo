@@ -188,17 +188,22 @@ It can share a graphics card with Ollama.
 
 ### FrivOSC — VRChat
 
-[FrivOSC](https://github.com/Friday7352/FrivOSC) connects Frivo to VRChat.
-Replies show up in your chatbox, and muting or unmuting in VRChat can turn
-Frivo's dictation off and on.
+FrivOSC connects Frivo to VRChat. Replies show up in your chatbox, and
+muting or unmuting in VRChat can turn Frivo's dictation off and on.
 
-1. Install `FrivOSCSetup.exe` from the
-   [latest FrivOSC release](https://github.com/Friday7352/FrivOSC/releases/latest)
-   **on the PC you play VRChat on**.
-2. During its setup, enter the address you use to open Frivo and click
-   **Test**.
-3. In VRChat, turn on OSC in the Options menu.
-4. In Frivo, open **Settings** > **VRChat** and turn on **VRChat OSC**.
+**It's built into the Frivo app** (2.0.0 and later). Run the app on the PC
+you play VRChat on (*Run Frivo here, in the Frivo app*, or *Just the Frivo
+app* if Frivo runs on another PC), and it connects VRChat to Frivo by itself
+whenever VRChat is running. Nothing else to install.
+
+1. In VRChat, turn on OSC in the Options menu.
+2. In Frivo, open **Settings** > **VRChat** and turn on **VRChat OSC**.
+
+It can be turned off in **Settings** > **App** > **VRChat on this PC**. Using
+Frivo in a browser instead of the app? The separate
+[FrivOSC](https://github.com/Friday7352/FrivOSC/releases/latest) still works:
+install it on the VRChat PC. Setup offers to remove it once the app is
+installed, since the app does its job.
 
 Then turn on the 💬 **Chatbox** button. Long replies are split into pages of
 144 characters (VRChat's limit), and each page changes exactly when the voice
@@ -215,7 +220,8 @@ reaches it. Anyone who can see your chatbox can read these messages.
 - **Unmute when I send**: unmutes you before a spoken reply plays, so it isn't
   lost into a muted mic. It never mutes you.
 - The mute options need **Options > Voice > Toggle Voice** on in VRChat (the
-  default). With push-to-talk, FrivOSC tells you in its log.
+  default). With push-to-talk, the log says so (`%APPDATA%\Frivo App\frivosc.log`
+  for the app, FrivOSC's own log for the separate one).
 
 </details>
 
@@ -245,13 +251,12 @@ For phones, Settings › Other devices has a QR code to scan and the steps to
 trust Frivo's certificate. Setup can also start Frivo **before anyone signs
 in**, for a PC that only runs Frivo for others.
 
-Setup downloads the app from GitHub and checks it before installing it. The
-app is also a separate download,
-[`FrivoApp-Setup-<version>.exe`](https://github.com/Friday7352/Frivo/releases?q=app-v&expanded=true),
-for a PC that only needs the app.
+The app comes inside `FrivoSetup.exe`: it's the only download, whichever of
+the three you pick.
 
-The app shows Frivo's own pages, so every Frivo update shows up in it with no
-app update needed. The app updates itself when its own parts change. Its
+The app shows Frivo's own pages, so every Frivo update shows up in it. When
+setup updates Frivo it updates the app on that PC too, and an app on another
+PC picks up its update from the Frivo it's connected to. Its
 settings (where Frivo runs, starting with Windows, what closing the window
 does) are under **Settings › App** and on the tray icon's menu. Phones and
 browsers keep working as before.
@@ -268,6 +273,13 @@ The first visit may show a certificate warning, because Frivo's certificate
 is only trusted on the PC it's installed on. Only allow this on a network you
 trust. If you skipped it during setup, turn it on in the Frivo window's
 **Settings**.
+
+**The Server page.** On the PC Frivo runs on, the launcher's **Open Frivo**
+opens the Server page: the address and QR code for connecting a device, the
+pairing code, whether everything's working, who's using Frivo right now and
+what they're doing, the graphics card, and what Frivo logged lately, with
+Restart and Stop. **Open chat** takes you to the chat. It's also at
+**Settings › Other devices › Server page**.
 
 ## Your data
 
@@ -337,35 +349,29 @@ data is from [eSpeak NG](https://github.com/espeak-ng/espeak-ng) (GPL-3.0).
 
 **Building.** Clone the repository and run `Install.bat` to install from
 source. To build, run **`Build.bat`**. It writes `dist\FrivoSetup.exe`, the
-one installer (Frivo, the Frivo app, or both), and beside it
-`dist\FrivoApp-Setup-<version>.exe`, the app that setup installs. Leave the
-two together: setup installs the app from that file, and only that exact
-file (it checks its fingerprint), instead of downloading it. Nothing needs
+one installer (Frivo, the Frivo app, or both), with the app inside it. Nothing needs
 installing first: it fetches Inno Setup and a private copy of Node.js when
 it needs them. The app is only rebuilt when something in `desktop\`
 changed; `Build.bat /app` forces it.
 
 **Version number.** The version lives only in `VERSION` at the root of the
 repository. Everything else — the installer, Apps & features,
-`FrivoHost.exe` and `/diagnose` — reads it at build time.
+`FrivoHost.exe` and `/diagnose` — reads it at build time. The app's version
+in `desktop\package.json` is kept the same.
 `tests/test-version.py` checks they agree.
 
 **Publishing an update.**
 
-1. Change `VERSION` and run `Build.bat`.
-2. If the app changed (its own version in `desktop\package.json`), first
-   create a GitHub release tagged `app-v<app version>` with
-   `dist\FrivoApp-Setup-<app version>.exe`, and **untick "Set as the latest
-   release"**. Setup downloads the app from there.
-3. Create a GitHub release tagged with Frivo's version, such as `v2.0.0`. It
+1. Change `VERSION`, and the `version` in `desktop\package.json` to match.
+   Run `Build.bat`.
+2. Create a GitHub release tagged with that version, such as `v2.0.0`. It
    can't be a pre-release or a draft. Attach `dist\FrivoSetup.exe`, keeping
-   that exact name.
+   that exact name. That's the only file.
 
 Installed copies offer it within six hours. The release notes appear in the
 update dialog.
 
-**The Frivo app.** Its code is in `desktop\`; `Build.bat` builds it too. See [`desktop/README.md`](desktop/README.md) for how it works and how to
-publish an app update.
+**The Frivo app.** Its code is in `desktop\`; `Build.bat` builds it too. See [`desktop/README.md`](desktop/README.md) for how it works.
 
 **Tests.** See [`tests/README.md`](tests/README.md).
 

@@ -38,6 +38,9 @@ const DEFAULTS = Object.freeze({
   // NEW: keys that work anywhere, even with VRChat in front. Electron
   // accelerators ("CommandOrControl+Alt+D"); '' for none.
   hotkeys: { dictate: 'CommandOrControl+Alt+D', send: '' },
+  // NEW (2.0.0): FrivOSC built in (osc.js): VRChat's chatbox and microphone,
+  // while VRChat runs on this PC.
+  vrchatBridge: true,
 });
 
 function clone(value) {
@@ -66,6 +69,7 @@ class Settings {
     if (!['tray', 'quit'].includes(this.data.closeAction)) this.data.closeAction = 'tray';
     if (!this.data.trusted || typeof this.data.trusted !== 'object') this.data.trusted = {};
     if (!Array.isArray(this.data.removedShortcuts)) this.data.removedShortcuts = [];
+    if (typeof this.data.vrchatBridge !== 'boolean') this.data.vrchatBridge = true;   // NEW (2.0.0)
     if (!this.data.hotkeys || typeof this.data.hotkeys !== 'object') this.data.hotkeys = clone(DEFAULTS.hotkeys);
     for (const key of Object.keys(DEFAULTS.hotkeys)) {
       if (typeof this.data.hotkeys[key] !== 'string') this.data.hotkeys[key] = DEFAULTS.hotkeys[key];

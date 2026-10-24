@@ -21,49 +21,10 @@ function Check([string] $Name, [bool] $Ok, $Got = $null) {
     if ($Ok) { Write-Host "  PASS  $Name" } else { Write-Host "  FAIL  $Name   got=$Got"; $script:failures++ }
 }
 
-$policy = Get-FrivoUpdatePolicy -Path (Join-Path $root 'installer/update-policy.json')
-$prefix = $policy.DownloadPrefix
-$sha = 'a' * 64
-function Asset($name, $tag, $digest = "sha256:$sha", $repoPrefix = $prefix) {
-    [ordered] @{ name = $name; size = 10; digest = $digest; browser_download_url = "$repoPrefix$tag/$name" }
-}
-$releases = @(
-    [ordered] @{ tag_name = 'v2.0.0'; assets = @(Asset 'FrivoSetup.exe' 'v2.0.0') }
-    [ordered] @{ tag_name = 'app-v1.0.0'; assets = @(Asset 'FrivoApp-Setup-1.0.0.exe' 'app-v1.0.0') }
-    [ordered] @{ tag_name = 'app-v1.2.0'; prerelease = $true; assets = @(Asset 'FrivoApp-Setup-1.2.0.exe' 'app-v1.2.0') }
-    [ordered] @{ tag_name = 'app-v1.1.0'; assets = @(Asset 'FrivoApp-Setup-1.1.0.exe' 'app-v1.1.0') }
-    [ordered] @{ tag_name = 'app-v1.3.0'; assets = @(Asset 'FrivoApp-Setup-1.3.0.exe' 'app-v1.3.0' $null) }
-    [ordered] @{ tag_name = 'app-v1.4.0'; assets = @(Asset 'FrivoApp-Setup-1.4.0.exe' 'app-v1.4.0' "sha256:$sha" 'https://github.com/someone/else/releases/download/') }
-)
-$json = $releases | ConvertTo-Json -Depth 6
-$pick = Select-FrivoAppRelease -Json $json -Policy $policy
-Check 'the newest checkable app release is picked' ($pick -and $pick.VersionText -eq '1.1.0') $pick.VersionText
-Check 'with its file and fingerprint' ($pick.Name -eq 'FrivoApp-Setup-1.1.0.exe' -and $pick.Sha256 -eq $sha)
-Check "Frivo's own releases aren't the app" ($null -eq (ConvertFrom-FrivoAppRelease -Release $releases[0] -Policy $policy))
-Check "and the app's aren't Frivo's (Frivo's updater skips app-v tags)" ($null -eq (ConvertFrom-FrivoRelease -Release $releases[1] -Policy $policy))
-Check 'no releases, no pick' ($null -eq (Select-FrivoAppRelease -Json '[]' -Policy $policy))
-
-# ---- the checked download, from a local file:// stand-in for GitHub
+# CHANGED (2.0.0): the app is inside FrivoSetup.exe now, not on GitHub, so
+# there are no app releases to pick or download.
 $work = Join-Path ([System.IO.Path]::GetTempPath()) ('frivo-app-setup-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $work | Out-Null
-$src = Join-Path $work 'source.exe'
-[System.IO.File]::WriteAllText($src, 'the frivo app')
-$good = Get-FrivoFileSha256 -Path $src
-$fakePolicy = [pscustomobject] @{ DownloadPrefix = (New-Object System.Uri($work)).AbsoluteUri.TrimEnd('/') + '/' }
-$url = (New-Object System.Uri($src)).AbsoluteUri
-$seen = New-Object System.Collections.ArrayList
-$target = Join-Path $work 'FrivoApp-Setup.exe'
-$out = Save-FrivoDownload -Url $url -Policy $fakePolicy -Target $target -Size 13 -Sha256 $good -OnProgress { param($d, $t) [void] $seen.Add($d) }
-Check 'a matching download is kept' ((Test-Path -LiteralPath $target) -and ([System.IO.File]::ReadAllText($target) -eq 'the frivo app'))
-Check 'with progress reported' ($seen.Count -ge 1 -and $seen[-1] -eq 13) ($seen -join ',')
-$bad = Join-Path $work 'Bad.exe'
-$refused = $false
-try { Save-FrivoDownload -Url $url -Policy $fakePolicy -Target $bad -Size 13 -Sha256 ('b' * 64) | Out-Null } catch { $refused = $_.Exception.Message -match 'does not match' }
-Check 'a download that does not match is refused' $refused
-Check 'and nothing is left behind' (-not (Test-Path -LiteralPath $bad) -and -not (Test-Path -LiteralPath ($bad + '.part')))
-$refused = $false
-try { Save-FrivoDownload -Url 'https://example.com/x.exe' -Policy $fakePolicy -Target $bad -Sha256 $good | Out-Null } catch { $refused = $true }
-Check 'a file from anywhere else is refused' $refused
 
 # ---- launcher.json: app mode
 $data = Join-Path $work 'Frivo'
@@ -171,33 +132,29 @@ $folder = Get-FrivoBackupFolder -RoamingAppData $env:APPDATA
 Check 'backups go to Documents\Frivo backups' ($folder -match 'Frivo backups$') $folder
 
 
-# NEW (2.0.0): the app built with this setup (Build.bat), used from beside it
+# CHANGED (2.0.0): the app is inside FrivoSetup.exe (installer\app\ in its payload)
 $src = Get-Content -LiteralPath (Join-Path $root 'installer/Install.ps1') -Raw
 $ast = [System.Management.Automation.Language.Parser]::ParseInput($src, [ref] $null, [ref] $null)
-$fn = $ast.Find({ $args[0] -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $args[0].Name -eq 'Find-FrivoLocalAppInstaller' }, $true)
+$fn = $ast.Find({ $args[0] -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $args[0].Name -eq 'Get-FrivoBundledApp' }, $true)
 . ([scriptblock]::Create($fn.Extent.Text))
 $pkg = Join-Path $work 'pkg'
 $ScriptDir = Join-Path $pkg 'installer'
 $PackageDir = $pkg
-$beside = Join-Path $work 'Downloads'
-New-Item -ItemType Directory -Path $ScriptDir, $beside -Force | Out-Null
-$appFile = Join-Path $beside 'FrivoApp-Setup-1.2.0.exe'
-[System.IO.File]::WriteAllText($appFile, 'the app built with this setup')
-Check 'without bundled-app.json, nothing local is used' ($null -eq (Find-FrivoLocalAppInstaller))
-[System.IO.File]::WriteAllText((Join-Path $pkg 'setup-folder.txt'), $beside)
-$good = (Get-FileHash -LiteralPath $appFile -Algorithm SHA256).Hash
-[System.IO.File]::WriteAllText((Join-Path $ScriptDir 'bundled-app.json'), (@{ name = 'FrivoApp-Setup-1.2.0.exe'; sha256 = $good } | ConvertTo-Json))
-$found = Find-FrivoLocalAppInstaller
-Check 'the app built with this setup is found beside FrivoSetup.exe' ($found -and $found.Path -eq $appFile -and $found.Version -eq [version] '1.2.0') $found
-[System.IO.File]::WriteAllText($appFile, 'something else with the same name')
-Check 'a file with the right name but other contents is never used' ($null -eq (Find-FrivoLocalAppInstaller))
-[System.IO.File]::WriteAllText((Join-Path $beside 'FrivoApp-Setup-9.9.9.exe'), 'x')
-Check 'nor any other FrivoApp-Setup file in that folder' ($null -eq (Find-FrivoLocalAppInstaller))
+New-Item -ItemType Directory -Path (Join-Path $ScriptDir 'app'), (Join-Path $pkg 'desktop/dist') -Force | Out-Null
+Check 'no app in the setup or the source tree: none' ($null -eq (Get-FrivoBundledApp))
+foreach ($v in @('1.0.0', '1.2.0', '1.10.0')) { [System.IO.File]::WriteAllText((Join-Path $pkg "desktop/dist/FrivoApp-Setup-$v.exe"), 'x') }
+$found = Get-FrivoBundledApp
+Check 'run from the source tree, the newest built app is used' ($found -and $found.Version -eq [version] '1.10.0') $found.Version
+[System.IO.File]::WriteAllText((Join-Path $ScriptDir 'app/FrivoApp-Setup.exe'), 'the app inside the setup')
+[System.IO.File]::WriteAllText((Join-Path $ScriptDir 'app/app.json'), '{"version":"1.3.0"}')
+$found = Get-FrivoBundledApp
+Check 'the app inside the setup comes first, with its version' ($found -and $found.Path -like '*installer*app*FrivoApp-Setup.exe' -and $found.Version -eq [version] '1.3.0') $found
 $build = Get-Content -LiteralPath (Join-Path $root 'build/Build.ps1') -Raw
-Check 'Build.bat writes the app''s fingerprint into the setup it builds' ($build -match 'installer\\bundled-app\.json' -and $build -match "Get-FileHash -LiteralPath \`$appBuilt -Algorithm SHA256")
-Check 'and puts the app beside FrivoSetup.exe' ($build -match 'Copy-Item -LiteralPath \$appBuilt -Destination \(Join-Path \$dist \$appName\)')
+Check 'Build.bat puts the app into the setup' ($build -match "Copy-Item -LiteralPath \`$appBuilt -Destination \(Join-Path \`$payload 'FrivoApp-Setup.exe'\)")
 $iss = Get-Content -LiteralPath (Join-Path $root 'build/Frivo.iss') -Raw
-Check 'setup tells Install.ps1 the folder it was run from' ($iss -match "setup-folder\.txt'\), ExpandConstant\('\{src\}'\)")
+Check 'and Frivo.iss packs it' ($iss -match 'Source: "app\\\*";\s+DestDir: "\{tmp\}\\FrivoSetupPayload\\installer\\app"')
+Check 'setup keeps the app installer beside Frivo for the app to update from' ($install -match 'Copy-FrivoAppInstaller -Target \$Target -Log \$Log')
+Check 'and nothing about the app is downloaded from GitHub any more' ($install -notmatch 'Get-FrivoAppReleasesApi|Select-FrivoAppRelease')
 
 
 # NEW (2.0.0): one "Frivo" in Apps & features
@@ -214,6 +171,14 @@ Check 'with Frivo installed, the app''s installer hides its own entry' ($nsh -ma
 Check 'and setup does too' ($install -match 'Set-FrivoAppListed -User \$person\.User -Listed \$false')
 $uninstall = Get-Content -LiteralPath (Join-Path $root 'installer/Uninstall.ps1') -Raw
 Check 'uninstalling Frivo but keeping the app lists the app again' ($uninstall -match 'Set-FrivoAppListed -User \(Get-FrivoDesktopUser\)\.User -Listed \$true')
+
+
+# NEW (2.0.0): FrivOSC built into the app
+Check 'setup offers to remove the separate FrivOSC when the app is installed' ($install -match '\$chkRemoveOSC = New-FrivoCheck' -and $install -match 'Remove-FrivoStandaloneOSC -Log \$Log')
+Check 'only by its own uninstaller, silently, told its folder (1.2.0 can''t work it out)' ($install -match "FrivOSC-Uninstall\.ps1" -and $install -match "'-Silent',\s+'-InstallPath', \('`"\{0\}`"' -f \`$folder\)")
+Check 'not when choosing Frivo without the app' ($install -match '\$chkRemoveOSC\.Enabled = -not \$radioServer\.Checked')
+
+Check 'an installed app reported as 1.0.0.0 counts as 1.0.0, so the same version is reinstalled' ($install -match '\$installed = \[version\]::new\(\$v\.Major, \$v\.Minor, \[Math\]::Max\(\$v\.Build, 0\)\)')
 
 Remove-Item -LiteralPath $work -Recurse -Force
 Write-Host ''

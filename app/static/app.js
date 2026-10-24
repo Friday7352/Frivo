@@ -366,7 +366,9 @@ function buildServiceBlock(service) {
 
 function paintServiceBlock(block, service) {
   const chip = block.querySelector(".service-status");
-  chip.className = "service-status " + (service.ok ? "is-ok" : "is-down");
+  // CHANGED (2.0.0): "idle" is a resting state (FrivOSC with VRChat closed):
+  // grey, and not a problem.
+  chip.className = "service-status " + (service.ok ? "is-ok" : service.idle ? "is-idle" : "is-down");
   chip.title = serviceChipTitle(service);
   block.querySelector(".service-status-name").textContent = service.name;
   // CHANGED (1.6.0): "not downloaded", "for replies", "no key", say.
@@ -381,7 +383,7 @@ function paintServiceBlock(block, service) {
 function paintStatusPill(services) {
   const pill = $("statusPillBtn");
   if (!pill) return;
-  const down = services.filter((s) => !s.ok);
+  const down = services.filter((s) => !s.ok && !s.idle);   // CHANGED (2.0.0): idle isn't down
   pill.classList.toggle("is-down", down.length > 0);
   const text = $("statusPillText");
   if (text && down.length) text.textContent = `${down[0].name} ${down[0].state || "offline"}`;   // CHANGED (1.6.0)
@@ -2366,7 +2368,7 @@ function syncOscSwitch() {
   oscSwitch.title = oscConfigured
     ? "Show the spoken reply in your VRChat chatbox as it plays"
     : oscEnabled_setting
-      ? "Waiting for FrivOSC on your VRChat PC"
+      ? "Waits for VRChat: on when VRChat runs on a PC with the Frivo app open"   // CHANGED (2.0.0): FrivOSC is built into the app
       : "Turn on VRChat OSC in Settings to use this";
   oscSwitch.classList.toggle("is-unset", !oscConfigured);
   syncOscQuick();
@@ -2652,13 +2654,9 @@ function sendToChatbox(text, { speaking = false, keepTyping = false } = {}) {
   // NEW (1.5.0): every way out of here ends the reply's typing dots.
   if (!text) { endReplyTyping(); return; }
   if (!oscConfigured) {
+    // CHANGED (2.0.0): quietly. VRChat not running is a normal state, and
+    // the Chatbox switch already shows it greyed out (its tooltip says why).
     endReplyTyping();
-    setStatus(
-      oscEnabled_setting
-        ? "VRChat chatbox is on, but FrivOSC isn't connected."
-        : "VRChat chatbox is on, but VRChat OSC is off in Settings.",
-      true
-    );
     return;
   }
   // OSC delivery is independent of the chat request. Speaking controls the
@@ -2747,8 +2745,7 @@ function makeChatboxFollower(pages, onPage) {   // CHANGED (1.5.0): onPage
       finished = true;
       stop();
     } else if (!oscConfigured) {
-      // Not connected: sendToChatbox has said so once. No need to repeat it
-      // for every page.
+      // Not connected: nothing to page out.
       finish();
     }
   }
@@ -2791,12 +2788,8 @@ function makeChatboxFollower(pages, onPage) {   // CHANGED (1.5.0): onPage
 oscToggle.addEventListener("change", () => {
   localStorage.setItem(OSC_ENABLED_KEY, oscToggle.checked ? "1" : "0");
   if (oscToggle.checked && !oscConfigured) {
-    setStatus(
-      oscEnabled_setting
-        ? "Waiting for FrivOSC to connect from your VRChat PC."
-        : "Turn on VRChat OSC in Settings for this to do anything.",
-      true
-    );
+    // CHANGED (2.0.0): no warning. The switch stays greyed out until VRChat
+    // is connected, and its tooltip says why.
   } else {
     setStatus(oscToggle.checked ? "Sending to the VRChat chatbox." : "VRChat chatbox off.");
   }
@@ -8424,11 +8417,38 @@ window.addEventListener("pagehide", () => {
     ["statusPillBtn", "statusPop"],
   ].map(([b, p]) => ({ btn: $(b), pop: $(p) })).filter((x) => x.btn && x.pop);
 
+  // NEW (2.0.0): a popover opens from its chip's left edge, which ran past
+  // the right side of a narrow window (the app beside VRChat). When it
+  // would, it's placed against the window instead (position: fixed, which
+  // also gets it out of the chip bar, a scrolling strip that would clip
+  // it), as close to its chip as fits, with a margin on both sides.
+  function fitPopover(pop) {
+    pop.classList.remove("is-fitted");
+    pop.style.left = pop.style.top = pop.style.bottom = "";
+    const margin = 12;
+    const width = document.documentElement.clientWidth;
+    const rect = pop.getBoundingClientRect();
+    const right = rect.left + pop.offsetWidth;
+    if (right <= width - margin && rect.left >= margin) return;
+    const anchor = (pop.parentElement || pop).getBoundingClientRect();
+    const upwards = Boolean(pop.closest(".session-strip"));
+    pop.classList.add("is-fitted");
+    const popWidth = pop.offsetWidth;   // as placed now, and without the opening animation's scale
+    pop.style.left = `${Math.max(margin, Math.min(anchor.left, width - popWidth - margin))}px`;
+    if (upwards) pop.style.bottom = `${window.innerHeight - anchor.top + 8}px`;
+    else pop.style.top = `${anchor.bottom + 8}px`;
+  }
+  window.addEventListener("resize", () => {
+    popovers.forEach(({ pop }) => { if (!pop.classList.contains("is-hidden")) fitPopover(pop); });
+  });
+
   window.closeAllPopovers = () => closePopovers(null);
   function closePopovers(except) {
     popovers.forEach(({ btn, pop }) => {
       if (pop === except) return;
       pop.classList.add("is-hidden");
+      pop.classList.remove("is-fitted");   // NEW (2.0.0)
+      pop.style.left = pop.style.top = pop.style.bottom = "";
       btn.setAttribute("aria-expanded", "false");
     });
   }
@@ -8438,6 +8458,7 @@ window.addEventListener("pagehide", () => {
       const opening = pop.classList.contains("is-hidden");
       closePopovers(opening ? pop : null);
       pop.classList.toggle("is-hidden", !opening);
+      if (opening) fitPopover(pop);   // NEW (2.0.0): never past the window's edge
       if (opening && typeof growFrom === "function") growFrom(pop, btn);   // NEW (1.5.0): grow out of the chip
       btn.setAttribute("aria-expanded", opening ? "true" : "false");
       if (opening && pop.id === "lengthPop" && typeof refreshPromptIfOpen === "function") refreshPromptIfOpen();
@@ -14372,14 +14393,14 @@ function omCardUses() {
     let dismissed = false;
     try { dismissed = localStorage.getItem(DISMISS_KEY) === "1"; } catch { /* private window */ }
     if (!windows || dismissed) return;
-    offer.classList.remove("is-hidden");
     $("appOfferClose").addEventListener("click", () => {
       offer.classList.add("is-hidden");
       try { localStorage.setItem(DISMISS_KEY, "1"); } catch { /* not remembered */ }
     });
-    // The releases page Frivo updates from, so a fork links to its own app.
-    fetch("/api/updates").then((r) => r.json()).then((d) => {
-      if (d && d.releases_page) $("appOfferLink").href = `${d.releases_page}?q=app-v&expanded=true`;
+    // CHANGED (2.0.0): the app comes from this Frivo, which carries it.
+    // Only offered when it does (a copy run from source may not).
+    fetch("/api/app/latest").then((r) => (r.ok ? r.json() : null)).then((d) => {
+      if (d && d.version) offer.classList.remove("is-hidden");
     }).catch(() => {});
     return;
   }
@@ -14579,8 +14600,21 @@ function omCardUses() {
     });
   }
 
+  // ---- NEW (2.0.0): FrivOSC, built into the app ----
+  const vrchatToggle = $("appVrchatToggle");
+  function renderVrchat(s) {
+    if (!s || !s.vrchat) return;
+    vrchatToggle.checked = Boolean(s.vrchat.enabled);
+    $("appVrchatSub").textContent = s.vrchat.enabled
+      ? s.vrchat.text
+      : "Off. Turn on for VRChat's chatbox and microphone sync while VRChat runs here.";
+  }
+  vrchatToggle.addEventListener("change", () => {
+    if (api.setVrchat) api.setVrchat(vrchatToggle.checked).then(render).catch(() => {});
+  });
+
   const baseRender = render;
-  render = (s) => { baseRender(s); renderHotkeys(s); };
+  render = (s) => { baseRender(s); renderHotkeys(s); renderVrchat(s); };
 
   api.onState(render);
   refresh();
@@ -14922,3 +14956,19 @@ if (navigator.mediaDevices && navigator.mediaDevices.addEventListener) {
 loadOutputDevices();
 syncAudioSummaries();
 
+
+
+// ============================================================
+// NEW (2.0.0): /?settings=<section> opens Settings there
+// ============================================================
+// How the Server page (/server) links to Settings › Other devices and
+// Settings › About. Last, so every section has been set up.
+(function openSettingsFromAddress() {
+  let wanted = null;
+  try { wanted = new URLSearchParams(window.location.search).get("settings"); } catch { return; }
+  if (!wanted || !/^[a-z-]{1,30}$/.test(wanted)) return;
+  if (!document.querySelector(`[data-settings-section="${wanted}"].settings-section`)) return;
+  setSettingsOpen(true);
+  if (typeof window.showSettingsSection === "function") window.showSettingsSection(wanted);
+  try { history.replaceState(null, "", window.location.pathname); } catch { /* fine */ }
+})();

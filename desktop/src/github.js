@@ -1,7 +1,9 @@
 'use strict';
 /*
-  Frivo's releases on GitHub: the app's own updates, and Frivo's setup when
-  someone picks "Frivo on this PC" and doesn't have it yet.
+  Frivo's releases on GitHub: Frivo's setup, when someone picks "Frivo on
+  this PC" and doesn't have it yet. CHANGED (2.0.0): the app's own updates
+  come from the Frivo it's connected to (downloadChecked, below), not from
+  GitHub: FrivoSetup.exe carries the app, and it's the only file published.
 
   The same rules as Frivo's own updater (installer\Frivo.Update.psm1):
     * only this repository's releases, never drafts or pre-releases
@@ -9,10 +11,8 @@
     * only with the SHA-256 fingerprint GitHub publishes for it, and the
       download is checked against it before anything runs
 
-  Both live in the one repository. Frivo's releases are tagged "v1.7.0" and
-  carry FrivoSetup.exe; the app's are tagged "app-v1.0.0" and carry
-  FrivoApp-Setup-1.0.0.exe. Frivo's updater ignores "app-v" tags (they
-  aren't plain versions), and this ignores Frivo's.
+  Frivo's releases are tagged "v2.0.0" and carry FrivoSetup.exe. Anything
+  else (the "app-v" releases from before 2.0.0) is ignored.
 */
 
 const crypto = require('crypto');
@@ -20,9 +20,7 @@ const fs = require('fs');
 const path = require('path');
 
 const FRIVO_TAG = /^[vV]?(\d{1,5})(?:\.(\d{1,5}))?(?:\.(\d{1,5}))?$/;
-const APP_TAG = /^app-v(\d{1,5})\.(\d{1,5})\.(\d{1,5})$/i;
 const FRIVO_ASSET = 'FrivoSetup.exe';
-const APP_ASSET = /^FrivoApp-Setup-[0-9.]+\.exe$/i;
 
 function parseVersion(text) {
   const m = String(text || '').trim().match(FRIVO_TAG);
@@ -81,25 +79,6 @@ function latestFrivo(releases, repository) {
   return best;
 }
 
-// The newest app release, if it's newer than `current`.
-function newerApp(releases, current, repository) {
-  const now = parseVersion(current) || [0, 0, 0];
-  let best = null;
-  for (const release of Array.isArray(releases) ? releases : []) {
-    if (!usable(release)) continue;
-    const m = String(release.tag_name || '').match(APP_TAG);
-    if (!m) continue;
-    const version = [Number(m[1]), Number(m[2]), Number(m[3])];
-    if (compareVersions(version, now) <= 0) continue;
-    const asset = pickAsset(release, APP_ASSET, repository);
-    if (!asset || !asset.sha256) continue;
-    if (!best || compareVersions(version, best.versionParts) > 0) {
-      best = { version: versionText(version), versionParts: version, notesUrl: String(release.html_url || ''), ...asset };
-    }
-  }
-  return best;
-}
-
 async function listReleases(fetchImpl, repository, userAgent) {
   const response = await fetchImpl(`https://api.github.com/repos/${repository}/releases?per_page=50`, {
     headers: { 'User-Agent': userAgent, Accept: 'application/vnd.github+json' },
@@ -119,11 +98,18 @@ async function downloadVerified(fetchImpl, asset, dest, repository, onProgress) 
   if (!String(asset.url).toLowerCase().startsWith(downloadPrefix(repository).toLowerCase())) {
     throw new Error('That download isn\'t from Frivo\'s releases.');
   }
+  return downloadChecked(fetchImpl, asset.url, asset.sha256, asset.size, dest, onProgress,
+    'The download doesn\'t match the fingerprint GitHub publishes for it, so it was deleted.');
+}
+
+// NEW (2.0.0): the download itself, checked against `sha256` as it arrives.
+// Also how the app gets its own update from the Frivo it's connected to.
+async function downloadChecked(fetchImpl, url, sha256, size, dest, onProgress, mismatch) {
   fs.mkdirSync(path.dirname(dest), { recursive: true });
   const partial = `${dest}.partial`;
-  const response = await fetchImpl(asset.url, { headers: { 'User-Agent': 'FrivoApp' } });
+  const response = await fetchImpl(url, { headers: { 'User-Agent': 'FrivoApp' }, cache: 'no-store' });
   if (!response.ok || !response.body) throw new Error(`The download failed (${response.status}).`);
-  const total = Number(response.headers.get('content-length')) || asset.size || 0;
+  const total = Number(response.headers.get('content-length')) || size || 0;
   const hash = crypto.createHash('sha256');
   const out = fs.createWriteStream(partial);
   let received = 0;
@@ -145,9 +131,9 @@ async function downloadVerified(fetchImpl, asset, dest, repository, onProgress) 
     throw err;
   }
   const actual = hash.digest('hex');
-  if (actual !== asset.sha256) {
+  if (actual !== String(sha256).toLowerCase()) {
     try { fs.unlinkSync(partial); } catch { /* gone already */ }
-    throw new Error('The download doesn\'t match the fingerprint GitHub publishes for it, so it was deleted.');
+    throw new Error(mismatch || 'The download doesn\'t match its fingerprint, so it was deleted.');
   }
   try { fs.unlinkSync(dest); } catch { /* none there */ }
   fs.renameSync(partial, dest);
@@ -159,7 +145,7 @@ module.exports = {
   compareVersions,
   versionText,
   latestFrivo,
-  newerApp,
+  downloadChecked,
   listReleases,
   downloadVerified,
   FRIVO_ASSET,

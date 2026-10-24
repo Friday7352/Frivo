@@ -1,0 +1,115 @@
+/* === server.css === */
+/* NEW (2.0.0): the Server page (/server). Uses style.css's tokens, so it
+   follows Frivo's dark and light themes; everything here is srv-. */
+
+html, body.srv-body { height: auto; min-height: 100%; overflow: auto; }
+body.srv-body { background: var(--bg); color: var(--ink); font-family: var(--font-panel); }
+
+.srv { max-width: 1220px; margin: 0 auto; padding: 28px 24px 48px; display: flex; flex-direction: column; gap: 20px; box-sizing: border-box; }
+.srv .is-hidden { display: none !important; }
+
+/* ---- top bar ---- */
+.srv-top { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px; }
+.srv-brand { display: flex; align-items: center; gap: 14px; min-width: 0; }
+.srv-logo { width: 40px; height: 40px; border-radius: 10px; flex: none; }
+.srv-brand-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.srv-title { margin: 0; font-size: 22px; font-weight: 600; letter-spacing: -0.01em; }
+.srv-meta { font-size: 13px; color: var(--ink-dim); }
+.srv-top-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+
+.srv-pill { display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; border-radius: var(--radius-pill); background: var(--fill); color: var(--ink-dim); font-size: 14px; font-weight: 600; }
+.srv-dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+.srv-pill.is-ok { background: var(--signal-soft); color: var(--signal); }
+.srv-pill.is-warn { background: var(--warn-soft); color: var(--warn); }
+.srv-pill.is-bad { background: var(--accent-soft); color: var(--accent-hover); }
+
+.srv-btn { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 0 18px; border-radius: var(--radius); background: var(--surface-3); color: var(--ink); border: 1px solid var(--rule); font: inherit; font-size: 14px; font-weight: 500; text-decoration: none; cursor: pointer; box-sizing: border-box; }
+.srv-btn:hover { background: var(--surface-4); }
+.srv-btn:disabled { opacity: 0.5; cursor: default; }
+.srv-btn--danger { background: transparent; color: var(--accent-hover); border-color: var(--accent-line); }
+.srv-btn--danger:hover { background: var(--accent-soft); }
+.srv-btn--sm { padding: 0 14px; font-size: 13px; }
+.srv-btn-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.srv-link { font: inherit; font-size: 13px; color: var(--accent-hover); background: none; border: 0; padding: 10px 0; cursor: pointer; }
+.srv-link:hover { text-decoration: underline; }
+
+.srv-banner { margin: 0; padding: 12px 16px; border-radius: var(--radius); background: var(--warn-soft); color: var(--ink); font-size: 14px; }
+
+/* ---- cards ---- */
+.srv-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 20px; }
+.srv-card { background: var(--surface); border: 1px solid var(--rule); border-radius: var(--radius-lg); padding: 22px; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.srv-card-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.srv-h2 { margin: 0; font-size: 16px; font-weight: 600; }
+.srv-aside { font-size: 13px; color: var(--ink-dim); }
+.srv-empty { margin: 0; font-size: 14px; color: var(--ink-dim); line-height: 1.5; }
+.srv-label { font-size: 12px; color: var(--ink-dim); text-transform: uppercase; letter-spacing: 0.06em; }
+.srv-mono { font-family: var(--font-mono); font-size: 15px; overflow-wrap: anywhere; }
+
+/* connect */
+.srv-connect { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 22px; }
+.srv-qr { width: 148px; height: 148px; background: #fff; border-radius: var(--radius); padding: 8px; flex: none; image-rendering: pixelated; }
+.srv-connect-text { flex: 1 1 200px; min-width: 0; display: flex; flex-direction: column; gap: 14px; }
+.srv-field { display: flex; flex-direction: column; gap: 4px; }
+.srv-code { font-size: 22px; font-weight: 500; letter-spacing: 0.08em; color: var(--accent-hover); }
+
+/* health */
+.srv-checks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.srv-check { display: flex; align-items: center; gap: 12px; min-height: 36px; }
+.srv-mark { width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; flex: none; background: var(--fill); color: var(--ink-dim); }
+.srv-check.is-ok .srv-mark { background: var(--signal-soft); color: var(--signal); }
+.srv-check.is-warn .srv-mark { background: var(--warn-soft); color: var(--warn); }
+.srv-check.is-bad .srv-mark { background: var(--accent-soft); color: var(--accent-hover); }
+.srv-check-label { flex: 1; font-size: 14px; }
+.srv-check-value { font-size: 13px; color: var(--ink-dim); text-align: right; }
+.srv-check-value a { color: var(--accent-hover); }
+
+/* devices */
+.srv-devices { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.srv-device { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-top: 1px solid var(--rule-soft); }
+.srv-device:first-child { border-top: 0; }
+.srv-device-icon { width: 36px; height: 36px; border-radius: 9px; background: var(--surface-3); color: var(--ink-dim); display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600; flex: none; }
+.srv-device-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.srv-device-name { font-size: 14px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.srv-device-sub { font-size: 12.5px; color: var(--ink-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.srv-device-doing { font-size: 13px; color: var(--ink-dim); white-space: nowrap; }
+.srv-device-doing.is-busy { color: var(--signal); }
+.srv-device.is-away { opacity: 0.6; }
+
+/* graphics card */
+.srv-graph svg { display: block; width: 100%; height: 130px; }
+.srv-graph-line { fill: none; stroke: var(--accent); stroke-width: 2.5; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+.srv-graph-fill { fill: var(--accent-soft); stroke: none; }
+.srv-graph-note { margin: 6px 0 0; font-size: 12px; color: var(--ink-dim); }
+.srv-graph-grid { stroke: var(--rule-soft); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.srv-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; }
+.srv-tile { background: var(--surface-2); border: 1px solid var(--rule-soft); border-radius: var(--radius); padding: 12px; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.srv-tile-label { font-size: 12px; color: var(--ink-dim); }
+.srv-tile-value { font-size: 14px; font-weight: 500; overflow-wrap: anywhere; }
+.srv-tile-sub { font-size: 12px; color: var(--ink-dim); overflow-wrap: anywhere; }
+.srv-tile.is-ok .srv-tile-sub { color: var(--signal); }
+.srv-tile.is-bad .srv-tile-sub { color: var(--accent-hover); }
+
+/* activity */
+.srv-log-box { overflow-x: auto; }
+.srv-log { list-style: none; margin: 0; padding: 0; font-family: var(--font-mono); font-size: 13px; }
+.srv-log li { display: flex; gap: 16px; padding: 6px 0; white-space: nowrap; }
+.srv-log-time { color: var(--ink-dim); }
+.srv-log-level { width: 48px; flex: none; color: var(--ink-dim); text-transform: uppercase; }
+.srv-log li.is-warn .srv-log-level { color: var(--warn); }
+.srv-log li.is-error .srv-log-level { color: var(--accent-hover); }
+.srv-log-text { color: var(--ink); }
+
+/* stopped: everything greyed behind the banner */
+.srv.is-down .srv-card { opacity: 0.55; }
+
+@media (max-width: 560px) {
+  .srv { padding: 20px 16px 40px; }
+  .srv-row { grid-template-columns: minmax(0, 1fr); }
+  .srv-check { flex-wrap: wrap; }
+  .srv-check-value { flex-basis: 100%; text-align: left; padding-left: 34px; }
+  .srv-log li { white-space: normal; flex-wrap: wrap; gap: 4px 12px; }
+  .srv-log-text { flex-basis: 100%; overflow-wrap: anywhere; }
+}
+
+/* Read out, not shown. */
+.srv-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }

@@ -659,6 +659,7 @@ ASSET_VERSION = asset_version()
 # Shown on the diagnostics page. A server started before the file you just
 # edited is the single most common reason a new setting is not on the page.
 SERVER_STARTED = time.strftime("%Y-%m-%d %H:%M:%S")
+SERVER_STARTED_AT = time.time()   # NEW (2.0.0): the Server page's uptime
 
 
 @app.after_request
@@ -6072,9 +6073,15 @@ def local_status():
             "id": "frivosc",
             "name": "FrivOSC",
             "ok": bool(status["connected"]),
+            # CHANGED (2.0.0): FrivOSC is built into the Frivo app, which
+            # connects by itself while VRChat runs, so not connected usually
+            # just means VRChat isn't running right now. That's a resting
+            # state ("idle": grey, not counted as a problem), not an error.
+            "idle": not status["connected"],
+            "state": None if status["connected"] else "waiting for VRChat",
             "message": (
                 "Connected." if status["connected"]
-                else "Not connected. Start FrivOSC on the PC you play VRChat on."
+                else "Connects by itself when VRChat runs on a PC with the Frivo app open."
             ),
             "url": status.get("hostname") or "this network",
             "used_for": ["VRChat chatbox", "VRChat microphone"],
@@ -6088,7 +6095,7 @@ def local_status():
         # True when nothing local is selected at all, so the client can hide
         # the indicator entirely rather than showing a meaningless "all ok".
         "none_selected": not services,
-        "all_ok": all(s["ok"] for s in services),
+        "all_ok": all(s["ok"] or s.get("idle") for s in services),   # CHANGED (2.0.0): idle is fine
     })
 
 
@@ -7210,7 +7217,7 @@ def osc_chatbox():
 
     status = frivosc_status()
     if not status["connected"]:
-        return jsonify({"error": "FrivOSC isn't connected. Start it on your VRChat PC."}), 503
+        return jsonify({"error": "Nothing on your VRChat PC is connected. Open the Frivo app there (or FrivOSC), with VRChat running."}), 503
 
     data = request.get_json(force=True)
     text = (data.get("text") or "").strip()
@@ -10698,7 +10705,11 @@ def serve(host, port, cert_path, key_path):
             # Everything, filtered or not, goes to the log file. The console
             # gets the short list. When something is actually wrong, the
             # file is the thing worth reading.
-            log_server_event(msg)
+            # CHANGED (2.0.0): except the launcher's check that Frivo is up
+            # (a connection from this PC, closed straight away), every
+            # second or so. It buried everything else in the file.
+            if not (("('127.0.0.1'," in msg or "('::1'," in msg) and "peer dropped the TLS connection" in msg):
+                log_server_event(msg)
             if any(marker in msg for marker in self.BENIGN):
                 return
             super().error_log(msg, level, traceback)
@@ -10731,7 +10742,52 @@ def serve(host, port, cert_path, key_path):
     if scheme == "https":
         from cheroot.ssl.builtin import BuiltinSSLAdapter
 
-        server.ssl_adapter = BuiltinSSLAdapter(cert_path, key_path)
+        class PatientSSLAdapter(BuiltinSSLAdapter):
+            """
+            NEW (2.0.0): one quiet connection can no longer freeze Frivo.
+
+            cheroot does the TLS handshake on the thread that accepts every
+            connection, with the idle timeout (3 minutes) as its limit. A
+            client that connects and then says nothing (a browser's
+            speculative connection, a phone that dozed off, a port check)
+            held up everyone behind it for those 3 minutes: Frivo was
+            running but answered nobody, and the app said it had stopped
+            responding.
+
+            Now a client gets a moment to start its handshake. One that does
+            (every real one, within milliseconds) is handled exactly as
+            before. One that doesn't is handed on with the handshake still to
+            do; it happens on that connection's own worker thread when it
+            finally speaks, or never, and nobody else waits for it.
+            """
+
+            HELLO_WAIT = 0.1     # seconds for the first handshake bytes
+            HANDSHAKE_LIMIT = 10  # seconds for the handshake itself
+
+            def wrap(self, sock):
+                import select as _select
+                import ssl as _ssl
+                try:
+                    ready, _, _ = _select.select([sock], [], [], self.HELLO_WAIT)
+                except (OSError, ValueError):
+                    ready = [sock]
+                if ready:
+                    previous = sock.gettimeout()
+                    sock.settimeout(self.HANDSHAKE_LIMIT)
+                    try:
+                        wrapped, env = super().wrap(sock)
+                    finally:
+                        try:
+                            sock.settimeout(previous)
+                        except OSError:
+                            pass
+                    return wrapped, env
+                # Quiet so far: the handshake happens on first read, on the
+                # worker thread that serves this connection.
+                wrapped = self.context.wrap_socket(sock, do_handshake_on_connect=False, server_side=True)
+                return wrapped, {"wsgi.url_scheme": "https", "HTTPS": "on"}
+
+        server.ssl_adapter = PatientSSLAdapter(cert_path, key_path)
 
     if local_hostname_available():
         print(f"  {scheme}://{LOCAL_HOSTNAME}:{port}   <- this PC only")
@@ -10740,7 +10796,9 @@ def serve(host, port, cert_path, key_path):
     print("Press CTRL+C to quit")
 
     # Run the server on a worker thread so Ctrl+C can request a bounded shutdown.
-    stopping = threading.Event()
+    # CHANGED (2.0.0): module-level, so the Server page's Stop can end it
+    # when there's no launcher to ask (see server_stop).
+    stopping = SERVER_STOP
 
     def request_shutdown(signum, frame):
         stopping.set()
@@ -11188,6 +11246,401 @@ def qr_png():
     resp = Response(out.getvalue(), mimetype="image/png")
     resp.headers["Cache-Control"] = "no-store"
     return resp
+
+
+# ---------------------------------------------------------------------------
+# NEW (2.0.0): the Frivo app, from this Frivo
+#
+# FrivoSetup.exe carries the app, and setup keeps its installer next to
+# Frivo (app-installer\ in the install folder) with app.json saying its
+# version. Frivo hands it out from here:
+#   * the app connected to this Frivo updates itself from it, so the app
+#     always matches the Frivo it uses, and nothing about it is on GitHub
+#   * a browser on another Windows PC gets the app from Settings > Updates
+# ---------------------------------------------------------------------------
+
+APP_INSTALLER_DIR = os.path.join(BASE_DIR, "app-installer")
+_app_installer_cache = {}
+
+
+def app_installer_info():
+    """The app installer Frivo carries: {version, name, size, sha256}, or None."""
+    try:
+        with open(os.path.join(APP_INSTALLER_DIR, "app.json"), "r", encoding="utf-8-sig") as f:
+            meta = json.load(f)
+        path = os.path.join(APP_INSTALLER_DIR, "FrivoApp-Setup.exe")
+        stat = os.stat(path)
+    except (OSError, ValueError):
+        return None
+    version = str(meta.get("version") or "")
+    if not re.fullmatch(r"\d{1,5}\.\d{1,5}\.\d{1,5}", version):
+        return None
+    key = (path, stat.st_size, stat.st_mtime)
+    if _app_installer_cache.get("key") != key:
+        digest = _hashlib.sha256()
+        with open(path, "rb") as f:
+            for chunk in iter(lambda: f.read(1024 * 1024), b""):
+                digest.update(chunk)
+        _app_installer_cache.update(key=key, sha256=digest.hexdigest())
+    return {"version": version, "name": f"FrivoApp-Setup-{version}.exe", "size": stat.st_size,
+            "sha256": _app_installer_cache["sha256"]}
+
+
+@app.route("/api/app/latest")
+def app_latest():
+    info = app_installer_info()
+    if not info:
+        return jsonify({"error": "This Frivo doesn't carry the Frivo app."}), 404
+    return jsonify(info)
+
+
+@app.route("/api/app/installer")
+def app_installer_download():
+    info = app_installer_info()
+    if not info:
+        return jsonify({"error": "This Frivo doesn't carry the Frivo app."}), 404
+    from flask import send_file
+    return send_file(os.path.join(APP_INSTALLER_DIR, "FrivoApp-Setup.exe"), mimetype="application/octet-stream",
+                     as_attachment=True, download_name=info["name"], max_age=0)
+
+
+# ============================================================
+# NEW (2.0.0): the Server page (/server)
+# ============================================================
+#
+# For a PC that runs Frivo for others: how to connect a device, whether
+# everything's working, who's using Frivo right now, the graphics card, and
+# what Frivo has logged lately. The launcher opens it on a PC set up as
+# "Frivo without the app"; anyone can open it from Settings > Other devices.
+#
+# Restart and Stop work only from this PC (a phone on the network can't
+# stop the server for everyone). They ask the launcher, which owns the
+# server process, through the same kind of named event the Frivo app uses.
+
+SERVER_STOP = threading.Event()
+
+CLIENTS = {}
+CLIENTS_LOCK = threading.Lock()
+CLIENT_FORGET_SECONDS = 24 * 3600
+CLIENT_SHOWN_SECONDS = 30 * 60      # listed for half an hour after it was last seen
+CLIENT_ONLINE_SECONDS = 90          # "connected now"
+CLIENT_BUSY_SECONDS = 8             # what it's doing, while it's doing it
+_CLIENT_NAMES = {}                  # ip -> name from the network, or "" (looked up once)
+
+# What a request means a device is doing. First match wins.
+CLIENT_ACTIVITIES = (
+    ("/api/transcribe", "Dictating"),
+    ("/api/listen", "Listening"),
+    ("/api/voice", "Speaking"),
+    ("/audio/stream/", "Speaking"),
+    ("/api/speech-stream/", "Speaking"),
+    ("/api/chat", "Writing a reply"),
+    ("/api/frivosc/", ""),          # the app's VRChat bridge: connected, not busy
+)
+
+
+def _is_loopback(addr):
+    addr = str(addr or "")
+    return addr.startswith("127.") or addr in ("::1", "localhost") or addr.startswith("::ffff:127.")
+
+
+def describe_client(user_agent):
+    """(what it is, what it's using) from a user agent, in plain words."""
+    ua = str(user_agent or "")
+    m = re.search(r"FrivoApp/([0-9.]+)", ua)
+    if re.search(r"iPhone", ua):
+        kind = "iPhone"
+    elif re.search(r"iPad", ua):
+        kind = "iPad"
+    elif re.search(r"Android", ua):
+        kind = "Android"
+    elif re.search(r"Windows", ua):
+        kind = "Windows PC"
+    elif re.search(r"Macintosh|Mac OS X", ua):
+        kind = "Mac"
+    elif re.search(r"Linux|CrOS", ua):
+        kind = "Linux PC"
+    else:
+        kind = "Device"
+    if m:
+        via = "Frivo app " + m.group(1)
+    elif "Edg/" in ua:
+        via = "Edge"
+    elif "OPR/" in ua:
+        via = "Opera"
+    elif "Firefox/" in ua or "FxiOS/" in ua:
+        via = "Firefox"
+    elif "Chrome/" in ua or "CriOS/" in ua:
+        via = "Chrome"
+    elif "Safari/" in ua:
+        via = "Safari"
+    else:
+        via = "Browser"
+    return kind, via
+
+
+def _look_up_client_name(ip):
+    """The name the network knows this address by (often the PC's name), once,
+    off the request thread: a lookup can take seconds when nothing answers."""
+    name = ""
+    try:
+        found = socket.gethostbyaddr(ip)[0]
+        if found and not re.fullmatch(r"[0-9.:]+", found):
+            name = found.split(".")[0]
+    except (OSError, UnicodeError):
+        name = ""
+    _CLIENT_NAMES[ip] = name
+
+
+@app.before_request
+def note_client():
+    """Remembers who's using Frivo, for the Server page. Static files and the
+    Server page itself don't count: looking at the page isn't using Frivo."""
+    path = request.path or ""
+    if path.startswith(("/static/", "/api/server/", "/api/qr.png", "/api/hello")) or path == "/server":
+        return None
+    if request.headers.get("X-Frivo-Server-Page"):
+        return None
+    try:
+        ip = request.remote_addr or "?"
+        kind, via = describe_client(request.headers.get("User-Agent", ""))
+        key = f"{ip}|{via}"
+        doing = None
+        for prefix, label in CLIENT_ACTIVITIES:
+            if path.startswith(prefix):
+                doing = label
+                break
+        now = time.time()
+        with CLIENTS_LOCK:
+            entry = CLIENTS.get(key)
+            if entry is None:
+                entry = CLIENTS[key] = {"ip": ip, "kind": kind, "via": via, "first": now,
+                                        "this_pc": _is_loopback(ip), "doing": "", "doing_at": 0}
+                if len(CLIENTS) > 200:   # never grows without end
+                    for old in sorted(CLIENTS, key=lambda k: CLIENTS[k]["seen"])[:50]:
+                        CLIENTS.pop(old, None)
+            entry["seen"] = now
+            if doing:
+                entry["doing"], entry["doing_at"] = doing, now
+        if ip not in _CLIENT_NAMES and not _is_loopback(ip):
+            _CLIENT_NAMES[ip] = ""
+            threading.Thread(target=_look_up_client_name, args=(ip,), daemon=True).start()
+    except Exception:
+        pass
+    return None
+
+
+def client_list(now=None):
+    """Devices seen in the last half hour, the most recent first."""
+    now = now or time.time()
+    out = []
+    with CLIENTS_LOCK:
+        for key in [k for k, c in CLIENTS.items() if now - c["seen"] > CLIENT_FORGET_SECONDS]:
+            CLIENTS.pop(key, None)
+        entries = [dict(c) for c in CLIENTS.values() if now - c["seen"] <= CLIENT_SHOWN_SECONDS]
+    for c in sorted(entries, key=lambda c: -c["seen"]):
+        ago = now - c["seen"]
+        online = ago <= CLIENT_ONLINE_SECONDS
+        busy = c["doing"] if c["doing"] and now - c["doing_at"] <= CLIENT_BUSY_SECONDS else ""
+        name = "This PC" if c["this_pc"] else (_CLIENT_NAMES.get(c["ip"]) or c["kind"])
+        out.append({
+            "name": name,
+            "kind": c["kind"],
+            "via": c["via"],
+            "ip": c["ip"],
+            "this_pc": c["this_pc"],
+            "online": online,
+            "doing": busy,
+            "seen_seconds": round(ago),
+        })
+    return out
+
+
+# Things only Windows can say, which take a program to ask. Refreshed in
+# the background at most every five minutes, so the page never waits on them.
+_SYSTEM_CHECKS = {"at": 0, "busy": False, "firewall": None, "boot_task": None}
+SYSTEM_CHECK_SECONDS = 300
+
+
+def _refresh_system_checks():
+    firewall = boot_task = None
+    if os.name == "nt":
+        try:
+            r = _hidden_run(["netsh", "advfirewall", "firewall", "show", "rule", "name=Frivo", "verbose"], timeout=10)
+            exe = os.path.normcase(os.path.abspath(sys.executable))
+            folder = os.path.normcase(os.path.dirname(exe))
+            text = os.path.normcase(r.stdout or "")
+            firewall = r.returncode == 0 and (exe in text or folder in text)
+        except Exception:
+            firewall = None
+        try:
+            r = _hidden_run(["schtasks", "/query", "/tn", "Frivo (at startup)"], timeout=10)
+            boot_task = r.returncode == 0
+        except Exception:
+            boot_task = None
+    _SYSTEM_CHECKS.update(firewall=firewall, boot_task=boot_task, at=time.time(), busy=False)
+
+
+def system_checks():
+    if not _SYSTEM_CHECKS["busy"] and time.time() - _SYSTEM_CHECKS["at"] > SYSTEM_CHECK_SECONDS:
+        _SYSTEM_CHECKS["busy"] = True
+        threading.Thread(target=_refresh_system_checks, daemon=True).start()
+    return dict(_SYSTEM_CHECKS)
+
+
+def certificate_expiry():
+    """When the server certificate runs out (epoch seconds), or None."""
+    try:
+        from cryptography import x509
+        with open(CERT_PATH, "rb") as f:
+            cert = x509.load_pem_x509_certificate(f.read())
+        end = getattr(cert, "not_valid_after_utc", None) or cert.not_valid_after.replace(tzinfo=None)
+        import calendar
+        return calendar.timegm(end.utctimetuple())
+    except Exception:
+        return None
+
+
+def server_checks(https):
+    """The Health card: one row each, ok / warn / bad / off."""
+    checks = []
+    urls = network_urls()
+    sysinfo = system_checks()
+    if not urls:
+        checks.append({"id": "network", "state": "warn", "label": "Other devices can reach it",
+                       "value": "No network address found"})
+    elif sysinfo["firewall"] is False:
+        checks.append({"id": "network", "state": "warn", "label": "Other devices can reach it",
+                       "value": "Port 5000 isn't open in the firewall. Open it from the launcher."})
+    else:
+        port = urls[0].rsplit(":", 1)[-1]
+        checks.append({"id": "network", "state": "ok", "label": "Other devices can reach it",
+                       "value": f"Port {port} open" if sysinfo["firewall"] else urls[0].split("://", 1)[1]})
+    if not https:
+        checks.append({"id": "https", "state": "warn", "label": "Secure connection (HTTPS)",
+                       "value": "Off: phones can't use the microphone"})
+    else:
+        end = certificate_expiry()
+        if end and end - time.time() < 30 * 86400:
+            checks.append({"id": "https", "state": "warn", "label": "Secure connection (HTTPS)",
+                           "value": "Certificate runs out " + time.strftime("%b %d, %Y", time.localtime(end))
+                           + ". Run setup again (Repair)."})
+        else:
+            checks.append({"id": "https", "state": "ok", "label": "Secure connection (HTTPS)",
+                           "value": ("Certificate until " + time.strftime("%Y", time.localtime(end))) if end else "On"})
+    if sysinfo["boot_task"] is not None:
+        checks.append({"id": "boot", "state": "ok" if sysinfo["boot_task"] else "off",
+                       "label": "Starts before anyone signs in",
+                       "value": "On" if sysinfo["boot_task"] else "Off. Turn it on in setup (Repair)."})
+    up = update_payload()
+    job = up.get("job") or {}
+    if job and job.get("state") not in (None, "done", "failed"):
+        checks.append({"id": "update", "state": "warn", "label": "Updating",
+                       "value": job.get("message") or "Installing…"})
+    elif up.get("latest"):
+        checks.append({"id": "update", "state": "warn", "label": "Update available",
+                       "value": f"{up['latest']['version']}: install it in Settings › About",
+                       "link": "/?settings=about"})
+    else:
+        checks.append({"id": "update", "state": "ok" if not up.get("error") else "off",
+                       "label": "Up to date",
+                       "value": APP_VERSION if not up.get("error") else f"{APP_VERSION} (couldn't check GitHub)"})
+    return checks
+
+
+def server_log_tail(limit=40):
+    """The last lines Frivo logged, newest first, for Recent activity."""
+    try:
+        with open(SERVER_LOG_PATH, "rb") as f:
+            f.seek(0, os.SEEK_END)
+            size = f.tell()
+            f.seek(max(0, size - 64 * 1024))
+            text = f.read().decode("utf-8", "replace")
+    except OSError:
+        return []
+    lines = []
+    for raw in text.splitlines():
+        m = re.match(r"\[(\d{4}-\d\d-\d\d) (\d\d:\d\d:\d\d)\] (.*)", raw)
+        if not m:
+            continue   # a traceback's own lines: the line before says what happened
+        msg = m.group(3).strip()
+        low = msg.lower()
+        if re.search(r"\b(error|failed|failing|died|traceback|gave up|couldn't|can't|unavailable)\b", low):
+            level = "error" if re.search(r"\b(error|died|traceback|gave up)\b", low) else "warn"
+        elif re.search(r"\b(slow|restart|falling back|fallback|warning|refused)\b", low):
+            level = "warn"
+        else:
+            level = "info"
+        lines.append({"date": m.group(1), "time": m.group(2), "level": level, "text": msg[:300]})
+    return lines[-limit:][::-1]
+
+
+def _signal_launcher(name):
+    """Sets one of the launcher's named events (Local\\FrivoLauncher...). True
+    when a launcher was there to hear it."""
+    if os.name != "nt":
+        return False
+    try:
+        import ctypes
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.OpenEventW(0x0002, False, "Local\\" + name)   # EVENT_MODIFY_STATE
+        if not handle:
+            return False
+        try:
+            return bool(kernel32.SetEvent(handle))
+        finally:
+            kernel32.CloseHandle(handle)
+    except Exception:
+        return False
+
+
+def _from_this_pc():
+    return _is_loopback(request.remote_addr)
+
+
+@app.route("/server")
+def server_page():
+    return render_template("server.html", asset_version=asset_version())
+
+
+@app.route("/api/server/status")
+def server_status():
+    der = authority_der()
+    https = request.scheme == "https"
+    return jsonify({
+        "name": socket.gethostname(),
+        "version": APP_VERSION,
+        "uptime_seconds": round(time.time() - SERVER_STARTED_AT),
+        "https": https,
+        "network_urls": network_urls(),
+        "pairing_code": pairing_code_for(der) if der else None,
+        "this_pc": _from_this_pc(),
+        "checks": server_checks(https),
+        "devices": client_list(),
+        "log": server_log_tail(),
+    })
+
+
+@app.route("/api/server/restart", methods=["POST"])
+def server_restart():
+    if not _from_this_pc():
+        return jsonify({"error": "Frivo can only be restarted from the PC it runs on."}), 403
+    log_server_event("restart asked for from the Server page")
+    if _signal_launcher("FrivoLauncherRestart"):
+        return jsonify({"ok": True})
+    return jsonify({"error": "Frivo's launcher isn't running, so Frivo can't restart itself. "
+                             "Stop it here, then start it from the Frivo shortcut."}), 409
+
+
+@app.route("/api/server/stop", methods=["POST"])
+def server_stop():
+    if not _from_this_pc():
+        return jsonify({"error": "Frivo can only be stopped from the PC it runs on."}), 403
+    log_server_event("stop asked for from the Server page")
+    if not _signal_launcher("FrivoLauncherStopServer"):
+        # No launcher (started by hand, or before sign-in): end this process.
+        threading.Timer(0.5, SERVER_STOP.set).start()
+    return jsonify({"ok": True})
 
 
 @app.route("/frivo-ca.crt")

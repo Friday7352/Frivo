@@ -33,6 +33,9 @@ const gh = require('./github');
 const { FrivoLocal, lanAddress } = require('./frivo-local');
 const pairing = require('./pairing');       // NEW: pairing codes
 const discovery = require('./discovery');   // NEW: finding Frivo on the network
+const { FrivOSC } = require('./osc');       // NEW (2.0.0): FrivOSC, built in
+const os = require('os');
+const { execFile } = require('child_process');
 
 const REPOSITORY = pkg.frivo.repository;
 const PORT = pkg.frivo.port;
@@ -65,6 +68,69 @@ function start() {
   const settings = new Settings(path.join(app.getPath('userData'), 'app-settings.json'));
   const local = new FrivoLocal({ appData: app.getPath('appData'), execPath: process.execPath });
   const hiddenStart = process.argv.includes('--hidden');
+
+  // ---------------------------------------------------------------- FrivOSC (NEW, 2.0.0)
+  // VRChat's chatbox and microphone, done by the app on the PC that plays
+  // VRChat (osc.js says how). Talks to whichever Frivo the app is connected
+  // to, through the app's own trusted connection.
+  const OSC_LOG = path.join(app.getPath('userData'), 'frivosc.log');
+  const [oscListen, oscSend] = (process.env.FRIVO_APP_OSC_PORTS || '9001,9000').split(',').map(Number);
+  const vrchatOverride = process.env.FRIVO_APP_VRCHAT || '';   // 'always' / 'never', for tests
+  const oscBridge = new FrivOSC({
+    listenPort: oscListen || 9001,
+    sendPort: oscSend || 9000,
+    version: app.getVersion(),
+    hostname: os.hostname(),
+    request: async (method, urlPath, body) => {
+      const origin = oscBridge.connectedTo;
+      if (!origin) throw new Error('not connected');
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 8000);
+      try {
+        const response = await net.fetch(`${origin}${urlPath}`, {
+          method,
+          headers: { Accept: 'application/json', ...(body ? { 'Content-Type': 'application/json' } : {}) },
+          body: body ? JSON.stringify(body) : undefined,
+          cache: 'no-store',
+          signal: controller.signal,
+        });
+        if (!response.ok) throw new Error(`Frivo answered ${response.status}`);
+        return await response.json().catch(() => ({}));
+      } finally {
+        clearTimeout(timer);
+      }
+    },
+    // Only while VRChat runs here: the app on the PC Frivo runs on mustn't
+    // take the chatbox messages meant for the app on the VRChat PC.
+    vrchatRunning: () => new Promise((resolve) => {
+      if (vrchatOverride) { resolve(vrchatOverride === 'always'); return; }
+      if (!IS_WINDOWS) { resolve(false); return; }
+      execFile('tasklist.exe', ['/FI', 'IMAGENAME eq VRChat.exe', '/FO', 'CSV', '/NH'], { windowsHide: true, timeout: 4000 },
+        (err, stdout) => resolve(!err && /"VRChat\.exe"/i.test(String(stdout))));
+    }),
+    // The separate FrivOSC, if it's installed and at work: its status file
+    // is rewritten every couple of seconds while it runs.
+    standaloneRunning: () => {
+      if (!IS_WINDOWS || vrchatOverride) return false;
+      try {
+        const file = path.join(process.env.ProgramData || 'C:\\ProgramData', 'FrivOSC', 'status.json');
+        const status = JSON.parse(fs.readFileSync(file, 'utf8'));
+        return Boolean(status.running) && Date.now() / 1000 - Number(status.updated_at || 0) < 15;
+      } catch {
+        return false;
+      }
+    },
+    log: (text) => {
+      try {
+        if (fs.existsSync(OSC_LOG) && fs.statSync(OSC_LOG).size > 1000000) fs.renameSync(OSC_LOG, `${OSC_LOG}.old`);
+        fs.appendFileSync(OSC_LOG, `[${new Date().toISOString().replace('T', ' ').slice(0, 19)}] ${text}\n`);
+      } catch { /* logging never stops the bridge */ }
+    },
+    // pushState is declared further down; before the window exists it has
+    // nothing to tell anyway.
+    onChange: () => { pushState().catch(() => {}); },
+  });
+  oscBridge.setEnabled(settings.get('vrchatBridge'));
 
   const state = {
     win: null,
@@ -368,6 +434,7 @@ function start() {
   }
 
   function stopProbing() {
+    oscBridge.setConnection(null);   // NEW (2.0.0)
     clearInterval(state.probeTimer);
     state.probeTimer = null;
     state.connected = false;
@@ -378,15 +445,20 @@ function start() {
   // Frivo answers at `origin`: show it, and keep checking it's still there.
   function frivoReady(origin) {
     state.origin = origin;
+    oscBridge.setConnection(origin);   // NEW (2.0.0)
+    // NEW (2.0.0): the app's update comes from Frivo, so look once it answers.
+    if (state.update.state === 'idle' || state.update.state === 'error') setTimeout(() => checkForAppUpdate(), 8000);
     state.connected = true;
     state.userStopped = false;   // it's running, whoever started it
     state.misses = 0;
     clearInterval(state.probeTimer);
     state.probeTimer = setInterval(async () => {
       if (!state.connected || !state.origin) return;
-      if (await probe(state.origin)) { state.misses = 0; return; }
+      // CHANGED (2.0.0): more patient. Frivo busy (starting a voice, a long
+      // reply) isn't Frivo gone: three misses in a row, each given 6 seconds.
+      if (await probe(state.origin, 6000)) { state.misses = 0; return; }
       state.misses += 1;
-      if (state.misses >= 2) connectionLost();
+      if (state.misses >= 3) connectionLost();
     }, PROBE_EVERY_MS);
 
     if (!state.everShown && !state.win.isVisible()) {
@@ -859,31 +931,45 @@ function start() {
 
   // ---------------------------------------------------------------- the app's own updates
 
+  /*
+    CHANGED (2.0.0): the app updates from the Frivo it's connected to, not
+    from GitHub. FrivoSetup.exe carries the app and leaves a copy with
+    Frivo (app-installer\), which Frivo hands out at /api/app/latest and
+    /api/app/installer. So updating Frivo on any PC brings its apps along.
+  */
   async function checkForAppUpdate({ manual = false } = {}) {
     if (!app.isPackaged && !process.env.FRIVO_APP_UPDATE_TEST) {
       if (manual) { state.update = { ...state.update, state: 'error', error: 'Updates work in the installed app.' }; pushState(); rebuildTray(); }
       return;
     }
     if (['checking', 'downloading', 'ready'].includes(state.update.state)) return;
+    const origin = state.connected ? state.origin : null;
+    if (!origin) {
+      if (manual) { state.update = { ...state.update, state: 'error', error: 'Connect to Frivo to check: the app updates from it.' }; pushState(); rebuildTray(); }
+      return;
+    }
     state.update = { ...state.update, state: 'checking', error: '' };
     pushState();
     try {
-      const releases = await gh.listReleases(net.fetch, REPOSITORY, `FrivoApp/${app.getVersion()}`);
-      const found = gh.newerApp(releases, app.getVersion(), REPOSITORY);
-      if (!found) {
+      const response = await net.fetch(`${origin}/api/app/latest`, { cache: 'no-store', bypassCustomProtocolHandlers: true });
+      const info = response.ok ? await response.json() : null;
+      const offered = info && gh.parseVersion(info.version);
+      const mine = gh.parseVersion(app.getVersion());
+      if (!offered || !mine || gh.compareVersions(offered, mine) <= 0 || !info.sha256) {
         state.update = { state: manual ? 'current' : 'idle', version: '', error: '', file: '', percent: 0 };
         pushState();
         rebuildTray();
         return;
       }
-      state.update = { state: 'downloading', version: found.version, error: '', file: '', percent: 0 };
+      const version = offered.join('.');
+      state.update = { state: 'downloading', version, error: '', file: '', percent: 0 };
       pushState();
-      const file = path.join(app.getPath('userData'), 'updates', found.name);
-      await gh.downloadVerified(net.fetch, found, file, REPOSITORY, (received, total) => {
+      const file = path.join(app.getPath('userData'), 'updates', `FrivoApp-Setup-${version}.exe`);
+      await gh.downloadChecked(net.fetch, `${origin}/api/app/installer`, info.sha256, info.size, file, (received, total) => {
         state.update.percent = total ? Math.floor((received / total) * 100) : 0;
       });
-      state.update = { state: 'ready', version: found.version, error: '', file, percent: 100 };
-      notify('Frivo update ready', `The app's update (${found.version}) installs when you restart it.`);
+      state.update = { state: 'ready', version, error: '', file, percent: 100 };
+      notify('Frivo update ready', `The app's update (${version}) installs when you restart it.`);
     } catch (err) {
       state.update = { state: 'error', version: '', error: err.message || String(err), file: '', percent: 0 };
     }
@@ -1038,6 +1124,7 @@ function start() {
       update: { state: state.update.state, version: state.update.version, error: state.update.error, percent: state.update.percent },
       hotkeys: { ...settings.get('hotkeys') },
       hotkeyErrors: { ...state.hotkeyErrors },
+      vrchat: oscBridge.status(),   // NEW (2.0.0)
     };
   }
 
@@ -1061,6 +1148,12 @@ function start() {
   handle('app:change-connection', fromFrivo, () => { welcomeView(); return true; });
   handle('app:check-update', fromFrivo, async () => { await checkForAppUpdate({ manual: true }); return appState(); });
   handle('app:install-update', fromFrivo, () => { installAppUpdate(); return true; });
+  // NEW (2.0.0): FrivOSC built in, on or off.
+  handle('app:set-vrchat', fromFrivo, (on) => {
+    settings.set('vrchatBridge', Boolean(on));
+    oscBridge.setEnabled(Boolean(on));
+    return appState();
+  });
   handle('app:hotkey-ready', fromFrivo, () => {
     const action = state.queuedHotkey || '';
     state.queuedHotkey = '';
@@ -1174,6 +1267,7 @@ function start() {
   app.on('before-quit', () => {
     state.quitting = true;
     stopProbing();
+    oscBridge.close();   // NEW (2.0.0): typing dots off, port released
   });
 
   app.whenReady().then(async () => {
@@ -1192,7 +1286,6 @@ function start() {
     await refreshStartAtLogin();
     await connect();
 
-    setTimeout(() => checkForAppUpdate(), 20000);
     setInterval(() => checkForAppUpdate(), UPDATE_EVERY_MS);
   });
 
