@@ -4750,13 +4750,22 @@ function speechRecognitionCtor() {
   return window.SpeechRecognition || window.webkitSpeechRecognition || null;
 }
 
+// NEW (2.0.0): the Frivo app (Electron) has the browser's speech
+// recogniser, but not Google's service behind it, so Live (browser) can't
+// work there: it fails with a network error, or never starts. In the app it
+// isn't offered, and isn't the default.
+const IN_FRIVO_APP = /FrivoApp\//.test(navigator.userAgent || "");
+
 function supportsLiveDictation() {
-  return !!speechRecognitionCtor();
+  return !!speechRecognitionCtor() && !IN_FRIVO_APP;
 }
 
 function currentDictationMode() {
   const stored = localStorage.getItem(DICTATION_MODE_KEY);
-  if (stored === "live" || stored === "accurate" || stored === "live_local" || stored === "live_frivo") return stored;
+  if (stored === "live" && !supportsLiveDictation()) {
+    // CHANGED (2.0.0): saved in a browser, or before the app existed. Falls
+    // through to the default below.
+  } else if (stored === "live" || stored === "accurate" || stored === "live_local" || stored === "live_frivo") return stored;
   // NEW (2.0.0): built-in dictation, once it's downloaded.
   if (builtinDictationReady) return "live_frivo";
   // Default to live where it exists — it's the more pleasant experience and
@@ -4774,10 +4783,13 @@ function updateDictationModeNote() {
       : "Download built-in dictation below to use this.";
     return;
   }
-  if (!supportsLiveDictation()) {
-    dictationModeNote.textContent =
-      "Live mode isn't available in this browser — Chrome and Edge support it. Accurate mode works everywhere.";
-    return;
+  if (!supportsLiveDictation() && currentDictationMode() !== "live_local") {
+    dictationModeNote.textContent = IN_FRIVO_APP
+      ? (currentDictationMode() === "accurate"
+        ? "Nothing appears until you stop; uses OpenAI or Evora (Settings › Providers). For live words, download built-in dictation below."
+        : "")
+      : "Live (browser) isn't available in this browser — Chrome and Edge support it. Accurate mode works everywhere.";
+    if (dictationModeNote.textContent) return;
   }
   const notes = {
     live: "Words appear as you speak. Uses the system default microphone, not the one selected above.",
@@ -4792,7 +4804,7 @@ function buildDictationModeUI() {
   if (!dictationModeRadios) return;
   buildRadioGroup(
     dictationModeRadios,
-    DICTATION_MODES,
+    DICTATION_MODES.filter((m) => m.id !== "live" || !IN_FRIVO_APP),   // CHANGED (2.0.0)
     "dictation_mode",
     currentDictationMode(),
     (id) => {

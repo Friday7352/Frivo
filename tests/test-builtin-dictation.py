@@ -266,6 +266,18 @@ if sync_playwright:
         final = page.input_value("#messageInput")
         check("after Stop the sentence is in the box", "word1_" in final and "word2_" in final, final)
         check("no script errors", not errors, errors)
+        # NEW (2.0.0): the Frivo app has no speech service behind the browser's
+        # recogniser, so Live (browser) is never offered or chosen there.
+        app_page = browser.new_page(user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/140.0 Electron/44.5.1 Safari/537.36 FrivoApp/2.0.0")
+        app_page.goto("http://127.0.0.1:5196/")
+        app_page.wait_for_selector("#dictateBtn", timeout=20000)
+        app_page.evaluate("localStorage.setItem('voice_console_dictation_mode', 'live')")
+        app_page.evaluate("buildDictationModeUI()")
+        modes = app_page.evaluate("[...document.querySelectorAll('#dictationModeRadios input')].map((i) => i.value)")
+        check("the app doesn't offer Live (browser)", "live" not in modes and "live_frivo" in modes, modes)
+        check("and a saved Live (browser) becomes built-in dictation there", app_page.evaluate("currentDictationMode()") == "live_frivo",
+              app_page.evaluate("currentDictationMode()"))
+        app_page.close()
         browser.close()
     server.shutdown()
 
