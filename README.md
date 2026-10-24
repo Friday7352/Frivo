@@ -96,6 +96,14 @@ Click any of them:
 - 🎤 **Dictation** — click and talk instead of typing. It's always off when
   Frivo opens.
 
+**Built-in dictation.** In **Settings › Dictation › Built into Frivo**, one
+download (about 270 MB, or 140 MB for the faster model) gives you live
+dictation that runs inside Frivo on the PC it runs on: words appear as you
+speak, with nothing sent to OpenAI and no Evora or graphics card needed.
+English only. It downloads to the PC Frivo runs on, even when you click the
+button on a phone or another PC. It uses Moonshine's streaming models (MIT
+licensed). The mic button then uses the **Live (Frivo)** mode.
+
 **Hover over a reply** to see which voice spoke it and whether it was written
 **Local**ly or by **OpenAI**.
 

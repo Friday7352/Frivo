@@ -4464,6 +4464,42 @@ async function refreshFreeVoices() {
 
 const MIC_STORAGE_KEY = "voice_console_mic_device_id";
 
+// NEW (2.0.0): saved audio devices are found again by name. A device's id
+// is made up by the browser and changes when its data is wiped (reinstalling
+// the Frivo app, clearing the browser), so a restored or kept id stops
+// matching. The name of each saved device is kept beside it, and when the
+// id is gone but a device with that name is there, the saved id is updated.
+const DEVICE_LABELS_KEY = "frivo_device_labels";
+const SAVED_DEVICE_KEYS = [
+  ["voice_console_mic_device_id", "audioinput"],
+  ["voice_console_listen_device", "audioinput"],
+  ["frivo_output_device", "audiooutput"],
+];
+function healSavedDevices(devices) {
+  let labels = {};
+  try { labels = JSON.parse(localStorage.getItem(DEVICE_LABELS_KEY) || "{}") || {}; } catch (e) { labels = {}; }
+  let changed = false;
+  for (const [key, kind] of SAVED_DEVICE_KEYS) {
+    let id = "";
+    try { id = localStorage.getItem(key) || ""; } catch (e) { return; }
+    if (!id || id === "default") continue;
+    const named = (devices || []).filter((d) => d.kind === kind && d.label);
+    if (!named.length) continue;   // names hidden until the mic is allowed
+    const here = named.find((d) => d.deviceId === id);
+    if (here) {
+      if (labels[key] !== here.label) { labels[key] = here.label; changed = true; }
+      continue;
+    }
+    const same = labels[key] && named.find((d) => d.label === labels[key] && d.deviceId !== "default" && d.deviceId !== "communications");
+    if (same) {
+      try { localStorage.setItem(key, same.deviceId); } catch (e) { /* this time only */ }
+    }
+  }
+  if (changed) {
+    try { localStorage.setItem(DEVICE_LABELS_KEY, JSON.stringify(labels)); } catch (e) { /* this time only */ }
+  }
+}
+
 // CHANGED (1.5.0): the microphone list.
 //
 // Until the page is allowed to use the mic, browsers hide every device's id
@@ -4518,6 +4554,7 @@ async function loadMicrophones() {
   }
   try {
     const devices = await navigator.mediaDevices.enumerateDevices();
+    healSavedDevices(devices);   // NEW (2.0.0)
     const visible = fillMicrophones(devices, localStorage.getItem(MIC_STORAGE_KEY) || "");
     // CHANGED (2.0.0): one button, shown only while the names are hidden.
     micNote.textContent = visible
@@ -4582,6 +4619,13 @@ refreshMicsBtn.addEventListener("click", async () => {
 const DICTATION_MODE_KEY = "voice_console_dictation_mode";
 
 const DICTATION_MODES = [
+  // NEW (2.0.0): built-in dictation, on the PC Frivo runs on.
+  {
+    id: "live_frivo",
+    name: "Live (Frivo)",
+    description:
+      "Words appear as you speak, transcribed by Frivo itself on the PC it runs on. Free and private, English only. Download it below first.",
+  },
   {
     id: "live",
     name: "Live (browser)",
@@ -4688,6 +4732,7 @@ function scheduleAutoSend(delayMs = AUTO_SEND_DELAY_MS) {
     // CHANGED (dictation speed): actually checked now. Mid-sentence again
     // means the sentence is not finished; its own end reschedules this.
     if (liveLocal && liveLocal.speaking) return;
+    if (liveFrivo && liveFrivoSpeaking(liveFrivo)) return;   // NEW (2.0.0)
     send({ auto: true });   // CHANGED (1.5.0): sent hands-free, so no tag check
   }, Math.max(0, delayMs));
 }
@@ -4695,6 +4740,8 @@ function scheduleAutoSend(delayMs = AUTO_SEND_DELAY_MS) {
 let mediaRecorder = null;
 let recordedChunks = [];
 let isDictating = false;
+let builtinDictationReady = false;   // NEW (2.0.0): set by Settings › Dictation's card
+let liveFrivo = null;                // NEW (2.0.0): the live built-in dictation running now
 // Which engine the in-progress dictation was started with, so stopping
 // always goes back to the same one even if the setting changed mid-way.
 let activeDictationMode = null;
@@ -4709,7 +4756,9 @@ function supportsLiveDictation() {
 
 function currentDictationMode() {
   const stored = localStorage.getItem(DICTATION_MODE_KEY);
-  if (stored === "live" || stored === "accurate" || stored === "live_local") return stored;
+  if (stored === "live" || stored === "accurate" || stored === "live_local" || stored === "live_frivo") return stored;
+  // NEW (2.0.0): built-in dictation, once it's downloaded.
+  if (builtinDictationReady) return "live_frivo";
   // Default to live where it exists — it's the more pleasant experience and
   // it's free — and quietly fall back where it doesn't (Firefox, older
   // Safari).
@@ -4718,6 +4767,13 @@ function currentDictationMode() {
 
 function updateDictationModeNote() {
   if (!dictationModeNote) return;
+  // NEW (2.0.0)
+  if (currentDictationMode() === "live_frivo") {
+    dictationModeNote.textContent = builtinDictationReady
+      ? "Words appear as you speak, transcribed by Frivo on the PC it runs on. Uses the microphone chosen in Audio. English."
+      : "Download built-in dictation below to use this.";
+    return;
+  }
   if (!supportsLiveDictation()) {
     dictationModeNote.textContent =
       "Live mode isn't available in this browser — Chrome and Edge support it. Accurate mode works everywhere.";
@@ -5502,6 +5558,294 @@ function stopLocalLiveDictation() {
   setStatus("Ready.");
 }
 
+
+// ============================================================
+// NEW (2.0.0): Live (Frivo) — built-in dictation
+// ============================================================
+// The microphone goes to the PC Frivo runs on as plain 16 kHz audio, a few
+// times a second, and Moonshine's streaming model there sends back the
+// words so far. It decides where a sentence ends (a pause) and marks it
+// complete; complete sentences go into the text, the one still being said
+// is shown after them and keeps correcting itself.
+const LIVE_FRIVO = {
+  SEND_MS: 160,              // how often audio goes up (and words come back)
+  SPEECH_THRESHOLD: 0.012,   // the level that counts as talking, as for Live (Evora)
+  AUTO_SEND_QUIET_MS: 1500,  // Auto: sent this long after you stopped talking
+  SPEAKING_HOLD_MS: 450,     // still "talking" this long after the level drops
+};
+
+// Collects the microphone on the audio thread and posts it every 50 ms.
+// Loaded from a string, so there's no extra file.
+const PCM_WORKLET_SOURCE = `
+class FrivoPcm extends AudioWorkletProcessor {
+  constructor() { super(); this.parts = []; this.count = 0; this.every = Math.round(sampleRate * 0.05); }
+  process(inputs) {
+    const channel = inputs[0] && inputs[0][0];
+    if (channel) {
+      this.parts.push(new Float32Array(channel));
+      this.count += channel.length;
+      if (this.count >= this.every) {
+        const out = new Float32Array(this.count);
+        let at = 0;
+        for (const part of this.parts) { out.set(part, at); at += part.length; }
+        this.port.postMessage(out, [out.buffer]);
+        this.parts = [];
+        this.count = 0;
+      }
+    }
+    return true;
+  }
+}
+registerProcessor("frivo-pcm", FrivoPcm);
+`;
+
+// The microphone's rate (often 48 kHz) to 16 kHz, carrying the fraction
+// over from one block to the next so nothing clicks at the joins.
+function makeResampler(inRate) {
+  const ratio = inRate / 16000;
+  let carry = new Float32Array(0);
+  let pos = 0;
+  return (block) => {
+    const data = new Float32Array(carry.length + block.length);
+    data.set(carry);
+    data.set(block, carry.length);
+    const out = [];
+    while (pos + 1 < data.length) {
+      const i = Math.floor(pos);
+      const f = pos - i;
+      out.push(data[i] + (data[i + 1] - data[i]) * f);
+      pos += ratio;
+    }
+    const keep = Math.min(Math.floor(pos), data.length);
+    carry = data.slice(keep);
+    pos -= keep;
+    return out;
+  };
+}
+
+function toPcm16(samples) {
+  const out = new Int16Array(samples.length);
+  for (let i = 0; i < samples.length; i += 1) {
+    const v = Math.max(-1, Math.min(1, samples[i]));
+    out[i] = v < 0 ? v * 32768 : v * 32767;
+  }
+  return out;
+}
+
+function liveFrivoSpeaking(s) {
+  return Boolean(s && Date.now() - s.lastVoiceAt < LIVE_FRIVO.SPEAKING_HOLD_MS);
+}
+
+function takeQueuedPcm(s) {
+  if (!s.queued) return new Int16Array(0);
+  const out = new Int16Array(s.queued);
+  let at = 0;
+  for (const part of s.queue) { out.set(part, at); at += part.length; }
+  s.queue = [];
+  s.queued = 0;
+  return out;
+}
+
+async function openFrivoStream() {
+  const res = await fetch("/api/dictation/stream", { method: "POST" });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.id) throw new Error(data.error || `Frivo answered ${res.status}.`);
+  return data.id;
+}
+
+function applyFrivoLines(s, lines) {
+  let interim = "";
+  for (const line of lines || []) {
+    if (line.complete) {
+      if (s.done.has(line.id)) continue;
+      s.done.add(line.id);
+      if (line.text) {
+        commitDictated(line.text);
+        s.lastCompleteAt = Date.now();
+        // Auto: counted from when you stopped talking, not from when the
+        // words arrived.
+        scheduleAutoSend(LIVE_FRIVO.AUTO_SEND_QUIET_MS - (Date.now() - s.lastVoiceAt));
+      }
+    } else if (line.text) {
+      interim = joinDictated(interim, line.text);
+    }
+  }
+  // Not while a preview you typed over is waiting for its finished words.
+  if (!liveBakedInterim) liveInterim = interim;
+  renderLiveText();
+}
+
+async function pumpFrivo(s, force) {
+  if (!s.id || s.inflight || s.ended) return;
+  if (!force && Date.now() - s.lastSentAt < LIVE_FRIVO.SEND_MS) return;
+  const pcm = takeQueuedPcm(s);
+  if (!pcm.length && !force) return;
+  s.inflight = true;
+  s.lastSentAt = Date.now();
+  try {
+    const res = await fetch(`/api/dictation/stream/${encodeURIComponent(s.id)}`, {
+      method: "POST", headers: { "Content-Type": "application/octet-stream" }, body: pcm.buffer,
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 409 && !s.reopened) {
+      // The stream was closed under it (a model switched, Frivo restarted):
+      // start another once and carry on.
+      s.reopened = true;
+      s.id = await openFrivoStream();
+      s.done = new Set();
+      return;
+    }
+    if (!res.ok) throw new Error(data.error || `Frivo answered ${res.status}.`);
+    if (isDictating && liveFrivo === s) applyFrivoLines(s, data.lines);
+  } catch (err) {
+    if (liveFrivo === s && isDictating) {
+      setStatus(`Dictation stopped: ${err.message}`, true);
+      stopFrivoLiveDictation();
+    }
+  } finally {
+    s.inflight = false;
+  }
+}
+
+async function startFrivoLiveDictation() {
+  if (!navigator.mediaDevices || !window.AudioContext) {
+    setStatus("This browser can't send the microphone to Frivo. Try Chrome, Edge or the Frivo app.", true);
+    return;
+  }
+  let stream;
+  try {
+    stream = await openMicrophone();
+  } catch (err) {
+    setStatus(`Couldn't access the microphone: ${err.message}`, true);
+    return;
+  }
+  const ctx = new (window.AudioContext || window.webkitAudioContext)();
+  const source = ctx.createMediaStreamSource(stream);
+  const analyser = ctx.createAnalyser();
+  analyser.fftSize = 1024;
+  source.connect(analyser);
+
+  const s = {
+    id: null, stream, ctx, source, analyser, node: null, resample: makeResampler(ctx.sampleRate),
+    queue: [], queued: 0, inflight: false, lastSentAt: 0, lastVoiceAt: 0, lastCompleteAt: 0,
+    done: new Set(), ended: false, reopened: false,
+  };
+  liveFrivo = s;
+  liveCommitted = messageInput.value.trim();
+  liveInterim = "";
+  liveBakedInterim = "";
+  liveStopping = false;
+  isDictating = true;
+  setDictateUI(true);
+  if (typeof micRing !== "undefined") micRing.fromAnalyser(analyser);
+  setStatus("Starting dictation…");
+
+  // The stream and the microphone start together; what's said while the
+  // model loads waits in the queue, so the first words aren't lost.
+  const opening = openFrivoStream();
+  try {
+    if (!ctx.audioWorklet || typeof AudioWorkletNode !== "function") throw new Error("This browser is too old for live dictation.");
+    const url = URL.createObjectURL(new Blob([PCM_WORKLET_SOURCE], { type: "application/javascript" }));
+    try { await ctx.audioWorklet.addModule(url); } finally { URL.revokeObjectURL(url); }
+    if (liveFrivo !== s || !isDictating) return;
+    const node = new AudioWorkletNode(ctx, "frivo-pcm");
+    const mute = ctx.createGain();
+    mute.gain.value = 0;   // it only runs while connected through to the speakers
+    source.connect(node);
+    node.connect(mute);
+    mute.connect(ctx.destination);
+    node.port.onmessage = (event) => {
+      if (liveFrivo !== s || s.ended) return;
+      const block = event.data;
+      let sum = 0;
+      for (let i = 0; i < block.length; i += 1) sum += block[i] * block[i];
+      const level = Math.sqrt(sum / (block.length || 1));
+      const now = Date.now();
+      if (level > LIVE_FRIVO.SPEECH_THRESHOLD) {
+        // Talking again after a pause: the last sentence wasn't the end.
+        if (now - s.lastVoiceAt > LIVE_FRIVO.SPEAKING_HOLD_MS) cancelAutoSend();
+        s.lastVoiceAt = now;
+      }
+      const pcm = toPcm16(s.resample(block));
+      s.queue.push(pcm);
+      s.queued += pcm.length;
+      pumpFrivo(s, false);
+    };
+    s.node = node;
+  } catch (err) {
+    setStatus(`Couldn't start dictation: ${err.message}`, true);
+    stopFrivoLiveDictation();
+    return;
+  }
+  try {
+    s.id = await opening;
+  } catch (err) {
+    if (liveFrivo === s) {
+      setStatus(err.message, true);
+      stopFrivoLiveDictation();
+    }
+    return;
+  }
+  if (liveFrivo !== s || !isDictating) {
+    fetch(`/api/dictation/stream/${encodeURIComponent(s.id)}/stop`, { method: "POST" }).catch(() => {});
+    return;
+  }
+  setStatus(micFellBack
+    ? "Listening on the default microphone — your saved one isn't connected."
+    : "Listening — text appears as you speak.");
+  pumpFrivo(s, true);
+}
+
+async function stopFrivoLiveDictation() {
+  const s = liveFrivo;
+  isDictating = false;
+  liveStopping = true;
+  setDictateUI(false);
+  if (!s) return;
+  s.ended = true;
+  if (s.node) s.node.port.onmessage = null;
+  try {
+    s.stream.getTracks().forEach((t) => t.stop());
+    s.ctx.close();
+  } catch (err) {
+    /* already torn down */
+  }
+  // Whatever was said last, then the final words: the sentence still being
+  // said when you stopped is finished, not dropped.
+  if (s.id) {
+    for (let i = 0; i < 40 && s.inflight; i += 1) await new Promise((r) => setTimeout(r, 25));
+    const pcm = takeQueuedPcm(s);
+    try {
+      const res = await fetch(`/api/dictation/stream/${encodeURIComponent(s.id)}/stop`, {
+        method: "POST", headers: { "Content-Type": "application/octet-stream" }, body: pcm.buffer,
+      });
+      const data = await res.json().catch(() => ({}));
+      const lines = data.lines || [];
+      const shown = liveInterim;
+      liveInterim = "";
+      for (const line of lines) {
+        if (line.text && !s.done.has(line.id)) {
+          s.done.add(line.id);
+          commitDictated(line.text);
+        }
+      }
+      if (!lines.length && shown) commitDictated(shown);
+    } catch (err) {
+      if (liveInterim) commitDictated(liveInterim);
+    }
+  } else if (liveInterim) {
+    commitDictated(liveInterim);
+  }
+  liveInterim = "";
+  liveBakedInterim = "";
+  renderLiveText();
+  if (liveFrivo === s) liveFrivo = null;
+  if (s.lastCompleteAt || messageInput.value.trim()) {
+    scheduleAutoSend(LIVE_FRIVO.AUTO_SEND_QUIET_MS - (Date.now() - (s.lastVoiceAt || Date.now())));
+  }
+  setStatus("Ready.");
+}
+
 // Named, because the mic button is no longer the only thing that starts and
 // stops dictation — VRChat's mute button can too, when mute sync is on.
 // Whichever engine is selected, both callers go through the same door.
@@ -5510,6 +5854,7 @@ function beginDictation() {
   activeDictationMode = currentDictationMode();
   if (activeDictationMode === "live") startLiveDictation();
   else if (activeDictationMode === "live_local") startLocalLiveDictation();
+  else if (activeDictationMode === "live_frivo") startFrivoLiveDictation();   // NEW (2.0.0)
   else startDictation();
 }
 
@@ -5517,6 +5862,7 @@ function endDictation() {
   if (!isDictating) return;
   if (activeDictationMode === "live") stopLiveDictation();
   else if (activeDictationMode === "live_local") stopLocalLiveDictation();
+  else if (activeDictationMode === "live_frivo") stopFrivoLiveDictation();   // NEW (2.0.0)
   else stopDictation();
 }
 
@@ -5714,6 +6060,7 @@ async function loadListenDevices() {
   if (!listenDeviceSelect || !navigator.mediaDevices) return;
   try {
     const devices = await navigator.mediaDevices.enumerateDevices();
+    healSavedDevices(devices);   // NEW (2.0.0)
     const inputs = devices.filter((d) => d.kind === "audioinput");
 
     const preferred =
@@ -8348,6 +8695,8 @@ function respondingNow() {
     if (activeDictationMode === "accurate") return true;
     if (activeDictationMode === "live_local" && liveLocal &&
         (liveLocal.speaking || liveLocal.speculative)) return true;
+    if (activeDictationMode === "live_frivo" && liveFrivo &&
+        (liveFrivoSpeaking(liveFrivo) || liveInterim)) return true;   // NEW (2.0.0)
   }
   return messageInput.value.trim() !== "" && now - typingLastChangeAt < TYPING_IDLE_MS;
 }
@@ -14169,6 +14518,237 @@ async function checkElevenKey(force) {
 })();
 
 
+// ---------------------------------------------------------------------------
+// NEW (2.0.0): built-in dictation (Settings › Dictation › Built into Frivo).
+// Download happens on the PC Frivo runs on: this page only asks for it and
+// shows the progress. Ready means the "Live (Frivo)" mode works, and it
+// becomes this browser's dictation mode unless you picked another.
+// ---------------------------------------------------------------------------
+(function initBuiltinDictation() {
+  const card = $("bdCard");
+  if (!card) return;
+  const modelsEl = $("bdModels");
+  const getBtn = $("bdGetBtn");
+  const cancelBtn = $("bdCancelBtn");
+  const testBtn = $("bdTestBtn");
+  const againBtn = $("bdAgainBtn");
+  const statusEl = $("bdStatus");
+  const idleSel = $("bdIdle");
+  let info = null;
+  let chosen = "medium";
+  let poll = null;
+  let lastJobState = "";
+  let pickedHere = false;
+  const mb = (n) => `${Math.round(n / 1e6)} MB`;
+  const BUSY = ["checking", "model"];
+
+  function say(text, kind) {
+    statusEl.textContent = text || "";
+    statusEl.classList.toggle("is-error", kind === "error");
+    statusEl.classList.toggle("is-ok", kind === "ok");
+  }
+
+  function renderModels() {
+    const nodes = (info.models || []).map((m) => {
+      const label = document.createElement("label");
+      label.className = `bai-model${m.id === chosen ? " is-checked" : ""}`;
+      const input = document.createElement("input");
+      input.type = "radio";
+      input.name = "builtin_dictation_model";
+      input.value = m.id;
+      input.checked = m.id === chosen;
+      const top = document.createElement("span");
+      top.className = "bai-model-top";
+      const name = document.createElement("span");
+      name.className = "bai-model-name";
+      name.textContent = m.name;
+      top.append(name);
+      if (m.downloaded) {
+        const badge = document.createElement("span");
+        badge.className = "om-badge is-fits";
+        badge.textContent = "Downloaded";
+        top.append(badge);
+      }
+      const sub = document.createElement("span");
+      sub.className = "bai-model-sub";
+      sub.textContent = `${m.model} · ${mb(m.size)} download`;
+      const note = document.createElement("span");
+      note.className = "bai-model-note";
+      note.textContent = m.note;
+      label.append(input, top, sub, note);
+      if (m.downloaded) {
+        const remove = document.createElement("button");
+        remove.type = "button";
+        remove.className = "bai-model-remove";
+        remove.dataset.remove = m.id;
+        remove.textContent = "Remove";
+        label.append(remove);
+      }
+      return label;
+    });
+    modelsEl.replaceChildren(...nodes);
+  }
+
+  function markReady() {
+    const was = builtinDictationReady;
+    builtinDictationReady = Boolean(info && info.supported && (info.models || []).some((m) => m.downloaded));
+    if (was !== builtinDictationReady && typeof buildDictationModeUI === "function") buildDictationModeUI();
+    else if (typeof updateDictationModeNote === "function") updateDictationModeNote();
+  }
+
+  function render() {
+    if (!info) return;
+    const model = (info.models || []).find((m) => m.id === chosen) || {};
+    const ready = Boolean(model.downloaded);
+    const job = info.job || {};
+    const busy = BUSY.includes(job.state);
+    const inUse = currentDictationMode() === "live_frivo";
+    renderModels();
+    $("bdValue").textContent = !info.supported ? "Not available" : ready && inUse ? "In use"
+      : ready ? "Downloaded" : busy ? "Downloading" : "Not downloaded";
+    $("bdProgress").classList.toggle("is-hidden", !busy);
+    cancelBtn.classList.toggle("is-hidden", !busy);
+    testBtn.classList.toggle("is-hidden", !ready || busy);
+    againBtn.classList.toggle("is-hidden", !ready || busy);
+    getBtn.classList.toggle("is-hidden", busy || (ready && inUse));
+    getBtn.textContent = ready ? "Use it for dictation" : `Download and use (${mb(model.size || 0)})`;
+    getBtn.disabled = !info.supported;
+    $("bdRemoveRow").classList.toggle("is-hidden", !(info.models || []).some((m) => m.downloaded));
+    $("bdFolder").textContent = info.folder ? `Kept in ${info.folder} on the PC Frivo runs on` : "";
+    if (idleSel && document.activeElement !== idleSel) idleSel.value = info.idle || "15m";
+    if (busy) {
+      const pct = job.total ? Math.min(100, Math.round((job.done / job.total) * 100)) : 0;
+      $("bdProgressText").textContent = job.state === "model"
+        ? `Downloading ${model.model || "the model"} to the PC Frivo runs on…` : "Getting ready…";
+      $("bdProgressPct").textContent = job.total ? `${mb(job.done)} of ${mb(job.total)} · ${pct}%` : "";
+      $("bdProgressBar").style.width = `${pct}%`;
+    }
+    if (!info.supported) say(info.problem, "error");
+    else if (job.state === "error" && lastJobState !== "shown-error") say(job.error, "error");
+  }
+
+  async function refresh() {
+    try {
+      const res = await fetch("/api/builtin-dictation");
+      info = await res.json();
+      if (!poll && !pickedHere && info.model) chosen = info.model;
+      const job = info.job || {};
+      const busy = BUSY.includes(job.state);
+      if (lastJobState && BUSY.includes(lastJobState) && job.state === "done") {
+        localStorage.setItem(DICTATION_MODE_KEY, "live_frivo");
+        say("Ready. The mic button now uses built-in dictation (Live (Frivo)).", "ok");
+      } else if (lastJobState && BUSY.includes(lastJobState) && job.state === "cancelled") {
+        say("Cancelled. Nothing was kept.");
+      }
+      markReady();
+      render();
+      lastJobState = job.state === "error" ? "shown-error" : (job.state || "");
+      clearTimeout(poll);
+      poll = busy ? setTimeout(refresh, 700) : null;
+    } catch (_) { /* tried again when the section is opened */ }
+  }
+
+  modelsEl.addEventListener("change", (e) => {
+    if (e.target.name !== "builtin_dictation_model") return;
+    chosen = e.target.value;
+    pickedHere = true;
+    say("");
+    render();
+    fetch("/api/builtin-dictation/settings", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model: chosen }) }).catch(() => {});
+  });
+  modelsEl.addEventListener("click", async (e) => {
+    const btn = e.target.closest("[data-remove]");
+    if (!btn) return;
+    e.preventDefault();
+    if (btn.dataset.armed !== "1") {
+      btn.dataset.armed = "1";
+      btn.textContent = "Remove? Click again";
+      setTimeout(() => { btn.dataset.armed = ""; btn.textContent = "Remove"; }, 3000);
+      return;
+    }
+    const res = await fetch(`/api/builtin-dictation/${encodeURIComponent(btn.dataset.remove)}`, { method: "DELETE" }).catch(() => null);
+    const data = res ? await res.json().catch(() => ({})) : {};
+    if (res && res.ok) say("Removed."); else say(data.error || "Couldn't remove it.", "error");
+    refresh();
+  });
+
+  async function startDownload(again) {
+    say("");
+    getBtn.disabled = true;
+    try {
+      const res = await fetch("/api/builtin-dictation/download", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model: chosen, again }) });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `Frivo said ${res.status}`);
+      if (data.ready) {
+        localStorage.setItem(DICTATION_MODE_KEY, "live_frivo");
+        say("The mic button now uses built-in dictation (Live (Frivo)).", "ok");
+      } else {
+        lastJobState = "checking";
+      }
+    } catch (err) {
+      say(err.message || String(err), "error");
+    } finally {
+      getBtn.disabled = false;
+    }
+    refresh();
+  }
+  getBtn.addEventListener("click", () => startDownload(false));
+  againBtn.addEventListener("click", () => startDownload(true));
+  cancelBtn.addEventListener("click", () => fetch("/api/builtin-dictation/cancel", { method: "POST" }).then(refresh));
+  testBtn.addEventListener("click", async () => {
+    testBtn.disabled = true;
+    say("Loading it and transcribing a few seconds of sample speech…");
+    try {
+      const res = await fetch("/api/builtin-dictation/test", { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `Frivo said ${res.status}`);
+      say(`"${data.text}" — ${data.audio_seconds} s of speech in ${data.seconds} s`
+        + (data.load_seconds >= 0.5 ? ` (plus ${data.load_seconds} s to load it)` : "") + ".", "ok");
+    } catch (err) {
+      say(err.message || String(err), "error");
+    } finally {
+      testBtn.disabled = false;
+      refresh();
+    }
+  });
+  if (idleSel) {
+    idleSel.addEventListener("change", () => {
+      fetch("/api/builtin-dictation/settings", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ idle: idleSel.value }) }).catch(() => {});
+    });
+  }
+  $("bdRemoveBtn").addEventListener("click", async (e) => {
+    const btn = e.currentTarget;
+    if (btn.dataset.armed !== "1") {
+      btn.dataset.armed = "1";
+      btn.textContent = "Remove everything?";
+      setTimeout(() => { btn.dataset.armed = ""; btn.textContent = "Remove"; }, 3000);
+      return;
+    }
+    btn.dataset.armed = "";
+    btn.textContent = "Remove";
+    const res = await fetch("/api/builtin-dictation", { method: "DELETE" }).catch(() => null);
+    const data = res ? await res.json().catch(() => ({})) : {};
+    if (res && res.ok) {
+      say("Removed.");
+      if (localStorage.getItem(DICTATION_MODE_KEY) === "live_frivo") localStorage.removeItem(DICTATION_MODE_KEY);
+    } else {
+      say(data.error || "Couldn't remove it.", "error");
+    }
+    refresh();
+  });
+  // The mode radios above change what "In use" means.
+  if (dictationModeRadios) dictationModeRadios.addEventListener("change", () => setTimeout(render, 0));
+
+  document.addEventListener("click", (e) => {
+    if (e.target.closest && e.target.closest('.settings-nav-btn[data-settings-section="dictation"]')) setTimeout(refresh, 50);
+  });
+  refresh();
+})();
+
+
 // NEW (1.6.0): the Ollama card under Chat replies says what *your* three
 // models use, once Ollama has said how big they are. (Until then, or if
 // Ollama can't be reached, it gives the usual range.)
@@ -14722,6 +15302,8 @@ function syncAudioSummaries() {
 // ---- output device ----
 async function loadOutputDevices() {
   if (!outputSelect) return;
+  // NEW (2.0.0): a saved device found again by its name first.
+  try { if (navigator.mediaDevices && navigator.mediaDevices.enumerateDevices) healSavedDevices(await navigator.mediaDevices.enumerateDevices()); } catch (e) { /* as saved */ }
   const saved = savedOutputDevice();
   const opt = (value, text) => { const o = document.createElement("option"); o.value = value; o.textContent = text; return o; };
   if (!canChooseOutput() || !navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) {
@@ -14971,4 +15553,83 @@ syncAudioSummaries();
   setSettingsOpen(true);
   if (typeof window.showSettingsSection === "function") window.showSettingsSection(wanted);
   try { history.replaceState(null, "", window.location.pathname); } catch { /* fine */ }
+})();
+
+
+// ============================================================
+// NEW (2.0.0): Frivo keeps a copy of this browser's preferences
+// ============================================================
+// Favourite voices, the audio devices, dictation and listening choices and
+// the rest live in this browser, so uninstalling the Frivo app or clearing
+// the browser lost them, even when setup kept everything else. Frivo now
+// keeps a copy (browser_prefs.json in its data folder, one per kind of
+// device and browser), which setup's backups include. A browser that starts
+// with none of its own takes them from there, once, and reloads.
+(function syncBrowserPrefs() {
+  const PREFIXES = ["voice_console_", "frivo_"];
+  const SKIP = new Set(["voice_console_session", "frivo_transcript_v1", "frivo_prefs_synced"]);
+  const MARK = "frivo_prefs_synced";
+  // Any of these means this browser already has preferences of its own.
+  const OWN = ["voice_console_voice_favorites", "frivo_output_device", "voice_console_mic_device_id",
+    "voice_console_volume", "voice_console_dictation_mode", "voice_console_profile", "frivo_your_tags",
+    "voice_console_theme", "voice_console_listen_device"];
+  let ls;
+  try { ls = window.localStorage; ls.getItem(MARK); } catch (e) { return; }
+
+  function collect() {
+    const out = {};
+    for (let i = 0; i < ls.length; i += 1) {
+      const k = ls.key(i);
+      if (!k || SKIP.has(k) || k.startsWith("voice_console_speaker_names")) continue;
+      if (!PREFIXES.some((p) => k.startsWith(p))) continue;
+      const v = ls.getItem(k);
+      if (typeof v === "string" && v.length <= 200000) out[k] = v;
+    }
+    return out;
+  }
+
+  let lastSent = "";
+  function push(beacon) {
+    const prefs = collect();
+    const body = JSON.stringify({ prefs });
+    if (body === lastSent || !Object.keys(prefs).length) return;
+    lastSent = body;
+    try {
+      if (beacon && navigator.sendBeacon) {
+        navigator.sendBeacon("/api/browser-prefs", new Blob([body], { type: "application/json" }));
+      } else {
+        fetch("/api/browser-prefs", { method: "POST", headers: { "Content-Type": "application/json" }, body, keepalive: true })
+          .catch(() => { lastSent = ""; });
+      }
+    } catch (e) { lastSent = ""; }
+  }
+
+  function startSyncing() {
+    setTimeout(() => push(false), 4000);
+    setInterval(() => push(false), 30000);
+    document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") push(true); });
+    window.addEventListener("pagehide", () => push(true));
+  }
+  window.frivoPushPrefs = () => push(false);   // for the tests
+
+  const fresh = !ls.getItem(MARK) && !OWN.some((k) => ls.getItem(k) !== null);
+  if (!fresh) {
+    try { ls.setItem(MARK, "1"); } catch (e) { /* fine */ }
+    startSyncing();
+    return;
+  }
+  fetch("/api/browser-prefs", { cache: "no-store" })
+    .then((res) => (res.ok ? res.json() : {}))
+    .then((data) => {
+      const prefs = (data && data.prefs) || {};
+      const keys = Object.keys(prefs).filter((k) => PREFIXES.some((p) => k.startsWith(p)) && !SKIP.has(k));
+      try { ls.setItem(MARK, "1"); } catch (e) { /* fine */ }
+      if (!keys.length) { startSyncing(); return; }
+      for (const k of keys) {
+        try { ls.setItem(k, String(prefs[k])); } catch (e) { /* full: the rest */ }
+      }
+      // Read once at start-up by everything else, so start again with them.
+      window.location.reload();
+    })
+    .catch(() => startSyncing());
 })();

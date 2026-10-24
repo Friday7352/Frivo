@@ -105,6 +105,7 @@ try {
     & $log ('Using Python {0}' -f $python.Version)
 
     $venvPython = New-Venv -Target $Target -Python $python -Log $log
+    [void] (Sync-FrivoDictation -VenvPython $venvPython -Target $Target -Log $log)   # NEW (2.0.0)
 
     & $log 'Writing configuration files...'
     New-FrivoDataFiles -Path $FrivoDataDir | Out-Null

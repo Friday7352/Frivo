@@ -108,7 +108,8 @@ check("saved audio copied", all(os.path.isfile(os.path.join(new.SAVED_DIR, i["fi
 check("profile restored", any(p.get("id") == "p-miki" for p in new.load_profiles()))
 check("setting restored", new.CFG.get("tag_amount") == "dramatic", new.CFG.get("tag_amount"))
 check("this server's Ollama address kept", new.CFG["ollama_url"] == "http://new-pc:11434", new.CFG["ollama_url"])
-check("key already here kept", new.CFG["elevenlabs_api_key"] == "sk_new_key")
+# CHANGED (2.0.0): a backup made with its keys puts them back, replacing the one here.
+check("a backup's key replaces the one here", new.CFG["elevenlabs_api_key"] == "sk_old_key", new.CFG["elevenlabs_api_key"])
 on_disk = json.load(open(new.CONFIG_PATH))
 check("settings written to disk", on_disk.get("tag_amount") == "dramatic")
 check("tag taste restored", new.load_tag_taste().get("laughs", {}).get("kept") == 2, new.load_tag_taste())

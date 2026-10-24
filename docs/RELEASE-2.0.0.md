@@ -43,15 +43,29 @@ The app is called just **Frivo**. With Frivo installed on the same PC, Apps & fe
 
 ## Adding the app later, backups, and uninstalling
 
+- **Setup knows what's installed.** Running `FrivoSetup.exe` again picks what this PC already has (just the app, Frivo without the app, or Frivo in the app) and says so, so an update keeps it as it is. If Frivo was set up with the app and the app has since been uninstalled, it says so and puts it back.
 - **Adding the app to Frivo, or Frivo to the app, later.** Run `FrivoSetup.exe` again: it sees what's already installed and says so on the "How you'll use Frivo" page. Choosing *in the Frivo app* adds what's missing in place. Nothing has to be uninstalled first, and your settings, profiles and saved replies stay.
-- **A backup before updating or repairing.** Setup offers to save one to *Documents\Frivo backups* first (ticked for Repair). It's the same zip as Settings › Updates › Back up, so Restore there brings it back. API keys are left out. If it can't be made, setup asks before changing anything.
+- **A backup before updating or repairing.** Setup offers to save one to *Documents\Frivo backups* first (ticked for Repair). It's the same zip as Settings › Updates › Back up, so Restore there brings it back. API keys are left out unless you tick *Include my API keys in it*, which the uninstaller offers too. If it can't be made, setup asks before changing anything.
 - **Uninstalling** asks what to do with your settings and saves: **keep them for next time** (the default; installing Frivo again picks them up) or **delete them**. Deleting ticks *Save a backup first*, and nothing is deleted if that backup can't be made.
+- **Restoring a backup made with its API keys** puts those keys back, replacing the ones there. A backup made without them never clears a key.
+- **Favourite voices, audio devices and other browser preferences survive.** They live in the browser (or the Frivo app), so uninstalling the app or clearing a browser used to lose them even with *keep them for next time*. Frivo now keeps a copy of each device's and browser's preferences in its own settings folder, which setup's backups include. A browser or a reinstalled app that starts with none takes them back by itself. Saved microphones, the listening input and the output device are found again by name when the browser gives them new ids.
 
 ## Connecting other devices
 
 - **Frivo is found on your network.** The app lists every Frivo on your network to pick from, by PC name, instead of asking for an address. Typing one still works.
 - **Pairing codes.** Connecting the app to another PC asks for a short code, like `K7Q4-MD2X-9P3R`, shown in that PC's launcher and in Frivo under **Settings › Other devices**. It proves it's your Frivo, without reading through certificate fingerprints. Comparing the certificate is still there under "No code?".
 - **Settings › Other devices** (new): this PC's network addresses with a **QR code** to scan with a phone, the pairing code, and Frivo's certificate to download, with steps for trusting it on an iPhone or Android phone so the browser stops warning. The launcher has a **QR code** button and shows the pairing code too.
+
+## Built-in dictation
+
+Fast, live dictation that runs inside Frivo, with nothing else to install. In **Settings › Dictation › Built into Frivo**, pick a model and click **Download and use**:
+
+- **Best:** Moonshine Streaming Medium, about 270 MB. The most accurate.
+- **Fast:** Moonshine Streaming Small, about 140 MB. For slower PCs.
+
+Both run on the processor of the PC Frivo runs on: no OpenAI, no Evora, no graphics card, and nothing leaves that PC. They're English only. The download always happens on the PC Frivo runs on, even when you click the button from a phone or another PC, and each file is checked before it's kept.
+
+The mic button then uses the new **Live (Frivo)** mode. Your microphone streams to Frivo a few times a second, and words appear as you speak. Each sentence finishes itself when you pause, and Auto-send works as it does with Evora. **Test** transcribes a few seconds of sample speech and says how long it took. The model loads when you start dictating and frees its memory after 15 minutes without dictation (you can change that), and **Remove** deletes it.
 
 ## The Server page
 

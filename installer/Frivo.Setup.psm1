@@ -626,6 +626,33 @@ function Sync-VenvDependencies {
     }
 }
 
+function Sync-FrivoDictation {
+    <#
+        NEW (2.0.0): installs built-in dictation's package (moonshine-voice,
+        from requirements-dictation.txt). Unlike requirements.txt, a failure
+        here doesn't stop setup: Frivo works without it, and its Settings ›
+        Dictation card says to run setup again. Returns $true when it's there.
+        Quick when nothing changed (pip finds it already installed).
+    #>
+    param([string] $VenvPython, [string] $Target, [scriptblock] $Log)
+    $req = Join-Path $Target 'requirements-dictation.txt'
+    if (-not (Test-Path -LiteralPath $req -PathType Leaf)) { return $false }
+    & $Log 'Installing built-in dictation...'
+    try {
+        $r = Invoke-Tool -FilePath $VenvPython -Arguments @(
+            '-m', 'pip', 'install', '--no-input', '--disable-pip-version-check', '-r', $req
+        )
+    } catch {
+        & $Log ('Built-in dictation could not be installed: {0}. Everything else works.' -f $_.Exception.Message)
+        return $false
+    }
+    if ($r.ExitCode -ne 0) {
+        & $Log ('Built-in dictation could not be installed. Everything else works.{0}{1}' -f "`r`n", (Get-LastLines ($r.StdErr + "`r`n" + $r.StdOut) 4))
+        return $false
+    }
+    return $true
+}
+
 # CHANGED (1.5.0): the Kokoro install step (Sync-FreeVoiceDependencies) and
 # the Visual C++ runtime it needed (Test-VCRuntimePresent, Install-VCRuntime)
 # have been removed. Frivo's own voices (Piper) need neither: the speech
@@ -1421,7 +1448,9 @@ function New-FrivoBackup {
         }
 
         if ($null -ne $configText) { & $addText 'data/config.json' $configText }
-        foreach ($name in @('profiles.json', 'tag_taste.json', 'voice_anchors.json')) {
+        # CHANGED (2.0.0): browser_prefs.json, each browser's preferences
+        # (favourite voices, audio devices, ...), which Frivo keeps a copy of.
+        foreach ($name in @('profiles.json', 'tag_taste.json', 'voice_anchors.json', 'browser_prefs.json')) {
             $path = Join-Path $DataDir $name
             if (Test-Path -LiteralPath $path -PathType Leaf) { & $addFile $path ('data/' + $name) }
         }
@@ -1446,7 +1475,22 @@ function New-FrivoBackup {
             $index = Join-Path $voicesDir 'voices.json'
             if (Test-Path -LiteralPath $index -PathType Leaf) { $counts.voices = & $countIn $index }
         }
-        & $addText 'browser.json' '{}'
+        # CHANGED (2.0.0): what the browser keeps, for Restore to put back in
+        # whichever browser restores it: the most recently used one's copy.
+        $browserText = '{}'
+        $prefsPath = Join-Path $DataDir 'browser_prefs.json'
+        if (Test-Path -LiteralPath $prefsPath -PathType Leaf) {
+            try {
+                $all = Get-Content -LiteralPath $prefsPath -Raw -Encoding UTF8 | ConvertFrom-Json
+                $newest = $null
+                foreach ($p in $all.PSObject.Properties) {
+                    if ($p.Value -and $p.Value.PSObject.Properties['prefs'] -and
+                        (-not $newest -or [string] $p.Value.updated -gt [string] $newest.updated)) { $newest = $p.Value }
+                }
+                if ($newest) { $browserText = $newest.prefs | ConvertTo-Json -Depth 3 -Compress }
+            } catch { $browserText = '{}' }
+        }
+        & $addText 'browser.json' $browserText
         $about = [ordered] @{
             format  = 1
             app     = 'Frivo'
@@ -1478,7 +1522,7 @@ Export-ModuleMember -Function `
     Get-FrivoInstallMarkerPath, Test-FrivoInstallOwnership, Test-FrivoRecoverableResidue, Write-FrivoInstallMarker, Test-OtherFrivoInstall, Test-PathWithinDirectory,
     Test-IsAdministrator, Test-InstallPathUsable,
     Write-SetupLog, Invoke-Tool, ConvertTo-ArgumentString, Get-LastLines, Find-Python, Install-Python,
-    Update-PathFromRegistry, New-Venv, Sync-VenvDependencies, Get-SetupLogPath,
+    Update-PathFromRegistry, New-Venv, Sync-VenvDependencies, Sync-FrivoDictation, Get-SetupLogPath,
     Sync-FrivoVoices,
     Reset-FrivoVoicePermissions,
     Stop-FrivoBuiltinAI,

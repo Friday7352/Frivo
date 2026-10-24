@@ -410,6 +410,8 @@ function Copy-AppFiles {
     }
     Copy-Item (Join-Path $SourceApp 'app.py')           -Destination $Target -Force
     Copy-Item (Join-Path $SourceApp 'requirements.txt') -Destination $Target -Force
+    # NEW (2.0.0): built-in dictation's package, installed on its own (Sync-FrivoDictation).
+    Copy-Item (Join-Path $SourceApp 'requirements-dictation.txt') -Destination $Target -Force
     # CHANGED (1.5.0): the helper that speaks the voices built into Windows.
     # (The Kokoro voices and their requirements-voices.txt have been removed.)
     Copy-Item (Join-Path $SourceApp 'windows_speech.ps1') -Destination $Target -Force
@@ -418,6 +420,8 @@ function Copy-AppFiles {
     # NEW (1.6.0): Clean up without AI, and the built-in AI.
     Copy-Item (Join-Path $SourceApp 'cleanup_rules.py')   -Destination $Target -Force
     Copy-Item (Join-Path $SourceApp 'builtin_ai.py')      -Destination $Target -Force
+    # NEW (2.0.0): built-in dictation.
+    Copy-Item (Join-Path $SourceApp 'builtin_dictation.py') -Destination $Target -Force
     # Installed alongside the app so a running Frivo can say which version
     # it is — /diagnose reads it. Written rather than copied, because the
     # payload keeps VERSION one level up from the app folder and this is
@@ -1054,6 +1058,9 @@ function Install-Frivo {
     } else {
         $venvPython = New-Venv -Target $Target -Python $python -Log $Log
     }
+    # NEW (2.0.0): built-in dictation's package. Allowed to fail: everything
+    # else works without it, and Settings › Dictation says so.
+    [void] (Sync-FrivoDictation -VenvPython $venvPython -Target $Target -Log $Log)
     # NEW (1.5.0): Frivo's free voices, into voices\piper in the install
     # folder. Updates and Repair keep them; uninstalling removes them.
     [void] (Sync-FrivoVoices -VenvPython $venvPython -Target $Target -Log $Log)
@@ -1350,9 +1357,13 @@ $removeNote  = New-FrivoLabel -Theme $Theme -Parent $cardExisting `
     -X 38 -Y 160 -W 516 -H 30 -Font $Theme.FontSmall -Color $Theme.Dim
 # NEW (2.0.0): a backup before changing anything, restorable in Frivo.
 $chkSetupBackup = New-FrivoCheck -Theme $Theme -Parent $pageExisting `
-    -Text 'Save a backup of my settings and saves first, to Documents\Frivo backups' -X 28 -Y 316 -W 564
+    -Text 'Save a backup of my settings and saves first, to Documents\Frivo backups' -X 28 -Y 312 -W 564
 $script:setupBackupTouched = $false
 $chkSetupBackup.Add_Click({ $script:setupBackupTouched = $true })
+# NEW (2.0.0): the API keys can go in the backup too, when asked for.
+$chkSetupBackupKeys = New-FrivoCheck -Theme $Theme -Parent $pageExisting `
+    -Text 'Include my API keys in it (keep that file private)' -X 48 -Y 336 -W 544
+$chkSetupBackup.Add_CheckedChanged({ $chkSetupBackupKeys.Enabled = $chkSetupBackup.Checked -and $chkSetupBackup.Enabled })
 
 # ---------- welcome ----------
 $pageWelcome = New-Page
@@ -1506,8 +1517,10 @@ $script:installFailed = $false
 $script:installAction = 'Install'
 
 if ($existing.State -eq 'Installed') {
-    $existingText.Text = ("{0} version {1} is already installed at:`r`n{2}`r`n`r`nSelect an option to continue." -f `
-        $AppName, $(if ($existing.Version) { $existing.Version } else { 'unknown' }), $existing.Path)
+    # CHANGED (2.0.0): says which kind of install it is.
+    $kind = if ($existingInstallSettings -and $existingInstallSettings.Role -eq 'Server') { ' (without the app)' } else { ' (in the Frivo app)' }
+    $existingText.Text = ("{0} version {1}{3} is already installed at:`r`n{2}`r`n`r`nSelect an option to continue." -f `
+        $AppName, $(if ($existing.Version) { $existing.Version } else { 'unknown' }), $existing.Path, $kind)
     $radioRepair.Text = 'Repair Frivo'
     $repairNote.Text  = 'Rebuilds program files and dependencies. Your API keys, profiles and usage history are preserved.'
     $txtPath.Text     = $existing.Path
@@ -1541,14 +1554,33 @@ $script:appAlreadyHere = $false
 try {
     $script:appAlreadyHere = Test-Path -LiteralPath (Get-FrivoAppPaths -LocalAppData (Get-FrivoDesktopUser).LocalAppData).Exe -PathType Leaf
 } catch { }
-if ($existing.State -eq 'Installed' -and $existingInstallSettings -and $existingInstallSettings.Role -eq 'Server' -and -not $script:appAlreadyHere) {
+# CHANGED (2.0.0): what's installed is picked to start with, so running
+# this setup again updates what this PC already is (app only, Frivo without
+# the app, or both) unless you choose otherwise.
+$script:appVersionHere = ''
+if ($script:appAlreadyHere) {
+    try {
+        $v = [version] ((Get-Item -LiteralPath (Get-FrivoAppPaths -LocalAppData (Get-FrivoDesktopUser).LocalAppData).Exe).VersionInfo.ProductVersion -replace '[^\d.].*$', '')
+        $script:appVersionHere = [version]::new($v.Major, $v.Minor, [Math]::Max($v.Build, 0)).ToString(3)
+    } catch { }
+}
+$script:installedRole = if ($existing.State -eq 'None') { if ($script:appAlreadyHere) { 'App' } else { '' } }
+    elseif ($existingInstallSettings -and $existingInstallSettings.Role -eq 'Server') { 'Server' } else { 'Both' }
+if ($existing.State -eq 'Installed' -and $script:installedRole -eq 'Server' -and -not $script:appAlreadyHere) {
     $roleNote.ForeColor = $Theme.Ink
-    $roleNote.Text = 'Frivo is installed here without the app. To add it, choose the first option: nothing needs uninstalling, and your settings, profiles and saved replies stay. The app comes with this setup.'
-} elseif ($script:appAlreadyHere -and $existing.State -eq 'None') {
+    $roleNote.Text = 'Installed here now: Frivo without the app, so that''s picked. To add the app, choose the first option: nothing needs uninstalling, and your settings, profiles and saved replies stay.'
+} elseif ($script:installedRole -eq 'App') {
+    # NEW (2.0.0): just the app is here: update it, as it is.
+    $radioApp.Checked = $true
     $roleNote.ForeColor = $Theme.Ink
-    $roleNote.Text = 'The Frivo app is already installed here. Choose the first option to add Frivo itself: the app is kept and opens straight to it.'
+    $roleNote.Text = ('Installed here now: just the Frivo app{0}, so that''s picked: setup updates it and keeps its settings. To run Frivo on this PC as well, choose the first option.' -f
+        $(if ($script:appVersionHere) { ' ' + $script:appVersionHere } else { '' }))
+} elseif ($existing.State -eq 'Installed' -and $script:installedRole -eq 'Both' -and -not $script:appAlreadyHere) {
+    $roleNote.ForeColor = $Theme.Ink
+    $roleNote.Text = 'Installed here now: Frivo in the app, but the app itself is missing (it was uninstalled). Setup puts it back, or choose the second option to keep Frivo without it.'
 } elseif ($script:appAlreadyHere) {
-    $roleNote.Text = 'The Frivo app is already installed here. Setup updates it if this one is newer.'
+    $roleNote.Text = ('Installed here now: Frivo in the app{0}, so that''s picked. Setup updates the app if this one is newer.' -f
+        $(if ($script:appVersionHere) { ' (app ' + $script:appVersionHere + ')' } else { '' }))
 }
 
 # NEW (2.0.0): FrivOSC, now built into the app.
@@ -1567,9 +1599,15 @@ $script:hasSetupData = $false
 try { $script:hasSetupData = Test-FrivoHasData -DataDir $script:SetupDataDir } catch { }
 $chkSetupBackup.Visible = $script:hasSetupData -and $existing.State -ne 'None'
 $chkSetupBackup.Checked = ($existing.State -eq 'Partial')
+$chkSetupBackupKeys.Visible = $chkSetupBackup.Visible   # NEW (2.0.0)
+$chkSetupBackupKeys.Enabled = $chkSetupBackup.Checked
 $radioRepair.Add_CheckedChanged({ if (-not $script:setupBackupTouched) { $chkSetupBackup.Checked = $radioRepair.Checked } })
-$radioRemove.Add_CheckedChanged({ $chkSetupBackup.Enabled = -not $radioRemove.Checked })   # the uninstaller asks itself
+$radioRemove.Add_CheckedChanged({
+    $chkSetupBackup.Enabled = -not $radioRemove.Checked   # the uninstaller asks itself
+    $chkSetupBackupKeys.Enabled = $chkSetupBackup.Enabled -and $chkSetupBackup.Checked
+})
 $script:wantBackup = $false
+$script:wantBackupKeys = $false   # NEW (2.0.0)
 $script:savedRole = if ($existingInstallSettings) { $existingInstallSettings.Role } else { '' }
 $script:appOnly = $false
 
@@ -1648,6 +1686,7 @@ $btnNext.Add_Click({
     }
     if ($current.Panel -eq $pageExisting) {
         $script:wantBackup = $chkSetupBackup.Visible -and $chkSetupBackup.Checked   # NEW (2.0.0)
+        $script:wantBackupKeys = $script:wantBackup -and $chkSetupBackupKeys.Checked   # NEW (2.0.0)
         if ($radioUpdate.Visible -and $radioUpdate.Checked) {
             $script:installAction = 'Update'
         } else {
@@ -1746,7 +1785,8 @@ $btnNext.Add_Click({
                 [System.Windows.Forms.Application]::DoEvents()
                 try {
                     $backupFile = New-FrivoBackup -DataDir $script:SetupDataDir -Version $existing.Version `
-                        -Destination (Get-FrivoBackupFolder -RoamingAppData (Get-FrivoDesktopUser).RoamingAppData)
+                        -Destination (Get-FrivoBackupFolder -RoamingAppData (Get-FrivoDesktopUser).RoamingAppData) `
+                        -IncludeKeys:$script:wantBackupKeys   # NEW (2.0.0)
                     Write-Log ('Backup saved: {0}' -f $backupFile)
                     Write-SetupLog ('backup: ' + $backupFile)
                 } catch {

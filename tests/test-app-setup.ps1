@@ -119,8 +119,12 @@ Check 'and makes the QR code offline, with Frivo''s Python' ($launcher -match 's
 
 
 # NEW (2.0.0): adding the app (or Frivo) later, backups, keeping your data
-Check 'setup says when Frivo is here without the app, and that nothing needs uninstalling' ($install -match 'Frivo is installed here without the app\. To add it, choose the first option: nothing needs uninstalling')
-Check 'and when the app is here without Frivo' ($install -match 'The Frivo app is already installed here\. Choose the first option to add Frivo itself')
+Check 'setup says when Frivo is here without the app, and that nothing needs uninstalling' ($install -match 'Installed here now: Frivo without the app, so that' -and $install -match 'To add the app, choose the first option: nothing needs uninstalling')
+# CHANGED (2.0.0): what's installed is picked to start with.
+Check 'with just the app here, "Just the app" is picked, so an update keeps it that way' ($install -match '(?s)installedRole -eq ''App''\) \{.{0,80}\$radioApp\.Checked = \$true')
+Check 'with Frivo without the app, "without the app" is picked' ($install -match "Role -eq 'Server'\) \{ \`$radioServer\.Checked = \`$true \}")
+Check 'an install whose app was removed says setup puts it back' ($install -match 'but the app itself is missing')
+Check 'the existing-install page says which kind it is' ($install -match "' \(without the app\)'" -and $install -match "' \(in the Frivo app\)'")
 Check 'setup offers a backup before an update or repair' ($install -match '\$chkSetupBackup = New-FrivoCheck' -and $install -match '\$script:wantBackup = \$chkSetupBackup\.Visible -and \$chkSetupBackup\.Checked')
 Check 'and makes it before Install-Frivo stops or changes anything' ($install -match '(?s)if \(\$script:wantBackup\).{0,3000}\$script:launcherPath = Install-Frivo')
 Check 'a failed backup stops setup unless you say to go on' ($install -match 'Setup stopped before changing anything, since the backup could not be made')

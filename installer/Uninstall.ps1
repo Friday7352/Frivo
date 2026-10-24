@@ -18,6 +18,8 @@ param(
     [switch] $RemoveApp,
     # NEW (2.0.0): save a backup to Documents\Frivo backups first.
     [switch] $Backup,
+    # NEW (2.0.0): with the API keys in it (left out unless asked).
+    [switch] $BackupKeys,
     # Captured before elevation so a standard user who supplies separate
     # administrator credentials still has their own settings addressed.
     [string] $DataPath
@@ -165,7 +167,8 @@ function Invoke-Removal {
     # [switch] $KeepSettings parameter (variable names are case-insensitive),
     # and a switch silently turns $null into $false — which once made
     # cancelling delete settings anyway.
-    param([bool] $PreserveSettings, [bool] $RemoveTheApp, [bool] $MakeBackup = $false)
+    param([bool] $PreserveSettings, [bool] $RemoveTheApp, [bool] $MakeBackup = $false,
+          [bool] $BackupKeys = $false)   # NEW (2.0.0)
 
     if (-not $script:InstallOwned) {
         Add-Step 'Refused to remove an unverified program folder' $false
@@ -328,7 +331,8 @@ function Invoke-Removal {
             $version = ''
             try { $version = ([string] (Get-Content -LiteralPath (Join-Path $InstallDir 'VERSION') -Raw -ErrorAction Stop)).Trim() } catch { }
             $script:BackupPath = New-FrivoBackup -DataDir $DataDir -Version $version `
-                -Destination (Get-FrivoBackupFolder -RoamingAppData (Get-FrivoDesktopUser).RoamingAppData)
+                -Destination (Get-FrivoBackupFolder -RoamingAppData (Get-FrivoDesktopUser).RoamingAppData) `
+                -IncludeKeys:$BackupKeys   # NEW (2.0.0)
             Add-Step ('Saved a backup: {0}' -f $script:BackupPath)
         } catch {
             Add-Step ('Save a backup ({0})' -f $_.Exception.Message) $false
@@ -508,7 +512,8 @@ function Invoke-Removal {
 # ==================================================================
 
 if ($Silent) {
-    Invoke-Removal -PreserveSettings (-not $RemoveSettings) -RemoveTheApp ([bool] $RemoveApp) -MakeBackup ([bool] $Backup)
+    Invoke-Removal -PreserveSettings (-not $RemoveSettings) -RemoveTheApp ([bool] $RemoveApp) -MakeBackup ([bool] $Backup) `
+        -BackupKeys ([bool] $BackupKeys)
     $steps | ForEach-Object { Write-Host $_.Text }
     exit $(if ($problems.Count) { 1 } else { 0 })
 }
@@ -557,18 +562,23 @@ $radioDelete = New-FrivoRadio -Theme $Theme -Parent $cardSettings -Text 'Delete 
 
 $hasData = Test-FrivoHasData -DataDir $DataDir
 $chkBackup = New-FrivoCheck -Theme $Theme -Parent $viewConfirm -Text 'Save a backup first, to Documents\Frivo backups' -X 28 -Y 224 -W 444
+# NEW (2.0.0): the API keys can go in the backup too, when asked for.
+$chkBackupKeys = New-FrivoCheck -Theme $Theme -Parent $viewConfirm -Text 'Include my API keys in it' -X 48 -Y 248 -W 424
 $backupNote = New-FrivoLabel -Theme $Theme -Parent $viewConfirm `
-    -Text 'Restore it in Frivo under Settings › Updates › Restore. API keys aren''t included.' `
-    -X 48 -Y 248 -W 424 -H 18 -Font $Theme.FontSmall -Color $Theme.Dim
+    -Text 'Restore it in Frivo under Settings › Updates › Restore. Keep a backup with keys private.' `
+    -X 48 -Y 272 -W 424 -H 18 -Font $Theme.FontSmall -Color $Theme.Dim
 $chkBackup.Visible = $hasData
+$chkBackupKeys.Visible = $hasData
 $backupNote.Visible = $hasData
+$chkBackupKeys.Enabled = $chkBackup.Checked
+$chkBackup.Add_CheckedChanged({ $chkBackupKeys.Enabled = $chkBackup.Checked })
 # Deleting ticks the backup, unless it's been set by hand.
 $script:backupTouched = $false
 $chkBackup.Add_Click({ $script:backupTouched = $true })
 $radioDelete.Add_CheckedChanged({ if (-not $script:backupTouched) { $chkBackup.Checked = $radioDelete.Checked } })
 
 # NEW (2.0.0): ticked when setup installed the app with Frivo.
-$chkApp = New-FrivoCheck -Theme $Theme -Parent $viewConfirm -Text 'Also remove the Frivo app' -X 28 -Y 280 -W 444 -Checked $script:AppWithFrivo
+$chkApp = New-FrivoCheck -Theme $Theme -Parent $viewConfirm -Text 'Also remove the Frivo app' -X 28 -Y 300 -W 444 -Checked $script:AppWithFrivo
 $chkApp.Visible = [bool] $script:AppPaths
 
 $btnRemove = New-FrivoButton -Theme $Theme -Parent $viewConfirm -Text ('Uninstall {0}' -f $AppName) -X 24 -Y 336 -W 452 -H 44 -Primary $true
@@ -598,6 +608,7 @@ $btnRemove.Add_Click({
     # Visible = $false, which made this always "keep the app".
     $removeApp = [bool] $script:AppPaths -and $chkApp.Checked
     $makeBackup = $hasData -and $chkBackup.Checked   # NEW (2.0.0)
+    $backupKeys = $makeBackup -and $chkBackupKeys.Checked   # NEW (2.0.0)
     $deleteData = $radioDelete.Checked
     $viewConfirm.Visible = $false
     $viewRun.Visible = $true
@@ -613,7 +624,7 @@ $btnRemove.Add_Click({
         [System.Windows.Forms.Application]::DoEvents()
     }
 
-    Invoke-Removal -PreserveSettings (-not $deleteData) -RemoveTheApp $removeApp -MakeBackup $makeBackup
+    Invoke-Removal -PreserveSettings (-not $deleteData) -RemoveTheApp $removeApp -MakeBackup $makeBackup -BackupKeys $backupKeys
 
     if ($problems.Count -eq 0) {
         $header.Subtitle.Text = 'Finished'

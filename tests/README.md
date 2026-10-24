@@ -456,6 +456,29 @@ Double-click `tests/check-windows-voices.bat` on a Windows PC. It runs the real 
 
 - `test-voice-remove.py`: removing a voice from your ElevenLabs voices. Refused while a profile uses it, refused for free voices and bad ids, its anchors go with it, and ElevenLabs refusing is reported.
 
+## test-browser-prefs.py
+
+NEW (2.0.0). The copy Frivo keeps of each browser's preferences
+(`/api/browser-prefs`, `browser_prefs.json`): one per kind of device and
+browser, only Frivo's own keys, a fresh browser (a reinstalled app) taking
+them back and reloading once while one with its own keeps them, saved audio
+devices found again by name when their ids change, and the API-keys option
+in setup's and the uninstaller's backups. (The backups themselves, keys and
+browser preferences included, are in `test-setup-backup.py`.)
+
+## test-builtin-dictation.py
+
+NEW (2.0.0). Built-in dictation (`app/builtin_dictation.py`), with Moonshine
+replaced by a stand-in (`tests/fixtures/fake_moonshine`: same names, no
+native library; each half second of loud audio is a word and a pause ends a
+line) and its download site by a server in the test. The download (progress,
+a bad checksum or a cancel keeps nothing, the model chosen when it's done),
+live streams (words while talking, a pause completing a line, Stop finishing
+the last one, ended streams refused, a cap on open streams, one model load),
+Test, the idle timer, Remove, and the page: Settings › Dictation's card and
+dictating in Chromium with a fake microphone, where the words must appear
+while it talks and both sentences must be in the box after Stop.
+
 ## test-server-page.py
 
 NEW (2.0.0). The Server page (`/server`): who's using Frivo (phone, PC or the

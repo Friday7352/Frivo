@@ -91,6 +91,12 @@ with open(os.path.join(voice_dir, "model.onnx"), "wb") as f:
 with open(os.path.join(old_data, "voices", "voices.json"), "w") as f:
     json.dump([{"key": "my-voice", "name": "My voice"}], f)
 
+# NEW (2.0.0): the copy of each browser's preferences Frivo keeps.
+with open(os.path.join(old_data, "browser_prefs.json"), "w") as f:
+    json.dump({"Windows PC|Chrome": {"prefs": {"voice_console_voice_favorites": "[\"old\"]"}, "updated": "2026-10-01 10:00:00"},
+               "Windows PC|Frivo app": {"prefs": {"voice_console_voice_favorites": "[\"alba\",\"rachel\"]",
+                                                  "frivo_output_device": "abc"}, "updated": "2026-10-20 09:00:00"}}, f)
+
 dest = tempfile.mkdtemp(prefix="frivo-sb-backups-")
 code, path, err = backup(old_data, dest)
 check("setup makes a backup", code == 0 and os.path.isfile(path), (code, path, err))
@@ -103,6 +109,10 @@ check("with the manifest, settings, profiles and saved list",
 check("and the saved audio, from where Storage put it", all(f"data/saved/{i['file']}" in names for i in items))
 check("and tag taste", "data/tag_taste.json" in names)
 check("but not the voices", not any(n.startswith("data/voices/") for n in names))
+check("every browser's preferences are in it", "data/browser_prefs.json" in names)
+check("and the newest one's are what Restore puts in the browser",
+      json.loads(z.read("browser.json")) == {"voice_console_voice_favorites": "[\"alba\",\"rachel\"]", "frivo_output_device": "abc"},
+      z.read("browser.json"))
 cfg = json.loads(z.read("data/config.json"))
 check("API keys are blanked", cfg.get("elevenlabs_api_key") == "" and cfg.get("openai_api_key") == "", cfg)
 check("everything else in config.json is kept", cfg.get("tag_amount") == "dramatic")
@@ -131,6 +141,18 @@ check("saved replies and their audio come back", r["saved"] == 3 and all(
 check("profiles and settings come back", any(p.get("id") == "p-miki" for p in new.load_profiles())
       and new.CFG.get("tag_amount") == "dramatic")
 check("a blanked key doesn't overwrite anything", not new.CFG.get("elevenlabs_api_key"))
+check("favourite voices and audio devices come back to the browser",
+      r.get("browser", {}).get("frivo_output_device") == "abc", r.get("browser"))
+check("and Frivo keeps every browser's copy again", set(new.load_browser_prefs()) == {"Windows PC|Chrome", "Windows PC|Frivo app"},
+      new.load_browser_prefs())
+# NEW (2.0.0): a backup made with its keys puts them back, even over a key already here.
+new.CFG["elevenlabs_api_key"] = "sk_some_other_key"
+new.save_config(new.CFG)
+with open(path2, "rb") as f:
+    r2 = c.post("/api/backup/restore", data={"file": (io.BytesIO(f.read()), "b.zip")},
+                content_type="multipart/form-data").get_json()
+check("a backup with keys restores them", new.CFG.get("elevenlabs_api_key") == "sk_old_key"
+      and new.CFG.get("openai_api_key") == "sk-openai-old" and r2.get("keys") == 2, (new.CFG.get("elevenlabs_api_key"), r2.get("keys")))
 check("this PC's storage folders aren't taken from the backup", not new.CFG.get("storage_saved"), new.CFG.get("storage_saved"))
 
 # --- nothing to back up ----------------------------------------------------

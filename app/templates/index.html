@@ -1185,6 +1185,54 @@
                     <span class="srow-control"><select id="dictationLangSelect"></select></span>
                   </div>
                 </div>
+
+                <!-- NEW (2.0.0): built-in dictation (app/builtin_dictation.py). Downloaded on
+                     the PC Frivo runs on, whichever device clicks the button. -->
+                <h3 class="settings-section-title">Built into Frivo <span class="settings-inline-value" id="bdValue"></span></h3>
+                <p class="settings-section-sub">Live dictation that runs inside Frivo, on the processor of the PC Frivo runs on (which may not be the one you're using). Free and private: nothing goes to OpenAI, and no Evora or graphics card is needed. English only. It's the <b>Live (Frivo)</b> dictation mode above.</p>
+                <div class="settings-card bai" id="bdCard">
+                  <div class="srow srow--stacked">
+                    <span class="srow-main srow-main--flex">
+                      <span class="srow-label">Model</span>
+                      <span class="srow-sub" id="bdModelNote">Both are Moonshine's streaming models (MIT licensed).</span>
+                    </span>
+                    <div class="bai-models" id="bdModels" role="radiogroup" aria-label="Built-in dictation model"></div>
+                  </div>
+                  <div class="bai-action">
+                    <div class="bai-progress is-hidden" id="bdProgress">
+                      <div class="bai-progress-line"><span id="bdProgressText">Starting…</span><span id="bdProgressPct"></span></div>
+                      <div class="om-progress"><span id="bdProgressBar"></span></div>
+                    </div>
+                    <p class="bai-status" id="bdStatus" aria-live="polite"></p>
+                    <div class="bai-buttons">
+                      <button type="button" class="btn" id="bdGetBtn">Download and use</button>
+                      <button type="button" class="btn-ghost btn-sm is-hidden" id="bdCancelBtn">Cancel</button>
+                      <button type="button" class="btn-ghost btn-sm is-hidden" id="bdTestBtn">Test</button>
+                      <button type="button" class="btn-ghost btn-sm is-hidden" id="bdAgainBtn" title="Deletes this model and downloads it again">Download again</button>
+                    </div>
+                  </div>
+                  <div class="srow">
+                    <label class="srow-main srow-main--flex" for="bdIdle">
+                      <span class="srow-label">Free its memory when idle</span>
+                      <span class="srow-sub">It's loaded when you start dictating, which takes a second or two, and freed after this long without dictation.</span>
+                    </label>
+                    <span class="srow-control">
+                      <select id="bdIdle" aria-label="Free built-in dictation's memory after">
+                        <option value="5m">After 5 minutes</option>
+                        <option value="15m">After 15 minutes</option>
+                        <option value="1h">After 1 hour</option>
+                        <option value="never">Never</option>
+                      </select>
+                    </span>
+                  </div>
+                  <div class="srow bai-remove-row is-hidden" id="bdRemoveRow">
+                    <span class="srow-main srow-main--flex">
+                      <span class="srow-label">Remove built-in dictation</span>
+                      <span class="srow-sub" id="bdFolder"></span>
+                    </span>
+                    <button type="button" class="btn-ghost btn-sm" id="bdRemoveBtn">Remove</button>
+                  </div>
+                </div>
               </section>
 
               <!-- Listening -->

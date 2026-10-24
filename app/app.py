@@ -737,6 +737,8 @@ def load_config():
         "builtin_ai_model": "small",
         "builtin_ai_idle": "1h",
         "builtin_ai_threads": 0,
+        "builtin_dictation_model": "medium",   # NEW (2.0.0): built-in dictation
+        "builtin_dictation_idle": "15m",       # NEW (2.0.0)
         "evora_idle_listen": DEFAULT_EVORA_IDLE_LISTEN,     # NEW (1.5.0)
         "evora_idle_speech": DEFAULT_EVORA_IDLE_SPEECH,     # NEW (1.5.0)
         # Blank uses the chat model for translation.
@@ -2788,6 +2790,182 @@ def builtin_ai_remove(model_id=None):
         CFG["translation_provider"] = "openai"
     save_config(CFG)
     return jsonify({"ok": True})
+
+
+# ---------------------------------------------------------------------------
+# NEW (2.0.0): built-in dictation (builtin_dictation.py)
+#
+# Live dictation on the processor of the PC Frivo runs on, with Moonshine's
+# streaming models. Settings › Dictation downloads it (on this PC, whichever
+# device asked); the "Live (Frivo)" dictation mode streams the microphone
+# here and gets words back as you speak.
+# ---------------------------------------------------------------------------
+
+def _load_builtin_dictation():
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "builtin_dictation.py")
+    if not os.path.isfile(path):
+        return None
+    try:
+        spec = _importlib_util.spec_from_file_location("frivo_builtin_dictation", path)
+        module = _importlib_util.module_from_spec(spec)
+        sys.modules["frivo_builtin_dictation"] = module
+        spec.loader.exec_module(module)
+        return module
+    except Exception as e:
+        log_server_event(f"Built-in dictation: builtin_dictation.py couldn't load: {e!r}")
+        return None
+
+
+BUILTIN_DICTATION_MODULE = _load_builtin_dictation()
+BUILTIN_DICTATION = None
+if BUILTIN_DICTATION_MODULE is not None:
+    BUILTIN_DICTATION = BUILTIN_DICTATION_MODULE.BuiltinDictation(
+        DATA_DIR, log_server_event,
+        settings=lambda: {"model": CFG.get("builtin_dictation_model") or "medium",
+                          "idle": CFG.get("builtin_dictation_idle") or "15m"},
+    )
+    atexit.register(BUILTIN_DICTATION.unload)
+
+
+def _dictation_missing():
+    return jsonify({"error": "Built-in dictation is missing a file (builtin_dictation.py). Run Frivo's setup again (Repair)."}), 400
+
+
+@app.route("/api/builtin-dictation")
+def builtin_dictation_status():
+    if BUILTIN_DICTATION is None:
+        return jsonify({"supported": False, "problem": "Built-in dictation is missing a file. Run setup again (Repair).",
+                        "models": []})
+    return jsonify(BUILTIN_DICTATION.status())
+
+
+@app.route("/api/builtin-dictation/settings", methods=["POST"])
+def builtin_dictation_settings():
+    data = request.get_json(silent=True) or {}
+    changed = False
+    if data.get("model") in ("medium", "small") and CFG.get("builtin_dictation_model") != data["model"]:
+        CFG["builtin_dictation_model"] = data["model"]
+        changed = True
+    if data.get("idle") in ("5m", "15m", "1h", "never") and CFG.get("builtin_dictation_idle") != data["idle"]:
+        CFG["builtin_dictation_idle"] = data["idle"]
+        changed = True
+    if changed:
+        save_config(CFG)
+    return builtin_dictation_status()
+
+
+@app.route("/api/builtin-dictation/download", methods=["POST"])
+def builtin_dictation_download():
+    if BUILTIN_DICTATION is None:
+        return _dictation_missing()
+    data = request.get_json(silent=True) or {}
+    model_id = data.get("model") if data.get("model") in ("medium", "small") else "medium"
+    again = data.get("again") is True
+
+    def ready():
+        CFG["builtin_dictation_model"] = model_id
+        save_config(CFG)
+
+    try:
+        if BUILTIN_DICTATION.downloaded(model_id) and not again:
+            ready()
+            return jsonify({"ok": True, "ready": True})
+        BUILTIN_DICTATION.on_ready = ready
+        BUILTIN_DICTATION.start_download(model_id, again=again)
+    except BUILTIN_DICTATION_MODULE.DictationError as e:
+        return jsonify({"error": str(e)}), 400
+    return jsonify({"ok": True})
+
+
+@app.route("/api/builtin-dictation/cancel", methods=["POST"])
+def builtin_dictation_cancel():
+    if BUILTIN_DICTATION is not None:
+        BUILTIN_DICTATION.cancel_download()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/builtin-dictation/test", methods=["POST"])
+def builtin_dictation_test():
+    """Loads it (if needed) and transcribes a few seconds of speech that
+    comes with Moonshine: how long that took, and what it heard."""
+    if BUILTIN_DICTATION is None:
+        return _dictation_missing()
+    clip = BUILTIN_DICTATION_MODULE.sample_clip()
+    if not clip:
+        return jsonify({"error": "There's no sample speech to test with."}), 500
+    start = time.perf_counter()
+    try:
+        with BUILTIN_DICTATION._engine_lock:
+            BUILTIN_DICTATION._load_locked()
+        loaded = time.perf_counter() - start
+        t = time.perf_counter()
+        text = BUILTIN_DICTATION.transcribe(clip)
+        took = time.perf_counter() - t
+    except BUILTIN_DICTATION_MODULE.DictationError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        log_server_event(f"Built-in dictation: test failed: {e!r}")
+        return jsonify({"error": f"It couldn't run ({e})."}), 500
+    seconds = len(clip) / BUILTIN_DICTATION_MODULE.SAMPLE_RATE
+    return jsonify({"ok": True, "text": text, "load_seconds": round(loaded, 1),
+                    "seconds": round(took, 2), "audio_seconds": round(seconds, 1)})
+
+
+@app.route("/api/builtin-dictation", methods=["DELETE"])
+@app.route("/api/builtin-dictation/<model_id>", methods=["DELETE"])
+def builtin_dictation_remove(model_id=None):
+    if BUILTIN_DICTATION is None:
+        return jsonify({"ok": True})
+    try:
+        BUILTIN_DICTATION.remove(model_id if model_id in ("medium", "small") else None)
+    except BUILTIN_DICTATION_MODULE.DictationError as e:
+        return jsonify({"error": str(e)}), 409
+    return jsonify({"ok": True})
+
+
+@app.route("/api/dictation/stream", methods=["POST"])
+def dictation_stream_open():
+    """Starts a live dictation: loads the model if it isn't (a second or two)."""
+    if BUILTIN_DICTATION is None:
+        return _dictation_missing()
+    problem = BUILTIN_DICTATION.problem()
+    if problem:
+        return jsonify({"error": problem + " Download it in Settings › Dictation."}), 409
+    try:
+        sid = BUILTIN_DICTATION.open_stream()
+    except BUILTIN_DICTATION_MODULE.DictationError as e:
+        return jsonify({"error": str(e)}), 409
+    except Exception as e:
+        log_server_event(f"Built-in dictation: couldn't start: {e!r}")
+        return jsonify({"error": f"Built-in dictation couldn't start ({e})."}), 500
+    return jsonify({"id": sid, "sample_rate": BUILTIN_DICTATION_MODULE.SAMPLE_RATE})
+
+
+@app.route("/api/dictation/stream/<sid>", methods=["POST"])
+def dictation_stream_audio(sid):
+    """16 kHz mono 16-bit PCM in; the lines so far out."""
+    if BUILTIN_DICTATION is None:
+        return _dictation_missing()
+    try:
+        lines = BUILTIN_DICTATION.add_audio(sid, request.get_data(cache=False) or b"")
+    except BUILTIN_DICTATION_MODULE.DictationError as e:
+        return jsonify({"error": str(e)}), 409
+    except Exception as e:
+        log_server_event(f"Built-in dictation: {e!r}")
+        return jsonify({"error": f"Built-in dictation stopped ({e})."}), 500
+    return jsonify({"lines": lines})
+
+
+@app.route("/api/dictation/stream/<sid>/stop", methods=["POST"])
+def dictation_stream_stop(sid):
+    if BUILTIN_DICTATION is None:
+        return jsonify({"lines": []})
+    try:
+        lines = BUILTIN_DICTATION.stop_stream(sid, request.get_data(cache=False) or b"")
+    except Exception as e:
+        log_server_event(f"Built-in dictation: stopping: {e!r}")
+        return jsonify({"lines": [], "error": str(e)})
+    return jsonify({"lines": lines})
 
 
 if CLEANUP_RULES is not None and chat_ai_missing():
@@ -10002,9 +10180,77 @@ BACKUP_KEEP_HERE = {"ollama_url", "whisper_url", "_moved_to_v4", "_evora_idle_of
 BACKUP_SECRET_KEYS = {"openai_api_key", "elevenlabs_api_key"}
 # What the page keeps in the browser that's worth carrying over.
 BACKUP_BROWSER_PREFIXES = ("voice_console_", "frivo_")
-BACKUP_BROWSER_SKIP = {"voice_console_session", "frivo_transcript_v1", "voice_console_mic_device_id",
-                       "voice_console_listen_device"}
+# CHANGED (2.0.0): the microphone and listening devices are kept now. A
+# device's id changes when the browser's data is wiped (an app reinstall),
+# so the page also keeps its name (frivo_device_labels) and finds it by that.
+BACKUP_BROWSER_SKIP = {"voice_console_session", "frivo_transcript_v1", "frivo_prefs_synced"}
 _ANCHOR_FILE_RE = re.compile(r"^[A-Za-z0-9_.\-]{1,120}\.(mp3|wav)$")
+
+
+# ---------------------------------------------------------------------------
+# NEW (2.0.0): a copy of each browser's preferences, kept by Frivo
+#
+# Favourite voices, the audio devices, the dictation mode and the rest live in
+# the browser (localStorage), so uninstalling the Frivo app, clearing a
+# browser or reinstalling took them with it, even with "keep my settings".
+# Each page now keeps a copy here, in browser_prefs.json in Frivo's data
+# folder (so setup's backups and "keep" keep it), one per kind of device and
+# browser ("Windows PC|Frivo app", "iPhone|Safari"). A page that starts with
+# none of its own preferences takes them from here.
+# ---------------------------------------------------------------------------
+BROWSER_PREFS_PATH = os.path.join(DATA_DIR, "browser_prefs.json")
+BROWSER_PREFS_LOCK = threading.Lock()
+BROWSER_PREFS_MAX_BYTES = 400_000      # one browser's copy
+BROWSER_PREFS_MAX_ENTRIES = 30
+
+
+def browser_prefs_key(user_agent):
+    kind, via = describe_client(user_agent)
+    return f"{kind}|{re.sub(r' [0-9.]+$', '', via)}"
+
+
+def clean_browser_prefs(prefs):
+    if not isinstance(prefs, dict):
+        return {}
+    out = {}
+    for k, v in prefs.items():
+        if isinstance(k, str) and k.startswith(BACKUP_BROWSER_PREFIXES) and k not in BACKUP_BROWSER_SKIP \
+                and not k.startswith("voice_console_speaker_names") and isinstance(v, str):
+            out[k] = v[:200000]
+    return out
+
+
+def load_browser_prefs():
+    data = _read_json(BROWSER_PREFS_PATH, {})
+    return data if isinstance(data, dict) else {}
+
+
+@app.route("/api/browser-prefs", methods=["GET", "POST"])
+def browser_prefs_route():
+    key = browser_prefs_key(request.headers.get("User-Agent", ""))
+    if request.method == "GET":
+        with BROWSER_PREFS_LOCK:
+            entry = load_browser_prefs().get(key)
+        if not isinstance(entry, dict) or not isinstance(entry.get("prefs"), dict):
+            return jsonify({"prefs": {}, "key": key})
+        return jsonify({"prefs": clean_browser_prefs(entry["prefs"]), "key": key, "updated": entry.get("updated")})
+    data = request.get_json(silent=True) or {}
+    prefs = clean_browser_prefs(data.get("prefs"))
+    if len(json.dumps(prefs)) > BROWSER_PREFS_MAX_BYTES:
+        return jsonify({"error": "Too much to keep."}), 413
+    if not prefs:
+        return jsonify({"ok": True, "kept": False})
+    with BROWSER_PREFS_LOCK:
+        all_prefs = load_browser_prefs()
+        all_prefs[key] = {"prefs": prefs, "updated": time.strftime("%Y-%m-%d %H:%M:%S")}
+        if len(all_prefs) > BROWSER_PREFS_MAX_ENTRIES:
+            for old in sorted(all_prefs, key=lambda k: str(all_prefs[k].get("updated", "")))[:-BROWSER_PREFS_MAX_ENTRIES]:
+                all_prefs.pop(old, None)
+        tmp = BROWSER_PREFS_PATH + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(all_prefs, f, ensure_ascii=False)
+        os.replace(tmp, BROWSER_PREFS_PATH)
+    return jsonify({"ok": True, "kept": True, "key": key})
 
 
 def _read_json(path, default):
@@ -10048,6 +10294,8 @@ def backup_make():
         counts["saved"] = len(kept)
         if os.path.isfile(TAG_TASTE_PATH):
             z.write(TAG_TASTE_PATH, "data/tag_taste.json")
+        if os.path.isfile(BROWSER_PREFS_PATH):   # NEW (2.0.0): every browser's preferences
+            z.write(BROWSER_PREFS_PATH, "data/browser_prefs.json")
         if os.path.isfile(ANCHORS_FILE):
             z.write(ANCHORS_FILE, "data/voice_anchors.json")
             if os.path.isdir(ANCHORS_DIR):
@@ -10156,7 +10404,10 @@ def backup_restore():
                 if key in BACKUP_KEEP_HERE or not isinstance(key, str):
                     continue
                 if key in BACKUP_SECRET_KEYS:
-                    if value and not CFG.get(key):
+                    # CHANGED (2.0.0): a backup made with its API keys puts
+                    # them back, replacing the ones here; one made without
+                    # them (blank) never clears a key.
+                    if value and CFG.get(key) != value:
                         CFG[key] = value
                         report["keys"] += 1
                     continue
@@ -10285,6 +10536,22 @@ def backup_restore():
             report["browser"] = {k: v for k, v in browser.items()
                                  if isinstance(k, str) and k.startswith(BACKUP_BROWSER_PREFIXES)
                                  and k not in BACKUP_BROWSER_SKIP and isinstance(v, str)}
+    # NEW (2.0.0): every browser's preferences Frivo kept, added to the ones here.
+    path = member("browser_prefs.json")
+    if path:
+        try:
+            incoming = json.loads(z.read(path).decode("utf-8"))
+        except ValueError:
+            incoming = {}
+        if isinstance(incoming, dict):
+            with BROWSER_PREFS_LOCK:
+                current = load_browser_prefs()
+                for key, entry in incoming.items():
+                    if isinstance(key, str) and isinstance(entry, dict) and isinstance(entry.get("prefs"), dict):
+                        current[key] = {"prefs": clean_browser_prefs(entry["prefs"]),
+                                        "updated": str(entry.get("updated") or "")}
+                with open(BROWSER_PREFS_PATH, "w", encoding="utf-8") as f:
+                    json.dump(current, f, ensure_ascii=False)
     log_server_event(f"Restored a backup ({kind}): {report['profiles']} profiles, {report['saved']} saved replies, "
                      f"{report['settings']} settings, {report['voices']} voices")
     return jsonify(report)
@@ -11330,6 +11597,7 @@ _CLIENT_NAMES = {}                  # ip -> name from the network, or "" (looked
 # What a request means a device is doing. First match wins.
 CLIENT_ACTIVITIES = (
     ("/api/transcribe", "Dictating"),
+    ("/api/dictation/", "Dictating"),   # built-in dictation (live)
     ("/api/listen", "Listening"),
     ("/api/voice", "Speaking"),
     ("/audio/stream/", "Speaking"),

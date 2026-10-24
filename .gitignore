@@ -75,3 +75,6 @@ _to_delete/
 Thumbs.db
 Desktop.ini
 .DS_Store
+
+# NEW (2.0.0): the dictation speed test's output
+tools/dictation-bench/results.txt
