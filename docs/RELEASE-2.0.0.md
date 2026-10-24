@@ -55,7 +55,7 @@ The app is called just **Frivo**. With Frivo installed on the same PC, Apps & fe
 
 ## The Server page
 
-For a PC that runs Frivo for other devices. The launcher's **Open Frivo** now opens it (the chat is one click away, and on the tray menu), and anyone can open it from **Settings › Other devices › Server page**, or at `/server`.
+For a PC that runs Frivo for other devices. On a PC set up as Frivo without the app, the Frivo shortcut opens it in your browser and the launcher stays in the tray (its window is under **Show launcher**, and comes up by itself if Frivo won't start). The chat is one click away, and on the tray menu. Anyone can also open it from **Settings › Other devices › Server page**, or at `/server`.
 
 - **Connect a phone or PC:** the address with its QR code, and the pairing code.
 - **Health:** whether other devices can reach it (and the firewall port), HTTPS and when its certificate runs out, whether it starts before anyone signs in, and whether an update is waiting.

@@ -274,8 +274,9 @@ is only trusted on the PC it's installed on. Only allow this on a network you
 trust. If you skipped it during setup, turn it on in the Frivo window's
 **Settings**.
 
-**The Server page.** On the PC Frivo runs on, the launcher's **Open Frivo**
-opens the Server page: the address and QR code for connecting a device, the
+**The Server page.** On a PC set up as Frivo without the app, the Frivo
+shortcut opens the Server page in your browser, and Frivo's launcher stays in
+the tray (**Show launcher** on its menu brings its window up). The page has the address and QR code for connecting a device, the
 pairing code, whether everything's working, who's using Frivo right now and
 what they're doing, the graphics card, and what Frivo logged lately, with
 Restart and Stop. **Open chat** takes you to the chat. It's also at

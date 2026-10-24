@@ -149,6 +149,10 @@ check("the launcher hears Restart", "Local\\FrivoLauncherRestart" in launcher)
 check("and Stop, without closing", "Local\\FrivoLauncherStopServer" in launcher)
 check("and opens the Server page", "$localUrl + '/server'" in launcher)
 check("with the chat still on the tray menu", "Open-Chat" in launcher)
+check("a shortcut opens the Server page, not the launcher's window", "$script:openWhenUp = $true" in launcher
+      and "[System.Windows.Forms.Application]::Run($form)" not in launcher)
+check("the window is still on the tray menu", "$miShow.Add_Click({ Show-LauncherWindow })" in launcher)
+check("and shows itself when Frivo won't start", "Show-LauncherWindow" in launcher.split("elseif ($script:state -eq 'failed')", 1)[-1][:200])
 check("the same event names in app.py", '"FrivoLauncherRestart"' in open(os.path.join(ROOT, "app", "app.py"), encoding="utf-8").read())
 
 print("In a browser")

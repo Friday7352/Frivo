@@ -826,6 +826,7 @@ $notify.Visible = -not $script:appMode
 $script:quitting     = $false
 $script:balloonShown = $false
 $script:autoOpenDone = $false
+$script:openWhenUp = $false   # NEW (2.0.0): open the Server page once Frivo answers
 
 # ==================================================================
 # Behaviour
@@ -876,7 +877,17 @@ function Show-Launcher {
         Open-App
         return
     }
+    # NEW (2.0.0): a server PC opens the Server page, not this window. Once
+    # Frivo answers, if it's still starting. The window is still on the tray
+    # menu (Show launcher), and comes up by itself if Frivo won't start.
+    if ($script:state -eq 'running') { Open-Dashboard; return }
+    if ($script:state -ne 'starting') { Start-Server }
+    $script:openWhenUp = $true
+    Update-Status
+}
 
+# The launcher's own window: the tray's "Show launcher", or Frivo not starting.
+function Show-LauncherWindow {
     # A desktop or Start Menu shortcut may be clicked while Frivo is already
     # running from the sign-in tray entry. Restore that same window instead
     # of silently leaving the person at the notification icon.
@@ -965,6 +976,19 @@ function Update-Status {
             $btnOpen.Text = ('Start {0}' -f $AppName)
             $btnPower.Enabled = $false
             $hintLbl.Text = $script:failReason
+        }
+    }
+
+    # NEW (2.0.0): opened from a shortcut while Frivo started: the Server
+    # page once it answers, or this window if it won't start, to say why.
+    if ($script:openWhenUp -and -not $script:appMode) {
+        if ($script:state -eq 'running') {
+            $script:openWhenUp = $false
+            $script:autoOpenDone = $true
+            Open-Dashboard
+        } elseif ($script:state -eq 'failed') {
+            $script:openWhenUp = $false
+            Show-LauncherWindow
         }
     }
 
@@ -1077,7 +1101,7 @@ $btnData.Add_Click({
 
 $miOpen.Add_Click({ Open-Dashboard })
 $miChat.Add_Click({ Open-Chat })   # NEW (2.0.0)
-$miShow.Add_Click({ Show-Launcher })
+$miShow.Add_Click({ Show-LauncherWindow })   # CHANGED (2.0.0): the window itself
 $miQuit.Add_Click({
     $script:quitting = $true
     Stop-Server
@@ -1086,7 +1110,7 @@ $miQuit.Add_Click({
     # form alone would leave it spinning.
     [System.Windows.Forms.Application]::Exit()
 })
-$notify.Add_DoubleClick({ Show-Launcher })
+$notify.Add_DoubleClick({ Show-Launcher })   # the Server page (or the app)
 
 $form.Add_FormClosing({
     param($s, $e)
@@ -1254,7 +1278,16 @@ if ($script:appMode) {
     # Run() returns when Application.Exit() is called — via the form path
     # below this never runs, so quit through the tray menu ends it here.
 } else {
-    [System.Windows.Forms.Application]::Run($form)
+    # CHANGED (2.0.0): opened from a shortcut. A server PC's window is the
+    # Server page in the browser, so this one stays in the tray: it opens the
+    # page once Frivo answers (or shows itself if Frivo won't start).
+    $script:openWhenUp = $true
+    if ($script:state -ne 'running') {
+        $notify.ShowBalloonTip(4000, $AppName, ('{0} is starting. The Server page opens in your browser in a moment.' -f $AppName),
+            [System.Windows.Forms.ToolTipIcon]::Info)
+    }
+    Update-Status
+    [System.Windows.Forms.Application]::Run()
 }
 
 try { $instanceLock.ReleaseMutex() } catch { }
