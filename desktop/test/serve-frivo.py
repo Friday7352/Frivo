@@ -27,7 +27,7 @@ repo_app = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", 
 os.environ["APPDATA"] = tempfile.mkdtemp(prefix="frivo-apptest-home-")
 os.environ["VOICE_CONSOLE_DATA"] = tempfile.mkdtemp(prefix="frivo-apptest-data-")
 work = tempfile.mkdtemp(prefix="frivo-apptest-")
-for name in ("app.py", "voice_pack.py", "cleanup_rules.py", "builtin_ai.py", "builtin_dictation.py"):
+for name in ("app.py", "voice_pack.py", "cleanup_rules.py", "builtin_ai.py", "builtin_dictation.py", "gpu_local.py"):
     shutil.copy(os.path.join(repo_app, name), os.path.join(work, name))
 shutil.copytree(os.path.join(repo_app, "static"), os.path.join(work, "static"))
 shutil.copytree(os.path.join(repo_app, "templates"), os.path.join(work, "templates"))

@@ -96,13 +96,16 @@ Click any of them:
 - 🎤 **Dictation** — click and talk instead of typing. It's always off when
   Frivo opens.
 
-**Built-in dictation.** In **Settings › Dictation › Built into Frivo**, one
-download (about 270 MB, or 140 MB for the faster model) gives you live
-dictation that runs inside Frivo on the PC it runs on: words appear as you
-speak, with nothing sent to OpenAI and no Evora or graphics card needed.
-English only. It downloads to the PC Frivo runs on, even when you click the
-button on a phone or another PC. It uses Moonshine's streaming models (MIT
-licensed). The mic button then uses the **Live (Frivo)** mode.
+**Built-in dictation.** In **Settings › Dictation › Built into Frivo**, pick a
+model and download it for live dictation that runs inside Frivo on the PC it
+runs on: words appear as you speak, with nothing sent to OpenAI and no Evora
+needed. **Small** (Nemotron 3.5 streaming, about 680 MB) and **Medium**
+(Parakeet v3, about 670 MB) run on the processor; **Large** (Whisper
+large-v3-turbo, the model Evora uses, about 1.6 GB plus 1 GB of NVIDIA's
+libraries once) needs an NVIDIA graphics card, and its memory shows on the
+GPU graph. All three are multilingual. It downloads to the PC Frivo runs on,
+even when you click the button on a phone or another PC. The mic button then
+uses the **Live (Frivo)** mode.
 
 **Hover over a reply** to see which voice spoke it and whether it was written
 **Local**ly or by **OpenAI**.

@@ -422,6 +422,8 @@ function Copy-AppFiles {
     Copy-Item (Join-Path $SourceApp 'builtin_ai.py')      -Destination $Target -Force
     # NEW (2.0.0): built-in dictation.
     Copy-Item (Join-Path $SourceApp 'builtin_dictation.py') -Destination $Target -Force
+    # NEW (2.0.0): reads the graphics card in this PC (the GPU graph, built-in dictation).
+    Copy-Item (Join-Path $SourceApp 'gpu_local.py')         -Destination $Target -Force
     # Installed alongside the app so a running Frivo can say which version
     # it is — /diagnose reads it. Written rather than copied, because the
     # payload keeps VERSION one level up from the app folder and this is

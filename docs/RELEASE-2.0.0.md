@@ -60,12 +60,13 @@ The app is called just **Frivo**. With Frivo installed on the same PC, Apps & fe
 
 Fast, live dictation that runs inside Frivo, with nothing else to install. In **Settings › Dictation › Built into Frivo**, pick a model and click **Download and use**:
 
-- **Best:** Moonshine Streaming Medium, about 270 MB. The most accurate.
-- **Fast:** Moonshine Streaming Small, about 140 MB. For slower PCs.
+- **Small:** NVIDIA Nemotron 3.5 ASR Streaming, about 680 MB, on the processor. Truly streaming: words appear as you say them. About 40 languages.
+- **Medium:** NVIDIA Parakeet TDT v3, about 670 MB, on the processor. Re-reads each sentence as you speak, more accurate. 25 European languages.
+- **Large:** Whisper large-v3-turbo (the model Evora uses), about 1.6 GB plus about 1 GB of NVIDIA's libraries the first time. Needs an NVIDIA graphics card. The most accurate, about 100 languages. Its memory shows on the GPU graph as **Built-in dictation**.
 
-Both run on the processor of the PC Frivo runs on: no OpenAI, no Evora, no graphics card, and nothing leaves that PC. They're English only. The download always happens on the PC Frivo runs on, even when you click the button from a phone or another PC, and each file is checked before it's kept.
+All three run on the PC Frivo runs on: no OpenAI, no Evora, and nothing leaves that PC. They're multilingual: the dictation language you pick is passed to the model, or it works it out. The download always happens on the PC Frivo runs on, even when you click the button from a phone or another PC, and each file is checked against its size and checksum before it's kept.
 
-The mic button then uses the new **Live (Frivo)** mode. Your microphone streams to Frivo a few times a second, and words appear as you speak. Each sentence finishes itself when you pause, and Auto-send works as it does with Evora. **Test** transcribes a few seconds of sample speech and says how long it took. The model loads when you start dictating and frees its memory after 15 minutes without dictation (you can change that), and **Remove** deletes it.
+The mic button then uses the new **Live (Frivo)** mode. Your microphone streams to Frivo a few times a second, and words appear as you speak. Each sentence finishes itself when you pause, and Auto-send works as it does with Evora. **Test with my voice** records four seconds from your microphone and shows what the model heard and how long it took. The model loads when you start dictating and frees its memory after 15 minutes without dictation (you can change that), and **Remove** deletes it.
 
 ## The Server page
 
@@ -74,7 +75,7 @@ For a PC that runs Frivo for other devices. On a PC set up as Frivo without the 
 - **Connect a phone or PC:** the address with its QR code, and the pairing code.
 - **Health:** whether other devices can reach it (and the firewall port), HTTPS and when its certificate runs out, whether it starts before anyone signs in, and whether an update is waiting.
 - **Connected now:** each phone, PC and Frivo app using it, by name where the network knows one, and what it's doing right now (dictating, speaking, writing a reply), or when it was last seen.
-- **Graphics card:** its memory over the last ten minutes when Ollama or Evora is in use, and how each service Frivo depends on is doing.
+- **Graphics card:** its memory over the last ten minutes when Ollama, Evora or built-in dictation's Large model is in use, and how each service Frivo depends on is doing.
 - **Recent activity:** the last things Frivo logged, with warnings and errors marked.
 - **Restart** and **Stop**, which only work on the PC Frivo runs on. Stop leaves the launcher open, so Start is right there.
 

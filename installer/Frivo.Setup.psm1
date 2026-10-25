@@ -628,8 +628,9 @@ function Sync-VenvDependencies {
 
 function Sync-FrivoDictation {
     <#
-        NEW (2.0.0): installs built-in dictation's package (moonshine-voice,
-        from requirements-dictation.txt). Unlike requirements.txt, a failure
+        NEW (2.0.0): installs built-in dictation's package (faster-whisper,
+        for the Large model, from requirements-dictation.txt; Small and
+        Medium use sherpa-onnx, already in requirements.txt). Unlike requirements.txt, a failure
         here doesn't stop setup: Frivo works without it, and its Settings ›
         Dictation card says to run setup again. Returns $true when it's there.
         Quick when nothing changed (pip finds it already installed).

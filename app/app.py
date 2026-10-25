@@ -737,7 +737,7 @@ def load_config():
         "builtin_ai_model": "small",
         "builtin_ai_idle": "1h",
         "builtin_ai_threads": 0,
-        "builtin_dictation_model": "medium",   # NEW (2.0.0): built-in dictation
+        "builtin_dictation_model": "small",    # NEW (2.0.0): built-in dictation (small/medium/large)
         "builtin_dictation_idle": "15m",       # NEW (2.0.0)
         "evora_idle_listen": DEFAULT_EVORA_IDLE_LISTEN,     # NEW (1.5.0)
         "evora_idle_speech": DEFAULT_EVORA_IDLE_SPEECH,     # NEW (1.5.0)
@@ -2795,8 +2795,10 @@ def builtin_ai_remove(model_id=None):
 # ---------------------------------------------------------------------------
 # NEW (2.0.0): built-in dictation (builtin_dictation.py)
 #
-# Live dictation on the processor of the PC Frivo runs on, with Moonshine's
-# streaming models. Settings › Dictation downloads it (on this PC, whichever
+# CHANGED (2.0.0): live dictation on the PC Frivo runs on, with a choice of
+# three models: Small (Nemotron 3.5 streaming) and Medium (Parakeet v3) on the
+# processor, Large (Whisper large-v3-turbo) on an NVIDIA card. Settings ›
+# Dictation downloads one (on this PC, whichever
 # device asked); the "Live (Frivo)" dictation mode streams the microphone
 # here and gets words back as you speak.
 # ---------------------------------------------------------------------------
@@ -2821,8 +2823,11 @@ BUILTIN_DICTATION = None
 if BUILTIN_DICTATION_MODULE is not None:
     BUILTIN_DICTATION = BUILTIN_DICTATION_MODULE.BuiltinDictation(
         DATA_DIR, log_server_event,
-        settings=lambda: {"model": CFG.get("builtin_dictation_model") or "medium",
+        settings=lambda: {"model": CFG.get("builtin_dictation_model") or "small",
                           "idle": CFG.get("builtin_dictation_idle") or "15m"},
+        # How much a model on the graphics card takes: the card's used
+        # memory before and after loading it (gpu_local.py).
+        gpu_reader=lambda: local_card_used_mb(),
     )
     atexit.register(BUILTIN_DICTATION.unload)
 
@@ -2843,7 +2848,7 @@ def builtin_dictation_status():
 def builtin_dictation_settings():
     data = request.get_json(silent=True) or {}
     changed = False
-    if data.get("model") in ("medium", "small") and CFG.get("builtin_dictation_model") != data["model"]:
+    if data.get("model") in ("small", "medium", "large") and CFG.get("builtin_dictation_model") != data["model"]:
         CFG["builtin_dictation_model"] = data["model"]
         changed = True
     if data.get("idle") in ("5m", "15m", "1h", "never") and CFG.get("builtin_dictation_idle") != data["idle"]:
@@ -2859,7 +2864,7 @@ def builtin_dictation_download():
     if BUILTIN_DICTATION is None:
         return _dictation_missing()
     data = request.get_json(silent=True) or {}
-    model_id = data.get("model") if data.get("model") in ("medium", "small") else "medium"
+    model_id = data.get("model") if data.get("model") in ("small", "medium", "large") else "small"
     again = data.get("again") is True
 
     def ready():
@@ -2886,29 +2891,24 @@ def builtin_dictation_cancel():
 
 @app.route("/api/builtin-dictation/test", methods=["POST"])
 def builtin_dictation_test():
-    """Loads it (if needed) and transcribes a few seconds of speech that
-    comes with Moonshine: how long that took, and what it heard."""
+    """CHANGED (2.0.0): transcribes a few seconds of you, recorded by the
+    page (16 kHz mono 16-bit), with the model chosen: what it heard, and how
+    long that took."""
     if BUILTIN_DICTATION is None:
         return _dictation_missing()
-    clip = BUILTIN_DICTATION_MODULE.sample_clip()
-    if not clip:
-        return jsonify({"error": "There's no sample speech to test with."}), 500
-    start = time.perf_counter()
+    pcm = request.get_data(cache=False) or b""
+    if len(pcm) < BUILTIN_DICTATION_MODULE.SAMPLE_RATE * 2 * 0.5:
+        return jsonify({"error": "Nothing was recorded. Check the microphone in Settings › Audio."}), 400
     try:
-        with BUILTIN_DICTATION._engine_lock:
-            BUILTIN_DICTATION._load_locked()
-        loaded = time.perf_counter() - start
-        t = time.perf_counter()
-        text = BUILTIN_DICTATION.transcribe(clip)
-        took = time.perf_counter() - t
+        text, took, loaded = BUILTIN_DICTATION.transcribe(pcm, request.args.get("language"))
     except BUILTIN_DICTATION_MODULE.DictationError as e:
         return jsonify({"error": str(e)}), 400
     except Exception as e:
         log_server_event(f"Built-in dictation: test failed: {e!r}")
         return jsonify({"error": f"It couldn't run ({e})."}), 500
-    seconds = len(clip) / BUILTIN_DICTATION_MODULE.SAMPLE_RATE
-    return jsonify({"ok": True, "text": text, "load_seconds": round(loaded, 1),
-                    "seconds": round(took, 2), "audio_seconds": round(seconds, 1)})
+    return jsonify({"ok": True, "text": text, "load_seconds": round(loaded, 1), "seconds": round(took, 2),
+                    "audio_seconds": round(len(pcm) / 2 / BUILTIN_DICTATION_MODULE.SAMPLE_RATE, 1),
+                    "model": BUILTIN_DICTATION.chosen_model()})
 
 
 @app.route("/api/builtin-dictation", methods=["DELETE"])
@@ -2917,7 +2917,7 @@ def builtin_dictation_remove(model_id=None):
     if BUILTIN_DICTATION is None:
         return jsonify({"ok": True})
     try:
-        BUILTIN_DICTATION.remove(model_id if model_id in ("medium", "small") else None)
+        BUILTIN_DICTATION.remove(model_id if model_id in ("small", "medium", "large") else None)
     except BUILTIN_DICTATION_MODULE.DictationError as e:
         return jsonify({"error": str(e)}), 409
     return jsonify({"ok": True})
@@ -2931,8 +2931,9 @@ def dictation_stream_open():
     problem = BUILTIN_DICTATION.problem()
     if problem:
         return jsonify({"error": problem + " Download it in Settings › Dictation."}), 409
+    language = (request.get_json(silent=True) or {}).get("language")   # NEW (2.0.0): "" or "auto" = automatic
     try:
-        sid = BUILTIN_DICTATION.open_stream()
+        sid = BUILTIN_DICTATION.open_stream(language)
     except BUILTIN_DICTATION_MODULE.DictationError as e:
         return jsonify({"error": str(e)}), 409
     except Exception as e:
@@ -8946,15 +8947,93 @@ def read_ollama_gpu():
     return models, None
 
 
+# ---------------------------------------------------------------------------
+# NEW (2.0.0): the card in this PC (gpu_local.py, from Evora's evora_gpu.py)
+# ---------------------------------------------------------------------------
+
+def _load_gpu_local():
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "gpu_local.py")
+    if not os.path.isfile(path):
+        return None
+    try:
+        spec = _importlib_util.spec_from_file_location("frivo_gpu_local", path)
+        module = _importlib_util.module_from_spec(spec)
+        sys.modules["frivo_gpu_local"] = module
+        spec.loader.exec_module(module)
+        return module
+    except Exception as e:
+        log_server_event(f"GPU graph: gpu_local.py couldn't load: {e!r}")
+        return None
+
+
+GPU_LOCAL = _load_gpu_local()
+_gpu_local_state = {"checked": 0.0, "present": False}
+GPU_LOCAL_RECHECK_SECONDS = 120   # a PC without a card isn't asked again for a while
+
+
+def gpu_local_card(cached_only=False):
+    """This PC's card as the graph wants it ({name, total_mb, used_mb, parts,
+    ...}), or None when it has no NVIDIA card. cached_only: just whether
+    there was one last time it was asked (cheap)."""
+    if GPU_LOCAL is None:
+        return None
+    now = time.time()
+    if not _gpu_local_state["present"] and now - _gpu_local_state["checked"] < GPU_LOCAL_RECHECK_SECONDS \
+            and _gpu_local_state["checked"]:
+        return None
+    if cached_only and _gpu_local_state["checked"]:
+        return True if _gpu_local_state["present"] else None
+    try:
+        report = GPU_LOCAL.snapshot()
+    except Exception:
+        report = {"ok": False}
+    _gpu_local_state.update(checked=now, present=bool(report.get("ok")))
+    if not report.get("ok"):
+        return None
+    if cached_only:
+        return True
+    return {k: report.get(k) for k in ("name", "total_mb", "used_mb", "util_pct", "temp_c", "parts", "processes", "source")}
+
+
+def local_card_used_mb():
+    """This PC's card's used memory in MB, read now, or None."""
+    if GPU_LOCAL is None:
+        return None
+    try:
+        return GPU_LOCAL.used_mb()
+    except Exception:
+        return None
+
+
 def gpu_sample():
     """One reading of everything the graph shows."""
     uses_ollama, uses_evora = gpu_watch_targets()
-    card, card_problem = read_evora_gpu() if uses_evora else (None, None)
+    # NEW (2.0.0): the card in this PC, when there is one: it sees built-in
+    # dictation (this process) as well as Ollama and Evora. Otherwise
+    # Evora's report, from the PC it runs on, as before.
+    local = gpu_local_card()
+    evora_card, card_problem = read_evora_gpu() if uses_evora else (None, None)
+    card = local if local else evora_card
+    if local:
+        card_problem = None
+        if evora_card and "idle" in evora_card:
+            card["idle"] = evora_card["idle"]
     models, ollama_problem = read_ollama_gpu() if uses_ollama else ([], None)
     ollama_vram = sum(m["vram_mb"] for m in models)
+    dictation = BUILTIN_DICTATION.gpu_usage() if BUILTIN_DICTATION is not None else None
 
     same_card = False
-    if card:
+    if card and local:
+        parts = card.get("parts")
+        if uses_ollama:
+            same_card = bool(parts and parts.get("ollama_mb")) or same_gpu_host("http://localhost", ollama_base_url())
+        if not parts:
+            used = int(card.get("used_mb") or 0)
+            ollama = min(used, ollama_vram) if same_card else 0
+            mine = min(used - ollama, int((dictation or {}).get("vram_mb") or 0))
+            card["parts"] = {"ollama_mb": ollama, "evora_mb": 0, "dictation_mb": mine,
+                             "other_mb": used - ollama - mine, "estimated": True}
+    elif card:
         parts = card.get("parts")
         if parts and parts.get("ollama_mb"):
             same_card = True     # Evora saw Ollama on its own card: settled
@@ -8973,6 +9052,8 @@ def gpu_sample():
         "t": time.time(),
         "uses_ollama": uses_ollama,
         "uses_evora": uses_evora,
+        "local_card": bool(local),   # NEW (2.0.0)
+        "dictation": dictation,      # NEW (2.0.0): built-in dictation's model, when it's on the card
         "card": card,
         "card_problem": card_problem,
         "same_card": same_card,
@@ -8990,10 +9071,11 @@ def gpu_history_point(sample):
         parts = card.get("parts") or {}
         return {"t": round(sample["t"], 1), "total": card.get("total_mb"), "used": card.get("used_mb"),
                 "ollama": parts.get("ollama_mb", 0), "evora": parts.get("evora_mb", 0),
+                "dictation": parts.get("dictation_mb", 0),   # NEW (2.0.0)
                 "other": parts.get("other_mb", 0)}
     if sample.get("ollama_models"):
         return {"t": round(sample["t"], 1), "total": None, "used": None,
-                "ollama": sum(m["vram_mb"] for m in sample["ollama_models"]), "evora": 0, "other": 0}
+                "ollama": sum(m["vram_mb"] for m in sample["ollama_models"]), "evora": 0, "dictation": 0, "other": 0}
     return None
 
 
@@ -9012,7 +9094,7 @@ def record_gpu_sample(sample):
 def gpu_sampler_loop():
     while True:
         uses_ollama, uses_evora = gpu_watch_targets()
-        if uses_ollama or uses_evora:
+        if uses_ollama or uses_evora or gpu_local_card(cached_only=True):   # CHANGED (2.0.0)
             try:
                 record_gpu_sample(gpu_sample())
             except Exception as e:
@@ -9026,7 +9108,8 @@ def gpu_route():
     """The latest reading and the last ten minutes, for the status popover."""
     uses_ollama, uses_evora = gpu_watch_targets()
     _gpu_state["viewed"] = time.time()
-    if not (uses_ollama or uses_evora):
+    # CHANGED (2.0.0): or a card in this PC (built-in dictation may be on it).
+    if not (uses_ollama or uses_evora or gpu_local_card(cached_only=True)):
         return jsonify({"enabled": False})
     latest = _gpu_state["latest"]
     stale = (latest is None or time.time() - latest["t"] > GPU_SAMPLE_SECONDS * 2

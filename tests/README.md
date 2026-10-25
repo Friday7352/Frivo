@@ -468,16 +468,23 @@ browser preferences included, are in `test-setup-backup.py`.)
 
 ## test-builtin-dictation.py
 
-NEW (2.0.0). Built-in dictation (`app/builtin_dictation.py`), with Moonshine
-replaced by a stand-in (`tests/fixtures/fake_moonshine`: same names, no
-native library; each half second of loud audio is a word and a pause ends a
-line) and its download site by a server in the test. The download (progress,
-a bad checksum or a cancel keeps nothing, the model chosen when it's done),
-live streams (words while talking, a pause completing a line, Stop finishing
-the last one, ended streams refused, a cap on open streams, one model load),
-Test, the idle timer, Remove, and the page: Settings › Dictation's card and
-dictating in Chromium with a fake microphone, where the words must appear
-while it talks and both sentences must be in the box after Stop.
+NEW (2.0.0). Built-in dictation (`app/builtin_dictation.py`) with its three
+models (Small: Nemotron 3.5 streaming, Medium: Parakeet v3, Large: Whisper
+large-v3-turbo). The engines are stand-ins with the same shape (each half
+second of loud audio is a word), the files are small ones served by a
+download site in the test, NVIDIA's libraries are two small zips laid out
+like the real wheels, and the graphics card is pretend; the streaming code
+(`_NemotronStream`, `_SentenceStream`) is the real one. Covered: Large
+unavailable without Windows and an NVIDIA card; the download (progress, a
+bad checksum or a cancel keeps nothing, NVIDIA's DLLs taken out of their
+wheels once and removed with Large); live streams for each model (words
+while talking, sentence ends, re-reads while speaking, Stop finishing the
+last one, the language passed through, ended streams refused); Test with
+recorded audio; Large's memory measured and shown on the GPU graph as its own
+part; the idle timer; Remove; the old Moonshine models cleared away; and the
+page: the card with three models, dictating in Chromium with a fake
+microphone, the error when nothing's downloaded, and the Frivo app never
+offering Live (browser).
 
 ## test-server-page.py
 

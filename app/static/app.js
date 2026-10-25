@@ -4624,7 +4624,7 @@ const DICTATION_MODES = [
     id: "live_frivo",
     name: "Live (Frivo)",
     description:
-      "Words appear as you speak, transcribed by Frivo itself on the PC it runs on. Free and private, English only. Download it below first.",
+      "Words appear as you speak, transcribed by Frivo itself on the PC it runs on. Free and private. Download a model below first.",
   },
   {
     id: "live",
@@ -4783,7 +4783,7 @@ function updateDictationModeNote() {
   // NEW (2.0.0)
   if (currentDictationMode() === "live_frivo") {
     dictationModeNote.textContent = builtinDictationReady
-      ? "Words appear as you speak, transcribed by Frivo on the PC it runs on. Uses the microphone chosen in Audio. English."
+      ? "Words appear as you speak, transcribed by Frivo on the PC it runs on. Uses the microphone chosen in Audio."
       : "Download built-in dictation below to use this.";
     return;
   }
@@ -5579,12 +5579,14 @@ function stopLocalLiveDictation() {
 // NEW (2.0.0): Live (Frivo) — built-in dictation
 // ============================================================
 // The microphone goes to the PC Frivo runs on as plain 16 kHz audio, a few
-// times a second, and Moonshine's streaming model there sends back the
-// words so far. It decides where a sentence ends (a pause) and marks it
+// times a second, and the model chosen in Settings › Dictation sends back
+// the words so far. It decides where a sentence ends (a pause) and marks it
 // complete; complete sentences go into the text, the one still being said
 // is shown after them and keeps correcting itself.
 const LIVE_FRIVO = {
-  SEND_MS: 160,              // how often audio goes up (and words come back)
+  // CHANGED (2.0.0): 160 -> 300. Each pass re-reads the sentence so far,
+  // so passes that often kept a slower processor busy and behind.
+  SEND_MS: 300,              // how often audio goes up (and words come back)
   SPEECH_THRESHOLD: 0.012,   // the level that counts as talking, as for Live (Evora)
   AUTO_SEND_QUIET_MS: 1500,  // Auto: sent this long after you stopped talking
   SPEAKING_HOLD_MS: 450,     // still "talking" this long after the level drops
@@ -5618,6 +5620,7 @@ registerProcessor("frivo-pcm", FrivoPcm);
 // The microphone's rate (often 48 kHz) to 16 kHz, carrying the fraction
 // over from one block to the next so nothing clicks at the joins.
 function makeResampler(inRate) {
+  if (inRate === 16000) return (block) => block;   // NEW (2.0.0): the browser already did it
   const ratio = inRate / 16000;
   let carry = new Float32Array(0);
   let pos = 0;
@@ -5626,10 +5629,15 @@ function makeResampler(inRate) {
     data.set(carry);
     data.set(block, carry.length);
     const out = [];
-    while (pos + 1 < data.length) {
-      const i = Math.floor(pos);
-      const f = pos - i;
-      out.push(data[i] + (data[i + 1] - data[i]) * f);
+    while (pos + ratio < data.length) {
+      // CHANGED (2.0.0): the average of the samples each output sample
+      // covers (a box filter), not just the nearest two: a cheap low-pass,
+      // so high notes don't fold back in as noise.
+      const start = Math.floor(pos);
+      const end = Math.max(start + 1, Math.floor(pos + ratio));
+      let sum = 0;
+      for (let j = start; j < end; j += 1) sum += data[j];
+      out.push(sum / (end - start));
       pos += ratio;
     }
     const keep = Math.min(Math.floor(pos), data.length);
@@ -5663,7 +5671,12 @@ function takeQueuedPcm(s) {
 }
 
 async function openFrivoStream() {
-  const res = await fetch("/api/dictation/stream", { method: "POST" });
+  // CHANGED (2.0.0): the dictation language, when you picked one; otherwise
+  // the model works it out.
+  let language = "auto";
+  try { if (localStorage.getItem(DICTATION_LANG_KEY)) language = speechLangTag(); } catch (e) { /* auto */ }
+  const res = await fetch("/api/dictation/stream", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ language }) });
   const data = await res.json().catch(() => ({}));
   if (!res.ok || !data.id) throw new Error(data.error || `Frivo answered ${res.status}.`);
   return data.id;
@@ -5735,7 +5748,19 @@ async function startFrivoLiveDictation() {
     setStatus(`Couldn't access the microphone: ${err.message}`, true);
     return;
   }
-  const ctx = new (window.AudioContext || window.webkitAudioContext)();
+  // CHANGED (2.0.0): the audio runs at 16 kHz where the browser allows it
+  // (Chrome, Edge, the Frivo app), so the browser does the resampling
+  // properly, with a filter. Doing it by hand without one folded the high
+  // notes back in as noise, which cost accuracy. Elsewhere it's done here.
+  let ctx;
+  try {
+    ctx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+    const probe = ctx.createMediaStreamSource(stream);   // Firefox refuses a mic at another rate
+    probe.disconnect();
+  } catch (e) {
+    if (ctx) { try { ctx.close(); } catch (e2) { /* gone */ } }
+    ctx = new (window.AudioContext || window.webkitAudioContext)();
+  }
   const source = ctx.createMediaStreamSource(stream);
   const analyser = ctx.createAnalyser();
   analyser.fftSize = 1024;
@@ -9056,6 +9081,7 @@ var GPU_GAP_SECONDS = 15;   // a longer gap between readings breaks the graph (F
 var GPU_SERIES = [
   { key: "ollama", name: "Ollama" },
   { key: "evora", name: "Evora" },
+  { key: "dictation", name: "Dictation" },   // NEW (2.0.0): built-in dictation, read on Frivo's own PC
   { key: "other", name: "Other" },
 ];
 var gpuTimer = null;
@@ -9085,6 +9111,8 @@ function gpuSeriesFor(data) {
   return GPU_SERIES.filter((s) => {
     if (s.key === "ollama") return data.same_card;
     if (s.key === "evora") return !parts.estimated;
+    // NEW (2.0.0): only where Frivo reads the card itself, with something on it.
+    if (s.key === "dictation") return data.local_card && (parts.dictation_mb > 0 || Boolean(data.dictation));
     return true;
   });
 }
@@ -9156,7 +9184,7 @@ function drawGpuChart(data) {
 
   const card = data.card;
   const parts = card.parts || {};
-  const label = series.map((s) => `${s.name} ${gpuGb(valueOf({ ...parts, ollama: parts.ollama_mb, evora: parts.evora_mb, other: parts.other_mb }, s.key))}`).join(", ");
+  const label = series.map((s) => `${s.name} ${gpuGb(valueOf({ ...parts, ollama: parts.ollama_mb, evora: parts.evora_mb, dictation: parts.dictation_mb, other: parts.other_mb }, s.key))}`).join(", ");
   svg.setAttribute("aria-label",
     `Graphics card memory over the last 10 minutes. Now ${gpuGb(card.used_mb)} of ${gpuGb(card.total_mb)} used: ${label}.`);
 }
@@ -9293,6 +9321,7 @@ function renderGpu(data) {
       let note = "";
       if (s.key === "ollama") note = ollamaModelNote(models);
       if (s.key === "evora") note = evoraIdleShort(data.evora_idle);   // NEW (1.5.0)
+      if (s.key === "dictation") { label = "Built-in dictation"; note = data.dictation ? data.dictation.model : "freed while idle"; }   // NEW (2.0.0)
       if (s.key === "other" && parts.estimated) { value = (parts.other_mb || 0) + (parts.evora_mb || 0); label = "Other"; note = "includes Evora"; }
       if (s.key === "other" && !parts.estimated) note = "desktop, games, driver";
       legend.append(gpuLegendRow(s.key, label, gpuGb(value), note));
@@ -14572,12 +14601,13 @@ async function checkElevenKey(force) {
   const statusEl = $("bdStatus");
   const idleSel = $("bdIdle");
   let info = null;
-  let chosen = "medium";
+  let chosen = "small";
   let poll = null;
   let lastJobState = "";
   let pickedHere = false;
-  const mb = (n) => `${Math.round(n / 1e6)} MB`;
-  const BUSY = ["checking", "model"];
+  // CHANGED (2.0.0): sizes in GB past one.
+  const mb = (n) => (n >= 1e9 ? `${(n / 1e9).toFixed(1)} GB` : `${Math.round(n / 1e6)} MB`);
+  const BUSY = ["checking", "model", "cuda"];
 
   function say(text, kind) {
     statusEl.textContent = text || "";
@@ -14606,13 +14636,27 @@ async function checkElevenKey(force) {
         badge.textContent = "Downloaded";
         top.append(badge);
       }
+      if (!m.downloaded && m.problem) {
+        // NEW (2.0.0): can't run on the PC Frivo runs on (Large without a card).
+        const badge = document.createElement("span");
+        badge.className = "om-badge is-tight";
+        badge.textContent = m.gpu ? "Needs an NVIDIA card" : "Unavailable";
+        badge.title = m.problem;
+        top.append(badge);
+        label.classList.add("is-unavailable");
+      }
       const sub = document.createElement("span");
       sub.className = "bai-model-sub";
-      sub.textContent = `${m.model} · ${mb(m.size)} download`;
+      sub.textContent = `${m.model} · ${mb(m.size)} download`
+        + (m.extra_size ? ` + ${mb(m.extra_size)} of NVIDIA libraries, once` : "")
+        + (m.gpu ? " · graphics card" : " · processor");
+      const langs = document.createElement("span");
+      langs.className = "bai-model-sub";
+      langs.textContent = m.languages || "";
       const note = document.createElement("span");
       note.className = "bai-model-note";
       note.textContent = m.note;
-      label.append(input, top, sub, note);
+      label.append(input, top, sub, langs, note);
       if (m.downloaded) {
         const remove = document.createElement("button");
         remove.type = "button";
@@ -14649,20 +14693,22 @@ async function checkElevenKey(force) {
     testBtn.classList.toggle("is-hidden", !ready || busy);
     againBtn.classList.toggle("is-hidden", !ready || busy);
     getBtn.classList.toggle("is-hidden", busy || (ready && inUse));
-    getBtn.textContent = ready ? "Use it for dictation" : `Download and use (${mb(model.size || 0)})`;
-    getBtn.disabled = !info.supported;
+    getBtn.textContent = ready ? "Use it for dictation" : `Download and use (${mb((model.size || 0) + (model.extra_size || 0))})`;
+    getBtn.disabled = !info.supported || Boolean(!ready && model.problem);
     $("bdRemoveRow").classList.toggle("is-hidden", !(info.models || []).some((m) => m.downloaded));
     $("bdFolder").textContent = info.folder ? `Kept in ${info.folder} on the PC Frivo runs on` : "";
     if (idleSel && document.activeElement !== idleSel) idleSel.value = info.idle || "15m";
     if (busy) {
       const pct = job.total ? Math.min(100, Math.round((job.done / job.total) * 100)) : 0;
       $("bdProgressText").textContent = job.state === "model"
-        ? `Downloading ${model.model || "the model"} to the PC Frivo runs on…` : "Getting ready…";
+        ? `Downloading ${model.model || "the model"} to the PC Frivo runs on…`
+        : job.state === "cuda" ? "Downloading NVIDIA's libraries for the graphics card…" : "Getting ready…";
       $("bdProgressPct").textContent = job.total ? `${mb(job.done)} of ${mb(job.total)} · ${pct}%` : "";
       $("bdProgressBar").style.width = `${pct}%`;
     }
     if (!info.supported) say(info.problem, "error");
     else if (job.state === "error" && lastJobState !== "shown-error") say(job.error, "error");
+    else if (!busy && !ready && model.problem && !statusEl.textContent) say(model.problem, "error");   // NEW (2.0.0)
   }
 
   async function refresh() {
@@ -14735,14 +14781,59 @@ async function checkElevenKey(force) {
   getBtn.addEventListener("click", () => startDownload(false));
   againBtn.addEventListener("click", () => startDownload(true));
   cancelBtn.addEventListener("click", () => fetch("/api/builtin-dictation/cancel", { method: "POST" }).then(refresh));
+  // CHANGED (2.0.0): Test is your own voice: four seconds from the
+  // microphone chosen in Settings › Audio, read by the model you picked on
+  // the PC Frivo runs on.
+  async function recordSeconds(seconds) {
+    const stream = await openMicrophone();
+    let ctx;
+    try {
+      ctx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+      ctx.createMediaStreamSource(stream).disconnect();
+    } catch (e) {
+      if (ctx) { try { ctx.close(); } catch (e2) { /* gone */ } }
+      ctx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    try {
+      const url = URL.createObjectURL(new Blob([PCM_WORKLET_SOURCE], { type: "application/javascript" }));
+      try { await ctx.audioWorklet.addModule(url); } finally { URL.revokeObjectURL(url); }
+      const node = new AudioWorkletNode(ctx, "frivo-pcm");
+      const mute = ctx.createGain();
+      mute.gain.value = 0;
+      ctx.createMediaStreamSource(stream).connect(node);
+      node.connect(mute);
+      mute.connect(ctx.destination);
+      const resample = makeResampler(ctx.sampleRate);
+      const parts = [];
+      let count = 0;
+      node.port.onmessage = (event) => {
+        const pcm = toPcm16(resample(event.data));
+        parts.push(pcm);
+        count += pcm.length;
+      };
+      await new Promise((r) => setTimeout(r, seconds * 1000));
+      node.port.onmessage = null;
+      const out = new Int16Array(count);
+      let at = 0;
+      for (const p of parts) { out.set(p, at); at += p.length; }
+      return out;
+    } finally {
+      stream.getTracks().forEach((t) => t.stop());
+      try { ctx.close(); } catch (e) { /* gone */ }
+    }
+  }
   testBtn.addEventListener("click", async () => {
     testBtn.disabled = true;
-    say("Loading it and transcribing a few seconds of sample speech…");
     try {
-      const res = await fetch("/api/builtin-dictation/test", { method: "POST" });
+      say("Speak now — recording 4 seconds…");
+      const pcm = await recordSeconds(4);
+      say("Reading it on the PC Frivo runs on…");
+      const lang = localStorage.getItem(DICTATION_LANG_KEY) ? speechLangTag() : "auto";
+      const res = await fetch(`/api/builtin-dictation/test?language=${encodeURIComponent(lang)}`, {
+        method: "POST", headers: { "Content-Type": "application/octet-stream" }, body: pcm.buffer });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || `Frivo said ${res.status}`);
-      say(`"${data.text}" — ${data.audio_seconds} s of speech in ${data.seconds} s`
+      say(`Heard: "${data.text || "(nothing)"}" — ${data.audio_seconds} s of speech read in ${data.seconds} s`
         + (data.load_seconds >= 0.5 ? ` (plus ${data.load_seconds} s to load it)` : "") + ".", "ok");
     } catch (err) {
       say(err.message || String(err), "error");

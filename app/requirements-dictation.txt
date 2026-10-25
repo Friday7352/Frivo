@@ -1,8 +1,12 @@
-# NEW (2.0.0): built-in dictation (builtin_dictation.py): Moonshine's streaming
-# speech models, run on the processor. MIT licensed; the models themselves are
-# downloaded only if someone turns it on in Settings › Dictation.
+# NEW (2.0.0): built-in dictation (builtin_dictation.py).
 #
-# Installed separately from requirements.txt, and allowed to fail: without it
-# everything else in Frivo works, and Settings › Dictation says to run setup
-# again.
-moonshine-voice==0.1.5
+# Small and Medium (NVIDIA Nemotron and Parakeet) run on sherpa-onnx, which
+# is already in requirements.txt. Large (Whisper large-v3-turbo, Evora's
+# model) runs on faster-whisper on an NVIDIA graphics card; the model and
+# NVIDIA's CUDA libraries are only downloaded if someone picks Large in
+# Settings › Dictation.
+#
+# Installed separately from requirements.txt, and allowed to fail: without
+# it everything else in Frivo works, and Settings › Dictation says to run
+# setup again.
+faster-whisper==1.2.1
