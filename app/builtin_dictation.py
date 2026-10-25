@@ -172,6 +172,20 @@ def clean_text(text):
     return re.sub(r"\s{2,}", " ", _LANG_TAG.sub(" ", str(text or ""))).strip()
 
 
+def tag_language(text):
+    """NEW (2.0.0): the language a tag says ("ja" from <ja-JP> or <|ja|>),
+    the last one in the text, or None. Listening uses it to skip
+    translating what's already in your language."""
+    found = re.findall(r"<\|?([a-z]{2,3})(?:[-_][A-Za-z]{2,4})?\|?>", str(text or ""))
+    return found[-1] if found else None
+
+
+def _short_language(value):
+    """"en" from "en", "en-US" or "english"-free codes; None when unknown."""
+    code = re.split(r"[-_]", str(value or "").strip().lower())[0]
+    return code if re.fullmatch(r"[a-z]{2,3}", code) else None
+
+
 def _np():
     try:
         import numpy
@@ -223,10 +237,15 @@ class _Lines:
             self.next_id += 1
         return self.items[-1]
 
-    def set_current(self, text):
-        self.current()["text"] = text
+    # CHANGED (2.0.0): each line also says the language it was heard in,
+    # when the model says (Small and Large do), for Listening.
+    def set_current(self, text, language=None):
+        line = self.current()
+        line["text"] = text
+        if language:
+            line["language"] = language
 
-    def complete_current(self, text=None):
+    def complete_current(self, text=None, language=None):
         if not self.items or self.items[-1]["complete"]:
             if not text:
                 return
@@ -234,6 +253,8 @@ class _Lines:
         line = self.items[-1]
         if text is not None:
             line["text"] = text
+        if language:
+            line["language"] = language
         line["complete"] = True
         if not line["text"]:
             self.items.pop()
@@ -244,7 +265,10 @@ class _Lines:
 
 
 class _NemotronStream:
-    def __init__(self, recognizer, language):
+    # CHANGED (2.0.0): max_seconds (Listening's "Commit every") finishes a
+    # line that goes on that long without a pause; the language tag it
+    # writes in automatic mode is kept on the line.
+    def __init__(self, recognizer, language, max_seconds=None):
         self.rec = recognizer
         self.s = recognizer.create_stream()
         try:
@@ -252,20 +276,30 @@ class _NemotronStream:
         except Exception:
             pass
         self.out = _Lines()
+        self.forced = language or None
+        self.max_seconds = max_seconds
+        self.heard = 0.0
 
     def _decode(self):
         while self.rec.is_ready(self.s):
             self.rec.decode_stream(self.s)
-        text = clean_text(self.rec.get_result(self.s))
+        raw = self.rec.get_result(self.s)
+        text = clean_text(raw)
+        language = tag_language(raw) or self.forced
         if text:
-            self.out.set_current(text)
-        if self.rec.is_endpoint(self.s):
-            self.out.complete_current(text or None)
+            self.out.set_current(text, language)
+        else:
+            self.heard = 0.0   # counted from the first word
+        too_long = bool(self.max_seconds and text and self.heard >= self.max_seconds)
+        if too_long or self.rec.is_endpoint(self.s):
+            self.out.complete_current(text or None, language)
             self.rec.reset(self.s)
+            self.heard = 0.0
 
     def add(self, samples):
         if len(samples):
             self.s.accept_waveform(SAMPLE_RATE, samples)
+            self.heard += len(samples) / SAMPLE_RATE
         self._decode()
 
     def stop(self):
@@ -277,7 +311,8 @@ class _NemotronStream:
         self.s.input_finished()
         while self.rec.is_ready(self.s):
             self.rec.decode_stream(self.s)
-        self.out.complete_current(clean_text(self.rec.get_result(self.s)) or None)
+        raw = self.rec.get_result(self.s)
+        self.out.complete_current(clean_text(raw) or None, tag_language(raw) or self.forced)
 
     def lines(self):
         return self.out.view()
@@ -288,10 +323,11 @@ class _SentenceStream:
     sentences start and end by loudness, reads the one being said again
     every INTERIM seconds, and once more when it's over."""
 
-    def __init__(self, engine, language, interim):
+    def __init__(self, engine, language, interim, max_seconds=None):
         self.engine = engine
         self.language = language
         self.interim = interim
+        self.max_seconds = max_seconds or MAX_SENTENCE_SECONDS   # NEW (2.0.0): Listening's "Commit every"
         self.pre = []
         self.buf = []
         self.speaking = False
@@ -315,10 +351,15 @@ class _SentenceStream:
         keep = max(1, len(frames) - int(self.quiet / 0.02) + 5)
         return np.concatenate(frames[:keep]) if frames else np.zeros(0, dtype=np.float32)
 
+    def _heard_language(self):
+        """NEW (2.0.0): the language the engine says it just heard (Large
+        does), or the one asked for."""
+        return _short_language(getattr(self.engine, "last_language", None)) or self.language
+
     def _finish(self):
         if self.buf and len(self.buf) * 0.02 - self.quiet >= 0.25:
             text = clean_text(self.engine.transcribe(self._audio(), self.language, final=True))
-            self.out.complete_current(text or None)
+            self.out.complete_current(text or None, self._heard_language())
         else:
             self.out.complete_current(None)
         self.buf, self.pre = [], []
@@ -344,13 +385,13 @@ class _SentenceStream:
             self.buf.append(frame)
             self.since_read += 0.02
             self.quiet = 0.0 if loud else self.quiet + 0.02
-            if self.quiet >= END_PAUSE_SECONDS or len(self.buf) * 0.02 >= MAX_SENTENCE_SECONDS:
+            if self.quiet >= END_PAUSE_SECONDS or len(self.buf) * 0.02 >= self.max_seconds:
                 self._finish()
         if self.speaking and self.since_read >= self.interim and len(self.buf) * 0.02 >= 0.4:
             self.since_read = 0.0
             text = clean_text(self.engine.transcribe(self._audio(), self.language, final=False))
             if text:
-                self.out.set_current(text)
+                self.out.set_current(text, self._heard_language())
 
     def stop(self):
         if self.speaking:
@@ -383,8 +424,8 @@ class NemotronEngine:
             provider="cpu",
         )
 
-    def stream(self, language):
-        return _NemotronStream(self.rec, language)
+    def stream(self, language, max_seconds=None):
+        return _NemotronStream(self.rec, language, max_seconds)
 
     def transcribe(self, samples, language=None, final=True):
         s = _NemotronStream(self.rec, language)
@@ -416,8 +457,8 @@ class ParakeetEngine:
             provider="cpu",
         )
 
-    def stream(self, language):
-        return _SentenceStream(self, language, INTERIM_SECONDS["parakeet"])
+    def stream(self, language, max_seconds=None):
+        return _SentenceStream(self, language, INTERIM_SECONDS["parakeet"], max_seconds)
 
     def transcribe(self, samples, language=None, final=True):
         if not len(samples):
@@ -425,6 +466,7 @@ class ParakeetEngine:
         s = self.rec.create_stream()
         s.accept_waveform(SAMPLE_RATE, samples)
         self.rec.decode_stream(s)
+        self.last_language = tag_language(s.result.text) or _short_language(getattr(s.result, "lang", None))
         return s.result.text.strip()
 
     def close(self):
@@ -476,16 +518,18 @@ class WhisperEngine:
                 raise DictationError("NVIDIA's CUDA libraries didn't load. Use Download again on Large.") from e
             raise DictationError(f"Large couldn't start on the graphics card ({message[:160]}).") from e
 
-    def stream(self, language):
-        return _SentenceStream(self, language, INTERIM_SECONDS["whisper"])
+    def stream(self, language, max_seconds=None):
+        return _SentenceStream(self, language, INTERIM_SECONDS["whisper"], max_seconds)
 
     def transcribe(self, samples, language=None, final=True):
         if not len(samples):
             return ""
-        segments, _ = self.model.transcribe(
+        segments, info = self.model.transcribe(
             samples, language=language or None, beam_size=3 if final else 1, temperature=0.0,
             condition_on_previous_text=False, without_timestamps=True, vad_filter=False)
-        return " ".join(seg.text.strip() for seg in segments).strip()
+        text = " ".join(seg.text.strip() for seg in segments).strip()
+        self.last_language = getattr(info, "language", None)   # NEW (2.0.0): for Listening
+        return text
 
     def close(self):
         self.model = None
@@ -882,14 +926,19 @@ class BuiltinDictation:
         code = re.split(r"[-_]", text)[0]
         return code if re.fullmatch(r"[a-z]{2,3}", code) else None
 
-    def open_stream(self, language=None):
+    def open_stream(self, language=None, max_seconds=None):
+        """CHANGED (2.0.0): max_seconds finishes a line that goes on that long
+        without a pause (Listening's "Commit every"; dictation leaves it)."""
+        if max_seconds is not None:
+            max_seconds = max(2.0, min(float(max_seconds), MAX_SENTENCE_SECONDS))
         with self._engine_lock:
             if len(self._streams) >= MAX_STREAMS:
                 oldest = min(self._streams, key=lambda s: self._streams[s]["last"])
                 self._close_stream_locked(oldest)
             engine = self._load_locked()
             sid = uuid.uuid4().hex
-            self._streams[sid] = {"stream": engine.stream(self._language(language)), "last": time.time(),
+            stream = engine.stream(self._language(language), max_seconds) if max_seconds else engine.stream(self._language(language))
+            self._streams[sid] = {"stream": stream, "last": time.time(),
                                   "model": self._loaded_id}
             self._last_used = time.time()
             return sid

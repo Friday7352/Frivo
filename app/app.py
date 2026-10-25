@@ -6532,6 +6532,198 @@ def listen():
     })
 
 
+# ---------------------------------------------------------------------------
+# NEW (2.0.0): Listening with Frivo's own dictation model
+#
+# The listening panel streams the audio it hears (16 kHz PCM) here, like
+# Live (Frivo) dictation does, and gets lines back as they're said: the
+# words so far, the language they're in (Small and Large say), and a
+# translation into the language picked in the panel. Translating happens
+# beside the stream, not in its way: a finished line is translated as soon
+# as it's finished, and with Live updates on, the line still being said is
+# translated too, at most every LISTEN_LIVE_TRANSLATE_SECONDS, so the
+# translation follows along. Each answer carries whatever translations are
+# ready by then. Nothing here needs Evora; speaker recognition does, so it
+# isn't offered with this.
+# ---------------------------------------------------------------------------
+
+LISTEN_LIVE_TRANSLATE_SECONDS = 1.5
+LISTEN_LIVE_MIN_WORDS = 3
+LISTEN_STOP_WAIT_SECONDS = 15.0
+_listen_streams = {}
+_listen_streams_lock = threading.Lock()
+_listen_pool = None
+
+
+def _listen_executor():
+    global _listen_pool
+    if _listen_pool is None:
+        from concurrent.futures import ThreadPoolExecutor
+        _listen_pool = ThreadPoolExecutor(max_workers=3, thread_name_prefix="frivo-listen-translate")
+    return _listen_pool
+
+
+def _listen_translate(state, line_id, text, final):
+    """Runs on the pool: one translation, kept unless a newer one won."""
+    try:
+        result = translate_text(text, state["target"])
+    except Exception as e:   # translate_text already falls back; this is belt and braces
+        log_server_event(f"Listen (built-in): translation failed ({e!r}).")
+        result = text
+    with _listen_streams_lock:
+        if not final:
+            state["live_busy"] = False
+        entry = state["lines"].get(line_id)
+        if entry is None:
+            return
+        if final or not entry.get("final"):
+            entry["translation"] = result or text
+            entry["source"] = text
+            entry["final"] = final
+        if final:
+            entry["final_pending"] = False
+
+
+def _listen_view(state, lines, now=None):
+    """The model's lines, with what's known of their translations, and any
+    translation that needs starting started."""
+    now = time.time() if now is None else now
+    target_iso = state["target_iso"]
+    out = []
+    jobs = []
+    with _listen_streams_lock:
+        seen = set()
+        for line in lines:
+            line_id = str(line.get("id"))
+            text = (line.get("text") or "").strip()
+            if not text:
+                continue
+            seen.add(line_id)
+            complete = bool(line.get("complete"))
+            language = line.get("language") or ""
+            entry = state["lines"].setdefault(line_id, {"translation": None, "source": "", "final": False,
+                                                        "final_pending": False})
+            same = bool(language) and bool(target_iso) and language.split("-")[0].lower() == target_iso
+            if same:
+                entry.update(translation=text, source=text, final=complete)
+            elif complete:
+                if not entry["final_pending"] and not (entry["final"] and entry["source"] == text):
+                    entry["final_pending"] = True
+                    jobs.append((line_id, text, True))
+            elif (state["live"] and not state["live_busy"] and text != entry["source"]
+                  and len(text.split()) >= LISTEN_LIVE_MIN_WORDS
+                  and now - state["live_at"] >= LISTEN_LIVE_TRANSLATE_SECONDS):
+                state["live_busy"] = True
+                state["live_at"] = now
+                jobs.append((line_id, text, False))
+            translation = entry["translation"]
+            done = complete and (same or (entry["final"] and entry["source"] == text and not entry["final_pending"]))
+            shown = translation if translation is not None else text
+            out.append({
+                "id": line_id,
+                "original": text,
+                "text": shown,
+                "complete": complete,
+                "translating": not same and not done,
+                "translated": bool(translation) and not same and translation.strip().lower() != text.strip().lower(),
+                # The translation is of an earlier draft of the line.
+                "behind": bool(translation) and not same and entry["source"] != text,
+                "detected_language": language,
+            })
+        for line_id in list(state["lines"]):
+            if line_id not in seen and not state["lines"][line_id].get("final_pending"):
+                del state["lines"][line_id]
+    for line_id, text, final in jobs:
+        _listen_executor().submit(_listen_translate, state, line_id, text, final)
+    return out
+
+
+def _listen_state(sid):
+    with _listen_streams_lock:
+        return _listen_streams.get(sid)
+
+
+def _listen_forget_old():
+    """Panels that went away without stopping (a closed tab)."""
+    cutoff = time.time() - BUILTIN_DICTATION_MODULE.STREAM_FORGET_SECONDS * 2
+    with _listen_streams_lock:
+        for sid in [s for s, st in _listen_streams.items() if st["last"] < cutoff]:
+            del _listen_streams[sid]
+
+
+@app.route("/api/listen/stream", methods=["POST"])
+def listen_stream_open():
+    """Starts listening with the built-in model. JSON: target_language (a
+    language name from the list), language (what they speak, "" for
+    automatic), max_seconds (Commit every), live (translate while they're
+    still talking)."""
+    if BUILTIN_DICTATION is None:
+        return _dictation_missing()
+    problem = BUILTIN_DICTATION.problem()
+    if problem:
+        return jsonify({"error": problem + " Download a model in Settings › Dictation, or choose Evora or OpenAI "
+                                           "for Listening in Settings › Listening."}), 409
+    data = request.get_json(silent=True) or {}
+    target = normalize_language(data.get("target_language")) or "English"
+    try:
+        max_seconds = float(data.get("max_seconds") or 0) or None
+    except (TypeError, ValueError):
+        max_seconds = None
+    _listen_forget_old()
+    try:
+        sid = BUILTIN_DICTATION.open_stream(data.get("language"), max_seconds=max_seconds)
+    except BUILTIN_DICTATION_MODULE.DictationError as e:
+        return jsonify({"error": str(e)}), 409
+    except Exception as e:
+        log_server_event(f"Listen (built-in): couldn't start: {e!r}")
+        return jsonify({"error": f"Listening couldn't start ({e})."}), 500
+    with _listen_streams_lock:
+        _listen_streams[sid] = {"target": target, "target_iso": language_iso(target), "live": bool(data.get("live")),
+                                "lines": {}, "live_busy": False, "live_at": 0.0, "last": time.time()}
+    return jsonify({"id": sid, "sample_rate": BUILTIN_DICTATION_MODULE.SAMPLE_RATE, "target_language": target,
+                    "model": (BUILTIN_DICTATION_MODULE.MODELS_BY_ID.get(BUILTIN_DICTATION.chosen_model()) or {}).get("model")})
+
+
+@app.route("/api/listen/stream/<sid>", methods=["POST"])
+def listen_stream_audio(sid):
+    """16 kHz mono 16-bit PCM in; the lines so far, translated as far as
+    they are, out."""
+    state = _listen_state(sid)
+    if BUILTIN_DICTATION is None or state is None:
+        return jsonify({"error": "That listening session ended. Start it again."}), 409
+    try:
+        lines = BUILTIN_DICTATION.add_audio(sid, request.get_data(cache=False) or b"")
+    except BUILTIN_DICTATION_MODULE.DictationError as e:
+        return jsonify({"error": str(e)}), 409
+    except Exception as e:
+        log_server_event(f"Listen (built-in): {e!r}")
+        return jsonify({"error": f"Listening stopped ({e})."}), 500
+    state["last"] = time.time()
+    return jsonify({"lines": _listen_view(state, lines)})
+
+
+@app.route("/api/listen/stream/<sid>/stop", methods=["POST"])
+def listen_stream_stop(sid):
+    """The last of the audio; the final lines, every one translated (waits
+    up to LISTEN_STOP_WAIT_SECONDS for that)."""
+    with _listen_streams_lock:
+        state = _listen_streams.pop(sid, None)
+    if BUILTIN_DICTATION is None or state is None:
+        return jsonify({"lines": []})
+    try:
+        lines = BUILTIN_DICTATION.stop_stream(sid, request.get_data(cache=False) or b"")
+    except Exception as e:
+        log_server_event(f"Listen (built-in): stopping: {e!r}")
+        return jsonify({"lines": [], "error": str(e)})
+    state["live"] = False
+    view = _listen_view(state, lines)
+    end = time.time() + LISTEN_STOP_WAIT_SECONDS
+    while any(l["translating"] for l in view) and time.time() < end:
+        time.sleep(0.05)
+        view = _listen_view(state, lines)
+    return jsonify({"lines": view})
+
+
 @app.route("/api/listen-speakers", methods=["GET", "POST", "DELETE"])
 def listen_speakers():
     """

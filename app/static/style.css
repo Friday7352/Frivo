@@ -5639,3 +5639,9 @@ html.motion-ready .stage { transition: transform var(--dur-smooth) var(--spring-
   .audio-test-row { flex-wrap: wrap; }
   .level-bars { order: 3; flex-basis: 100%; }
 }
+
+/* NEW (2.0.0): listening with Frivo's own model. Telling voices apart is
+   Evora's, so its controls step aside; a finished line still being
+   translated stays faint until its translation arrives. */
+.listen-panel.is-builtin .listen-evora-only { display: none; }
+.listen-entry.is-translating .listen-text { opacity: 0.75; }

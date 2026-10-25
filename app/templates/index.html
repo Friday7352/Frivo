@@ -693,7 +693,7 @@
               <span class="lamp" id="listenLamp" aria-hidden="true"></span>
               <h2 class="listen-title-text">Listening</h2>
               <span class="readout" id="listenStatus">Idle</span>
-              <span class="people-chip" id="listenPeople" title="Distinct voices heard so far">
+              <span class="people-chip listen-evora-only" id="listenPeople" title="Distinct voices heard so far">
                 <svg class="icon-14"><use href="#i-people"/></svg>
                 <span id="listenPeopleCount">0 people</span>
               </span>
@@ -703,8 +703,8 @@
             </div>
             <div class="listen-actions">
               <button id="listenStartBtn" class="btn btn-sm listen-start" type="button">Start listening</button>
-              <a class="btn-ghost btn-sm" href="/api/evora-speaker-settings" target="_blank" rel="noopener noreferrer">Speaker setup</a>
-              <button id="listenResetSpeakersBtn" class="btn-ghost btn-sm" type="button"
+              <a class="btn-ghost btn-sm listen-evora-only" href="/api/evora-speaker-settings" target="_blank" rel="noopener noreferrer">Speaker setup</a>
+              <button id="listenResetSpeakersBtn" class="btn-ghost btn-sm listen-evora-only" type="button"
                       title="Forget the voices learned so far — use when the people around you change">Reset voices</button>
               <button id="listenClearBtn" class="btn-ghost btn-sm" type="button">Clear</button>
             </div>
@@ -1240,6 +1240,20 @@
                 <h3 class="settings-section-title">Listening</h3>
                 <p class="settings-section-sub">Translating and transcribing the people around you. Open it from the rail.</p>
                 <div class="settings-card" id="listenSetupCard">
+                  <!-- NEW (2.0.0): Frivo's own model, or Evora / OpenAI -->
+                  <div class="srow">
+                    <label class="srow-main srow-main--flex" for="listenEngineSelect">
+                      <span class="srow-label">Hear them with</span>
+                      <span class="srow-sub" id="listenEngineSub">Frivo's built-in model is the one chosen in Dictation, on the PC Frivo runs on. Free, live, and nothing leaves that PC. Telling voices apart needs Evora.</span>
+                    </label>
+                    <span class="srow-control">
+                      <select id="listenEngineSelect">
+                        <option value="auto">Built-in model, once downloaded</option>
+                        <option value="frivo">Built-in model</option>
+                        <option value="provider">Evora or OpenAI (as in Dictation)</option>
+                      </select>
+                    </span>
+                  </div>
                   <!-- CHANGED (2.0.0): the audio source and gate are in Settings › Audio -->
                   <button class="srow" type="button" data-goto-section="audio">
                     <span class="srow-main srow-main--flex">
@@ -1736,20 +1750,8 @@
                     </span>
                   </label>
                 </div>
-                <div class="settings-card">
-                  <div class="srow">
-                    <span class="srow-main srow-main--flex"><span class="srow-label">App version</span></span>
-                    <span class="srow-value srow-value--mono" id="appVersionValue">—</span>
-                  </div>
-                  <button class="srow" type="button" id="appUpdateRow">
-                    <span class="srow-main srow-main--flex">
-                      <span class="srow-label">Check for app updates</span>
-                      <span class="srow-sub">The app updates from the Frivo it's connected to, and checks by itself every few hours. Frivo's own updates are under Updates.</span>
-                    </span>
-                    <span class="srow-value" id="appUpdateValue"></span>
-                    <span class="srow-chevron"><svg class="icon-16"><use href="#i-chevron"/></svg></span>
-                  </button>
-                </div>
+                <!-- CHANGED (2.0.0): the app's version and its updates moved to
+                     Updates, beside Frivo's own. -->
                 <!-- NEW: keys that work anywhere, even in VRChat or a game. -->
                 <h4 class="settings-subhead">Shortcuts</h4>
                 <div class="settings-card" id="appHotkeys">
@@ -1786,6 +1788,21 @@
                   <button class="srow" type="button" id="checkUpdatesRow">
                     <span class="srow-main srow-main--flex"><span class="srow-label">Check for updates</span></span>
                     <span class="srow-value" id="checkUpdatesValue">—</span>
+                    <span class="srow-chevron"><svg class="icon-16"><use href="#i-chevron"/></svg></span>
+                  </button>
+                  <!-- CHANGED (2.0.0): the Frivo app's version and updates, here
+                       beside Frivo's own instead of under Frivo app. Shown only
+                       in the app. -->
+                  <div class="srow is-hidden" id="appVersionRow">
+                    <span class="srow-main srow-main--flex"><span class="srow-label">Frivo app version</span></span>
+                    <span class="srow-value srow-value--mono" id="appVersionValue">—</span>
+                  </div>
+                  <button class="srow is-hidden" type="button" id="appUpdateRow">
+                    <span class="srow-main srow-main--flex">
+                      <span class="srow-label">Check for app updates</span>
+                      <span class="srow-sub">The app on this PC updates from the Frivo it's connected to. It checks by itself every few hours and installs while it's in the tray, or the next time it starts.</span>
+                    </span>
+                    <span class="srow-value" id="appUpdateValue"></span>
                     <span class="srow-chevron"><svg class="icon-16"><use href="#i-chevron"/></svg></span>
                   </button>
                   <label class="srow">

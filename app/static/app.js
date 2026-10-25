@@ -6720,9 +6720,9 @@ async function startListening() {
 
   const deviceId = listenDeviceSelect ? listenDeviceSelect.value : "";
 
-  if (savedDevice && deviceId !== savedDevice) {
-    setListenStatus("Saved audio source is gone — using the system default.");
-  }
+  const deviceWarning = savedDevice && deviceId !== savedDevice
+    ? "Saved audio source is gone — using the system default." : "";   // CHANGED (2.0.0): kept for Frivo's model too
+  if (deviceWarning) setListenStatus(deviceWarning);
 
   let stream;
   try {
@@ -6738,6 +6738,12 @@ async function startListening() {
     });
   } catch (err) {
     setListenStatus(`Couldn't open that device: ${err.message}`);
+    return;
+  }
+
+  // NEW (2.0.0): with Frivo's own model, nothing goes to Evora or OpenAI.
+  if (await listenUsesFrivo()) {
+    await startFrivoListening(stream, deviceWarning);
     return;
   }
 
@@ -6818,6 +6824,7 @@ function stopListening() {
   setGateState("Idle", false);
 
   if (!s) return Promise.resolve();
+  if (s.frivo) return stopFrivoListening(s);   // NEW (2.0.0)
   const finished = s.recorder && s.recorder.state !== "inactive"
     ? new Promise(resolve => s.recorder.addEventListener("stop", () => resolve(closeListenSession(s)), {once: true}))
     : closeListenSession(s);
@@ -6839,6 +6846,294 @@ function stopListening() {
   }, 1200);
   return finished;
 }
+
+// ============================================================
+// NEW (2.0.0): Listening with Frivo's own dictation model
+// ============================================================
+// When Settings › Listening says so (by default, whenever a model is
+// downloaded in Settings › Dictation), the panel doesn't record clips for
+// Evora or OpenAI. It streams what it hears to Frivo as 16 kHz audio a few
+// times a second, the way Live (Frivo) dictation does, and gets back the
+// lines as they're said, with their translations as they're ready. The
+// loudness gate still decides what counts: below it, Frivo is sent
+// silence, so the model never hears the room tone, music or game you
+// turned the gate up against. Speaker recognition is Evora's, so it isn't
+// part of this.
+const LISTEN_ENGINE_KEY = "voice_console_listen_engine";
+const LISTEN_FRIVO = {
+  SEND_MS: 300,       // how often audio goes up (and lines come back)
+  HOLD_MS: 300,       // still "talking" this long after the level drops (the model finds its own pauses)
+  PRE_ROLL_MS: 300,   // kept from just before the gate opens, so first syllables aren't lost
+};
+
+function listenEngineChoice() {
+  try { return localStorage.getItem(LISTEN_ENGINE_KEY) || "auto"; } catch (e) { return "auto"; }
+}
+
+async function listenUsesFrivo() {
+  const choice = listenEngineChoice();
+  if (choice === "provider") return false;
+  if (choice === "frivo") return true;
+  try {
+    const res = await fetch("/api/builtin-dictation");
+    if (!res.ok) return false;
+    const info = await res.json();
+    return Boolean(info && info.supported && !info.problem);
+  } catch (e) {
+    return false;
+  }
+}
+
+async function openFrivoListenStream() {
+  const res = await fetch("/api/listen/stream", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      target_language: listenTargetLanguage(),
+      language: "auto",
+      max_seconds: maxUtteranceMs() / 1000,
+      live: Boolean(listenLiveToggle && listenLiveToggle.checked),
+    }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || !data.id) throw new Error(data.error || `Frivo answered ${res.status}.`);
+  return data;
+}
+
+function listenFrivoMeter(s) {
+  s.analyser.getByteTimeDomainData(s.data);
+  let sum = 0;
+  for (let i = 0; i < s.data.length; i += 1) {
+    const v = (s.data[i] - 128) / 128;
+    sum += v * v;
+  }
+  const level = Math.sqrt(sum / s.data.length);
+  const width = `${Math.min(100, (level / 0.25) * 100)}%`;
+  const open = Date.now() - s.lastLoudAt < LISTEN_FRIVO.HOLD_MS;
+  if (listenMeterFill) listenMeterFill.style.width = width;
+  if (listenMeterFillMini) listenMeterFillMini.style.width = width;
+  if (listenMeter) listenMeter.classList.toggle("is-open", open);
+  if (listenMeterMini) listenMeterMini.classList.toggle("is-open", open);
+  setGateState(open ? "Hearing speech" : "Quiet", open);
+}
+
+// Audio below the gate goes up as silence. Blocks wait PRE_ROLL_MS before
+// that's decided, so when someone starts talking the moment before the
+// level crossed the line goes up as it was.
+function listenFrivoTake(s, block) {
+  const now = Date.now();
+  let sum = 0;
+  for (let i = 0; i < block.length; i += 1) sum += block[i] * block[i];
+  const level = Math.sqrt(sum / (block.length || 1));
+  const loud = level > thresholdFromSlider(listenThreshold.value);
+  s.delay.push({ block, at: now });
+  if (loud) {
+    s.lastLoudAt = now;
+    for (const item of s.delay) listenFrivoQueue(s, item.block);
+    s.delay = [];
+    return;
+  }
+  while (s.delay.length && now - s.delay[0].at > LISTEN_FRIVO.PRE_ROLL_MS) {
+    const item = s.delay.shift();
+    const heard = item.at - s.lastLoudAt <= LISTEN_FRIVO.HOLD_MS;
+    listenFrivoQueue(s, heard ? item.block : new Float32Array(item.block.length));
+  }
+}
+
+function listenFrivoQueue(s, block) {
+  const pcm = toPcm16(block);
+  s.queue.push(pcm);
+  s.queued += pcm.length;
+}
+
+function applyFrivoListenLines(s, lines) {
+  const live = Boolean(listenLiveToggle && listenLiveToggle.checked);
+  for (const line of lines || []) {
+    const key = `${s.generation}:${line.id}`;
+    let node = s.nodes.get(key);
+    if (node && (!node.entry.isConnected || node.done)) continue;   // cleared, or already final
+    // Without Live updates, a line shows once it's finished.
+    if (!node && !line.complete && !live) continue;
+    if (!node) {
+      node = addListenEntry();
+      node.entry.classList.add("is-unknown");
+      node.avatar.title = "";
+      s.nodes.set(key, node);
+    }
+    const final = line.complete && !line.translating;
+    fillListenEntry(node, {
+      text: line.text,
+      original: line.original,
+      translated: line.translated,
+      detected_language: line.detected_language,
+    }, !final);
+    node.entry.classList.toggle("is-translating", Boolean(line.translating && line.complete));
+  }
+  if (s.nodes.size > 200) {
+    for (const [key, node] of s.nodes) {
+      if (s.nodes.size <= 100) break;
+      if (node.done || !node.entry.isConnected) s.nodes.delete(key);
+    }
+  }
+}
+
+async function pumpFrivoListen(s, force) {
+  if (!s.id || s.inflight || s.ended) return;
+  if (!force && Date.now() - s.lastSentAt < LISTEN_FRIVO.SEND_MS) return;
+  const pcm = takeQueuedPcm(s);
+  if (!pcm.length && !force) return;
+  s.inflight = true;
+  s.lastSentAt = Date.now();
+  try {
+    const res = await fetch(`/api/listen/stream/${encodeURIComponent(s.id)}`, {
+      method: "POST", headers: { "Content-Type": "application/octet-stream" }, body: pcm.buffer,
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 409 && !s.reopened && !s.ended) {
+      // Closed under it (the model was switched, Frivo restarted): start
+      // another once and carry on.
+      s.reopened = true;
+      const opened = await openFrivoListenStream();
+      s.id = opened.id;
+      s.generation += 1;
+      return;
+    }
+    if (!res.ok) throw new Error(data.error || `Frivo answered ${res.status}.`);
+    if (listening === s) applyFrivoListenLines(s, data.lines);
+  } catch (err) {
+    if (listening === s && !s.ended) {
+      stopListening();
+      setListenStatus(`Listening stopped: ${err.message}`);
+    }
+  } finally {
+    s.inflight = false;
+  }
+}
+
+async function startFrivoListening(stream, warning) {
+  // At 16 kHz where the browser allows it, so it resamples properly; by
+  // hand elsewhere. The same as Live (Frivo) dictation.
+  let ctx;
+  try {
+    ctx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+    ctx.createMediaStreamSource(stream).disconnect();
+  } catch (e) {
+    if (ctx) { try { ctx.close(); } catch (e2) { /* gone */ } }
+    ctx = new (window.AudioContext || window.webkitAudioContext)();
+  }
+  const source = ctx.createMediaStreamSource(stream);
+  const analyser = ctx.createAnalyser();
+  analyser.fftSize = 1024;
+  source.connect(analyser);
+
+  const s = {
+    frivo: true, stream, ctx, source, analyser, data: new Uint8Array(analyser.fftSize), node: null,
+    resample: makeResampler(ctx.sampleRate), queue: [], queued: 0, delay: [], lastLoudAt: 0,
+    inflight: false, lastSentAt: 0, id: null, generation: 1, reopened: false, ended: false,
+    nodes: new Map(), pending: Promise.resolve(), timer: null,
+  };
+  listening = s;
+  activeListenSession = s;
+  listenPanel.classList.add("is-builtin");
+  s.timer = setInterval(() => {
+    listenFrivoMeter(s);
+    pumpFrivoListen(s, false);
+  }, LISTEN.POLL_MS);
+  listenStartBtn.textContent = "Stop listening";
+  setListenLamp(true);
+  listenStartBtn.classList.add("is-live");
+  setListenStatus(warning || "Starting…");
+
+  // The stream and the audio start together; what's heard while the model
+  // loads waits in the queue.
+  const opening = openFrivoListenStream();
+  opening.catch(() => {});
+  try {
+    if (!ctx.audioWorklet || typeof AudioWorkletNode !== "function") throw new Error("This browser is too old for listening with Frivo's model.");
+    const url = URL.createObjectURL(new Blob([PCM_WORKLET_SOURCE], { type: "application/javascript" }));
+    try { await ctx.audioWorklet.addModule(url); } finally { URL.revokeObjectURL(url); }
+    if (listening !== s) return;
+    const node = new AudioWorkletNode(ctx, "frivo-pcm");
+    const mute = ctx.createGain();
+    mute.gain.value = 0;   // it only runs while connected through to the speakers
+    source.connect(node);
+    node.connect(mute);
+    mute.connect(ctx.destination);
+    node.port.onmessage = (event) => {
+      if (listening !== s || s.ended) return;
+      listenFrivoTake(s, s.resample(event.data));
+    };
+    s.node = node;
+  } catch (err) {
+    stopListening();
+    setListenStatus(`Couldn't start listening: ${err.message}`);
+    return;
+  }
+  let opened;
+  try {
+    opened = await opening;
+  } catch (err) {
+    if (listening === s) {
+      stopListening();
+      setListenStatus(err.message);
+    }
+    return;
+  }
+  if (listening !== s) {
+    fetch(`/api/listen/stream/${encodeURIComponent(opened.id)}/stop`, { method: "POST" }).catch(() => {});
+    return;
+  }
+  s.id = opened.id;
+  if (!warning) {
+    setListenStatus(`Listening → ${opened.target_language || listenTargetLanguage()}` + (opened.model ? ` · ${opened.model}` : ""));
+  }
+  pumpFrivoListen(s, true);
+}
+
+async function stopFrivoListening(s) {
+  s.ended = true;
+  clearInterval(s.timer);
+  if (s.node) s.node.port.onmessage = null;
+  listenPanel.classList.remove("is-builtin");
+  // Whatever was waiting on the gate goes up as it was heard.
+  for (const item of s.delay) {
+    const heard = item.at - s.lastLoudAt <= LISTEN_FRIVO.HOLD_MS;
+    listenFrivoQueue(s, heard ? item.block : new Float32Array(item.block.length));
+  }
+  s.delay = [];
+  try {
+    s.stream.getTracks().forEach((t) => t.stop());
+    s.ctx.close();
+  } catch (err) {
+    /* already gone */
+  }
+  const end = Date.now() + 5000;
+  while (s.inflight && Date.now() < end) await new Promise((r) => setTimeout(r, 30));
+  if (!s.id) return;
+  try {
+    const pcm = takeQueuedPcm(s);
+    const res = await fetch(`/api/listen/stream/${encodeURIComponent(s.id)}/stop`, {
+      method: "POST", headers: { "Content-Type": "application/octet-stream" }, body: pcm.buffer,
+    });
+    const data = await res.json().catch(() => ({}));
+    applyFrivoListenLines(s, data.lines);
+  } catch (err) {
+    /* the last words are lost; nothing else is */
+  }
+}
+
+// Settings › Listening › Hear them with. Takes effect the next time
+// listening starts.
+(function initListenEngine() {
+  const select = $("listenEngineSelect");
+  if (!select) return;
+  const choice = listenEngineChoice();
+  select.value = ["auto", "frivo", "provider"].includes(choice) ? choice : "auto";
+  select.addEventListener("change", () => {
+    try { localStorage.setItem(LISTEN_ENGINE_KEY, select.value); } catch (e) { /* not remembered */ }
+    if (listening) setListenStatus("Stop and start listening to switch.");
+  });
+})();
 
 if (listenToggle) {
   listenToggle.addEventListener("click", async () => {
@@ -15117,6 +15412,9 @@ function omCardUses() {
   document.documentElement.classList.add("in-frivo-app");
   if (offer) offer.remove();
   $("appNavBtn").classList.remove("is-hidden");
+  // CHANGED (2.0.0): the app's version and updates sit under Updates.
+  $("appVersionRow").classList.remove("is-hidden");
+  $("appUpdateRow").classList.remove("is-hidden");
 
   const closeSelect = $("appCloseSelect");
   const loginToggle = $("appLoginToggle");
@@ -15166,7 +15464,7 @@ function omCardUses() {
     const outdated = local && s.local && s.local.outdated;
     note.classList.toggle("is-hidden", !outdated);
     if (outdated) {
-      note.textContent = `Frivo ${s.local.version} runs fine in the app, but update it to ${s.local.minimum} or newer (Updates, above) so its launcher stays in the background.`;
+      note.textContent = `Frivo ${s.local.version} runs fine in the app, but update it to ${s.local.minimum} or newer (Settings › Updates) so its launcher stays in the background.`;
     }
   }
 

@@ -486,6 +486,21 @@ page: the card with three models, dictating in Chromium with a fake
 microphone, the error when nothing's downloaded, and the Frivo app never
 offering Live (browser).
 
+## test-builtin-listening.py
+
+NEW (2.0.0). Listening with Frivo's own dictation model (`/api/listen/stream`
+in `app/app.py`). Stand-in models as in `test-builtin-dictation.py` (Small
+writes a language tag, Large says what it heard) and a stand-in translation
+that marks what it translated. Covered: refused with nothing downloaded;
+lines as they're said with their language; finished lines translated, and
+with Live updates the line being said, at most every 1.5 s; nothing
+translated when it's already your language; a slow translation not holding
+up the audio; Commit every; Stop waiting for the last translations; and in
+Chromium with a fake audio source: the panel switching to the built-in model
+by itself, translated lines with the original under them, the loudness gate
+keeping a hum out (reintroducing the hum makes it fail), Evora's speaker
+controls stepping aside, and Settings › Listening's choice of engine.
+
 ## test-server-page.py
 
 NEW (2.0.0). The Server page (`/server`): who's using Frivo (phone, PC or the

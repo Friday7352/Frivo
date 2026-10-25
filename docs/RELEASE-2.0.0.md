@@ -68,6 +68,15 @@ All three run on the PC Frivo runs on: no OpenAI, no Evora, and nothing leaves t
 
 The mic button then uses the new **Live (Frivo)** mode. Your microphone streams to Frivo a few times a second, and words appear as you speak. Each sentence finishes itself when you pause, and Auto-send works as it does with Evora. **Test with my voice** records four seconds from your microphone and shows what the model heard and how long it took. The model loads when you start dictating and frees its memory after 15 minutes without dictation (you can change that), and **Remove** deletes it.
 
+## Listening with the built-in model
+
+Once a dictation model is downloaded, the **Listening** panel uses it too: no Evora, no OpenAI for the words, and nothing leaves the PC Frivo runs on. The audio source streams to Frivo a few times a second, and each person's words appear as they talk, with the language they're speaking. Every finished line is translated into the language picked under **Show me in**, with what was said underneath; with **Live updates** on, the line still being said is translated as it goes too. Nothing is translated when they already speak your language (Small and Large say which language they heard; with Medium, the translation provider decides).
+
+- Translation still uses the provider in **Settings › Listening › Translation** (OpenAI, Ollama or the built-in AI).
+- The loudness gate still decides what counts: anything quieter is sent to Frivo as silence, so music or game sound under the gate is never transcribed.
+- **Commit every** finishes a line that goes on without a pause.
+- Telling voices apart is Evora's, so the speaker controls step aside while the built-in model is listening. **Settings › Listening › Hear them with** switches back to Evora or OpenAI.
+
 ## The Server page
 
 For a PC that runs Frivo for other devices. On a PC set up as Frivo without the app, the Frivo shortcut opens it in your browser and the launcher stays in the tray (its window is under **Show launcher**, and comes up by itself if Frivo won't start). The chat is one click away, and on the tray menu. Anyone can also open it from **Settings › Other devices › Server page**, or at `/server`.

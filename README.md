@@ -105,7 +105,10 @@ large-v3-turbo, the model Evora uses, about 1.6 GB plus 1 GB of NVIDIA's
 libraries once) needs an NVIDIA graphics card, and its memory shows on the
 GPU graph. All three are multilingual. It downloads to the PC Frivo runs on,
 even when you click the button on a phone or another PC. The mic button then
-uses the **Live (Frivo)** mode.
+uses the **Live (Frivo)** mode, and the **Listening** panel uses the same
+model to transcribe and translate the people around you, live (telling
+voices apart still needs Evora; **Settings › Listening › Hear them with**
+switches back).
 
 **Hover over a reply** to see which voice spoke it and whether it was written
 **Local**ly or by **OpenAI**.
