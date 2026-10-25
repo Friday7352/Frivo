@@ -155,6 +155,26 @@ SPEECH_RMS = 0.010              # the level that counts as talking
 END_PAUSE_SECONDS = 0.6
 MAX_SENTENCE_SECONDS = 25.0     # read and start a new one, however long it goes on
 PRE_ROLL_FRAMES = 15            # 0.3 s kept from before speech starts
+# NEW (2.0.0): a sentence needs this much loud audio in it to be read at all.
+# A pop, a click or a knock is a frame or two; even "no" is more than this.
+# Read anyway, Whisper tends to answer short noise with "Thank you".
+MIN_SPEECH_SECONDS = 0.3
+
+# NEW (2.0.0): what Whisper writes for noise and silence (it learned them
+# from subtitles). Lines that are only one of these, normalised (lowercase,
+# no punctuation), are dropped when the model wasn't sure there was speech;
+# a clear "thank you" stays. ALWAYS ones are subtitle credits nobody says.
+WHISPER_NOISE_PHRASES = {
+    "thank you", "thank you very much", "thanks", "thank you so much", "thanks for watching",
+    "thank you for watching", "thanks for watching and see you next time", "please subscribe",
+    "subscribe", "like and subscribe", "bye", "bye bye", "you", "oh", "uh", "hmm", "okay",
+    "so", "the end", "see you next time", "i'll see you next time",
+    "gracias", "obrigado", "obrigada", "merci", "danke", "grazie", "спасибо",
+    "ご視聴ありがとうございました", "ありがとうございました", "감사합니다", "谢谢", "謝謝",
+    "thank you for your attention",
+}
+WHISPER_NOISE_ALWAYS = ("amara.org", "subtitles by", "subtitled by", "untertitel", "sous-titres",
+                        "sottotitoli", "субтитры", "字幕", "transcribed by", "captions by")
 INTERIM_SECONDS = {"parakeet": 0.5, "whisper": 0.6}
 
 _LANG_TAG = re.compile(r"\s*<\|?[a-z]{2,3}(?:[-_][A-Za-z]{2,4})?\|?>\s*")
@@ -333,6 +353,7 @@ class _SentenceStream:
         self.speaking = False
         self.quiet = 0.0
         self.since_read = 0.0
+        self.loud_frames = 0      # NEW (2.0.0): see MIN_SPEECH_SECONDS
         self.out = _Lines()
         self.leftover = None
 
@@ -357,15 +378,19 @@ class _SentenceStream:
         return _short_language(getattr(self.engine, "last_language", None)) or self.language
 
     def _finish(self):
-        if self.buf and len(self.buf) * 0.02 - self.quiet >= 0.25:
+        # CHANGED (2.0.0): only with enough loud audio in it (a pop isn't
+        # read), and a reading that comes back empty (noise the engine threw
+        # out) takes the line away rather than leaving its draft.
+        if self.buf and self.loud_frames * 0.02 >= MIN_SPEECH_SECONDS:
             text = clean_text(self.engine.transcribe(self._audio(), self.language, final=True))
-            self.out.complete_current(text or None, self._heard_language())
+            self.out.complete_current(text, self._heard_language())
         else:
             self.out.complete_current(None)
         self.buf, self.pre = [], []
         self.speaking = False
         self.quiet = 0.0
         self.since_read = 0.0
+        self.loud_frames = 0
 
     def add(self, samples):
         np = _np()
@@ -378,16 +403,20 @@ class _SentenceStream:
                     self.pre = []
                     self.quiet = 0.0
                     self.since_read = 0.0
+                    self.loud_frames = 1
                     self.out.current()
                 else:
                     self.pre = (self.pre + [frame])[-PRE_ROLL_FRAMES:]
                 continue
             self.buf.append(frame)
             self.since_read += 0.02
+            if loud:
+                self.loud_frames += 1
             self.quiet = 0.0 if loud else self.quiet + 0.02
             if self.quiet >= END_PAUSE_SECONDS or len(self.buf) * 0.02 >= self.max_seconds:
                 self._finish()
-        if self.speaking and self.since_read >= self.interim and len(self.buf) * 0.02 >= 0.4:
+        if (self.speaking and self.since_read >= self.interim and len(self.buf) * 0.02 >= 0.4
+                and self.loud_frames * 0.02 >= MIN_SPEECH_SECONDS):
             self.since_read = 0.0
             text = clean_text(self.engine.transcribe(self._audio(), self.language, final=False))
             if text:
@@ -527,12 +556,52 @@ class WhisperEngine:
         segments, info = self.model.transcribe(
             samples, language=language or None, beam_size=3 if final else 1, temperature=0.0,
             condition_on_previous_text=False, without_timestamps=True, vad_filter=False)
-        text = " ".join(seg.text.strip() for seg in segments).strip()
+        # CHANGED (2.0.0): noise Whisper read as words is left out (see
+        # whisper_keep).
+        kept = [seg for seg in segments if whisper_keep(seg)]
+        text = " ".join(seg.text.strip() for seg in kept).strip()
         self.last_language = getattr(info, "language", None)   # NEW (2.0.0): for Listening
+        if kept and whisper_noise_line(text, kept):
+            return ""
         return text
 
     def close(self):
         self.model = None
+
+
+def _normalise(text):
+    return re.sub(r"[^\w\s']", "", str(text or "").lower()).strip()
+
+
+def whisper_keep(seg):
+    """NEW (2.0.0): one of Whisper's segments worth keeping. Not when it
+    thinks there was probably no speech and isn't confident of the words
+    (its own rule, applied to every segment), and not when it repeats itself
+    (a high compression ratio is Whisper looping on noise)."""
+    no_speech = getattr(seg, "no_speech_prob", 0.0) or 0.0
+    logprob = getattr(seg, "avg_logprob", 0.0) or 0.0
+    ratio = getattr(seg, "compression_ratio", 0.0) or 0.0
+    if no_speech > 0.6 and logprob < -1.0:
+        return False
+    if ratio > 2.4:
+        return False
+    return bool(str(getattr(seg, "text", "")).strip())
+
+
+def whisper_noise_line(text, segments):
+    """NEW (2.0.0): True when the whole line is one of Whisper's noise
+    phrases and it wasn't sure: some chance of no speech, or low confidence
+    in the words. Subtitle credits are always noise."""
+    norm = _normalise(text)
+    if not norm:
+        return True
+    if any(p in norm for p in WHISPER_NOISE_ALWAYS):
+        return True
+    if norm not in WHISPER_NOISE_PHRASES:
+        return False
+    no_speech = max((getattr(s, "no_speech_prob", 0.0) or 0.0) for s in segments)
+    logprob = min((getattr(s, "avg_logprob", 0.0) or 0.0) for s in segments)
+    return no_speech > 0.15 or logprob < -0.5
 
 
 ENGINES = {"nemotron": NemotronEngine, "parakeet": ParakeetEngine, "whisper": WhisperEngine}

@@ -374,6 +374,52 @@ check("Test reads what was recorded", r.status_code == 200 and d.get("text", "")
 r = client.post("/api/builtin-dictation/test", data=b"\0" * 100, content_type="application/octet-stream")
 check("an empty recording says so", r.status_code == 400 and "microphone" in r.get_json()["error"], r.get_json())
 
+print("Noise isn't words")
+client.post("/api/builtin-dictation/settings", json={"model": "medium"})
+sid = client.post("/api/dictation/stream", json={}).get_json()["id"]
+LOG["transcribed"].clear()
+lines = client.post(f"/api/dictation/stream/{sid}", data=pcm(0.5, False) + pcm(0.06, True) + pcm(1.0, False)).get_json()["lines"]
+check("a pop isn't even read", not lines and not LOG["transcribed"], (lines, LOG["transcribed"]))
+client.post(f"/api/dictation/stream/{sid}/stop")
+
+
+class Seg:
+    def __init__(self, text, no_speech=0.01, logprob=-0.2, ratio=1.2):
+        self.text, self.no_speech_prob, self.avg_logprob, self.compression_ratio = text, no_speech, logprob, ratio
+
+
+class Info:
+    language = "en"
+
+
+class FakeWhisperModel:
+    segments = []
+
+    def transcribe(self, samples, **kw):
+        return iter(self.segments), Info()
+
+
+import numpy as np
+w = M.WhisperEngine.__new__(M.WhisperEngine)
+w.model = FakeWhisperModel()
+audio = np.ones(16000, dtype=np.float32) * 0.1
+
+
+def heard(*segments):
+    w.model.segments = list(segments)
+    return w.transcribe(audio)
+
+
+check("Whisper's \"Thank you\" for a noise it wasn't sure of is dropped", heard(Seg(" Thank you.", no_speech=0.4)) == "")
+check("and when it wasn't sure of the words", heard(Seg(" Thanks for watching!", logprob=-0.8)) == "")
+check("a clear \"thank you\" stays", heard(Seg(" Thank you.")) == "Thank you.")
+check("so does a sentence with it in", heard(Seg(" Thank you, that was fun.", no_speech=0.4)) == "Thank you, that was fun.")
+check("subtitle credits are always dropped", heard(Seg(" Subtitles by the Amara.org community")) == "")
+check("in other languages too", heard(Seg(" ご視聴ありがとうございました", no_speech=0.3)) == "")
+check("Whisper's own no-speech rule is applied to each part", heard(Seg(" Hello there."), Seg(" Hmm hmm.", no_speech=0.7, logprob=-1.3)) == "Hello there.")
+check("and a part repeating itself is dropped", heard(Seg(" Hello."), Seg(" the the the the the the", ratio=3.1)) == "Hello.")
+client.post("/api/builtin-dictation/settings", json={"model": "large"})
+
 print("Idle, and Remove")
 client.post("/api/builtin-dictation/settings", json={"idle": "5m", "model": "nonsense"})
 check("the idle time is saved, nonsense isn't", mod.CFG["builtin_dictation_idle"] == "5m" and mod.CFG["builtin_dictation_model"] == "large")
