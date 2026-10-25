@@ -7527,7 +7527,7 @@ def frivosc_unmute():
 
     status = frivosc_status()
     if not status["connected"]:
-        return jsonify({"error": "FrivOSC isn't connected."}), 503
+        return jsonify({"error": "VRChat isn't running with the Frivo app right now."}), 503   # CHANGED (2.0.0)
 
     # Nothing to do, and saying so is more useful than queueing a no-op.
     if status["muted"] is False:

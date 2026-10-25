@@ -347,7 +347,7 @@ function paintSettingsNavDots(services) {
     const state = !service ? "" : service.ok ? "is-ok" : service.idle ? "" : "is-down";
     dot.className = "settings-nav-dot" + (state ? " " + state : "");
     const btn = dot.closest(".settings-nav-btn");
-    if (btn) btn.title = !service ? "Not in use" : service.ok ? "Working" : service.idle ? "Resting" : `${service.state || "Not reachable"}`;
+    if (btn) btn.title = !service ? "Not in use" : service.ok ? "Working" : `${service.state || (service.idle ? "Resting" : "Not reachable")}`;
   });
 }
 
@@ -2518,11 +2518,13 @@ function setFrivoscPollRate(interval) {
 }
 
 function describeFrivosc(data) {
-  // Deliberately just "Connected". The hostname reads as "Connected — PA…"
-  // at this row's width, which tells nobody anything; the machine's name is
-  // visible in FrivOSC's own window, on the machine in question.
+  // CHANGED (2.0.0): FrivOSC is built into the Frivo app, which connects by
+  // itself while VRChat runs, so there's nothing to "connect": the row says
+  // whether VRChat is there, and on which PC. Not connected is just VRChat
+  // not running, not a problem.
   if (!data || !data.enabled) return "Off";
-  return data.connected ? "Connected" : "Not connected";
+  if (!data.connected) return "Waiting for VRChat";
+  return data.hostname ? `Running on ${data.hostname}` : "Running";
 }
 
 async function pollFrivoscStatus() {
@@ -2548,7 +2550,8 @@ async function pollFrivoscStatus() {
     // null is not false: "unknown" and "live" are different answers.
     setSummary(
       "frivoscMicValue",
-      frivoscMuted === null ? "Unknown" : frivoscMuted ? "Muted" : "Live"
+      // CHANGED (2.0.0): "—" while VRChat isn't running, rather than "Unknown".
+      !frivoscConnected ? "—" : frivoscMuted === null ? "Not reported yet" : frivoscMuted ? "Muted" : "Live"
     );
     syncOscSwitch();
     applyMuteSync();

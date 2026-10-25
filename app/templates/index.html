@@ -1480,7 +1480,7 @@
               <!-- CHANGED (2.0.0): VRChat is FrivOSC's page now -->
               <section class="settings-section" data-settings-section="frivosc" id="frivoscSection">
                 <h3 class="settings-section-title">FrivOSC</h3>
-                <p class="settings-section-sub">Through the Frivo app on the PC you play VRChat on: FrivOSC is built into it, and connects by itself while VRChat runs. (The separate FrivOSC still works too.)</p>
+                <p class="settings-section-sub">Through the Frivo app on the PC you play VRChat on: FrivOSC is built into it, and connects by itself while VRChat runs.</p>
                 <div class="settings-card-home" id="oscSettingsHome"></div>
                 <div class="settings-card" id="oscSettings">
                   <label class="srow">
@@ -1524,12 +1524,13 @@
                     </span>
                   </label>
                   <div class="srow" id="frivoscStatusRow">
-                    <span class="srow-main srow-main--flex"><span class="srow-label">FrivOSC</span></span>
-                    <span class="srow-value" id="frivoscStatusValue">Not connected</span>
+                    <!-- CHANGED (2.0.0): FrivOSC is built in; this says whether VRChat is there -->
+                    <span class="srow-main srow-main--flex"><span class="srow-label">VRChat</span></span>
+                    <span class="srow-value" id="frivoscStatusValue">Off</span>
                   </div>
                   <div class="srow">
                     <span class="srow-main srow-main--flex"><span class="srow-label">Microphone in VRChat</span></span>
-                    <span class="srow-value" id="frivoscMicValue">Unknown</span>
+                    <span class="srow-value" id="frivoscMicValue">—</span>
                   </div>
                 </div>
                 <!-- CHANGED (2.0.0): the Frivo app's switch for FrivOSC, built into it (moved
