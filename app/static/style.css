@@ -5645,3 +5645,54 @@ html.motion-ready .stage { transition: transform var(--dur-smooth) var(--spring-
    translated stays faint until its translation arrives. */
 .listen-panel.is-builtin .listen-evora-only { display: none; }
 .listen-entry.is-translating .listen-text { opacity: 0.75; }
+
+/* ============================================================
+   CHANGED (2.0.0): the Settings list, grouped
+   ============================================================
+   Five groups (General, Features, Engines, Add-ons, This PC) under small
+   headings; an add-on carries a dot for whether it's working, and Updates
+   a badge when one is waiting. The list scrolls on its own when the
+   window is short. */
+.settings-nav { overflow-y: auto; gap: 1px; padding-top: 12px; }
+.settings-nav-btn { height: 34px; flex: none; }
+.settings-nav-label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.settings-nav-group {
+  flex: none;
+  padding: 14px 12px 5px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+.settings-nav-group:first-child { padding-top: 4px; }
+.settings-nav-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--ink-faint); opacity: 0.6; }
+.settings-nav-dot.is-ok { background: var(--signal); opacity: 1; }
+.settings-nav-dot.is-down { background: var(--alert); opacity: 1; }
+.settings-nav-badge {
+  flex: none;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  box-sizing: border-box;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-size: 11px;
+  font-weight: 700;
+  display: grid;
+  place-items: center;
+}
+.settings-nav-badge.is-hidden { display: none; }
+.settings-nav-btn .settings-nav-version { margin-left: 0; }
+.settings-nav-badge:not(.is-hidden) + .settings-nav-version { display: none; }
+.models-group-title { margin-top: 30px; }
+@media (max-width: 900px) {
+  .settings-nav { overflow-y: hidden; }
+  .settings-nav-group { display: none; }
+}
+/* Models & downloads: its three groups (Built-in AI, Dictation & listening,
+   Where they're kept) as the same small headings, whatever comes before. */
+.settings-section-title.models-group-title { margin-top: 30px; font-size: 12px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-faint); }
+/* The version is on the Updates page; in the list it cut "Updates & backup" short. */
+.settings-nav-btn .settings-nav-version { display: none; }

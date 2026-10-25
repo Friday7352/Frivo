@@ -21,7 +21,7 @@ is Frivo's side:
   * in Chromium, with a fake audio source: the panel using Frivo's model by
     itself once one is downloaded, translated lines with the original under
     them, the loudness gate keeping quiet sounds out, Evora's speaker
-    controls stepping aside, and Settings › Listening's choice to use Evora
+    controls stepping aside, and Settings › Providers' choice to use Evora
     or OpenAI instead
 
 Usage:  python3 tests/test-builtin-listening.py     (run from the repo root)
@@ -200,7 +200,7 @@ def settle(sid, seconds=1.0):
 print("Before a model is downloaded")
 r = client.post("/api/listen/stream", json={"target_language": "English"})
 check("listening with Frivo's model is refused, and says where to go",
-      r.status_code == 409 and "Settings › Dictation" in r.get_json()["error"] and "Settings › Listening" in r.get_json()["error"],
+      r.status_code == 409 and "Settings › Models & downloads" in r.get_json()["error"] and "Settings › Providers" in r.get_json()["error"],
       r.get_json())
 
 for model_id in ("small", "medium"):
@@ -374,9 +374,9 @@ if sync_playwright:
         check("the hum under the gate never reached the model", all(t.count("palabra") <= 5 for t in texts), texts)
         check("each says the language heard", page.eval_on_selector_all("#listenLog .listen-entry-lang", "els => els.map(e => e.textContent)") == ["ja", "ja"])
         check("no script errors", not errors, errors)
-        # Settings › Listening: Evora or OpenAI instead.
+        # Settings › Providers: Evora or OpenAI instead.
         page.click("#settingsToggle")
-        page.click('.settings-nav-btn[data-settings-section="listening"]')
+        page.click('.settings-nav-btn[data-settings-section="providers"]')
         page.evaluate("(() => { const s = document.getElementById('listenEngineSelect'); s.value = 'provider'; s.dispatchEvent(new Event('change', { bubbles: true })); })()")
         check("the choice is remembered", page.evaluate("localStorage.getItem('voice_console_listen_engine')") == "provider")
         check("and with it, listening goes to Evora or OpenAI", page.evaluate("listenUsesFrivo()") is False)

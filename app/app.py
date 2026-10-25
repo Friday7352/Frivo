@@ -2930,7 +2930,7 @@ def dictation_stream_open():
         return _dictation_missing()
     problem = BUILTIN_DICTATION.problem()
     if problem:
-        return jsonify({"error": problem + " Download it in Settings › Dictation."}), 409
+        return jsonify({"error": problem + " Download it in Settings › Models & downloads."}), 409   # CHANGED (2.0.0)
     language = (request.get_json(silent=True) or {}).get("language")   # NEW (2.0.0): "" or "auto" = automatic
     try:
         sid = BUILTIN_DICTATION.open_stream(language)
@@ -6661,8 +6661,8 @@ def listen_stream_open():
         return _dictation_missing()
     problem = BUILTIN_DICTATION.problem()
     if problem:
-        return jsonify({"error": problem + " Download a model in Settings › Dictation, or choose Evora or OpenAI "
-                                           "for Listening in Settings › Listening."}), 409
+        return jsonify({"error": problem + " Download a model in Settings › Models & downloads, or choose Evora or OpenAI "
+                                           "for Listening in Settings › Providers."}), 409   # CHANGED (2.0.0)
     data = request.get_json(silent=True) or {}
     target = normalize_language(data.get("target_language")) or "English"
     try:

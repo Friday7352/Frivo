@@ -771,48 +771,59 @@
         </header>
 
         <div class="settings-body">
+          <!-- CHANGED (2.0.0): grouped. Each add-on (FrivOSC, Evora, Ollama) has a
+               page of its own with everything about it; Providers says which one
+               does which job; Models & downloads holds everything downloaded. -->
           <nav class="settings-nav" id="settingsNav" aria-label="Settings sections">
+            <span class="settings-nav-group">General</span>
             <button type="button" class="settings-nav-btn" data-settings-section="accounts">
-              <svg class="icon-16"><use href="#i-key"/></svg>Accounts &amp; keys
+              <svg class="icon-16"><use href="#i-key"/></svg><span class="settings-nav-label">Accounts &amp; keys</span>
+            </button>
+            <button type="button" class="settings-nav-btn" data-settings-section="appearance">
+              <svg class="icon-16"><use href="#i-sun"/></svg><span class="settings-nav-label">Appearance</span>
+            </button>
+            <button type="button" class="settings-nav-btn" data-settings-section="audio">
+              <svg class="icon-16"><use href="#i-speaker"/></svg><span class="settings-nav-label">Audio</span>
+            </button>
+            <span class="settings-nav-group">Features</span>
+            <button type="button" class="settings-nav-btn is-active" data-settings-section="replies">
+              <svg class="icon-16"><use href="#i-chat"/></svg><span class="settings-nav-label">Replies</span>
             </button>
             <button type="button" class="settings-nav-btn" data-settings-section="voices">
-              <svg class="icon-16"><use href="#i-wave"/></svg>Voices
-            </button>
-            <button type="button" class="settings-nav-btn is-active" data-settings-section="replies">
-              <svg class="icon-16"><use href="#i-chat"/></svg>Replies
-            </button>
-            <!-- NEW (2.0.0): devices, like Discord's Voice & Video -->
-            <button type="button" class="settings-nav-btn" data-settings-section="audio">
-              <svg class="icon-16"><use href="#i-speaker"/></svg>Audio
+              <svg class="icon-16"><use href="#i-wave"/></svg><span class="settings-nav-label">Voices</span>
             </button>
             <button type="button" class="settings-nav-btn" data-settings-section="dictation">
-              <svg class="icon-16"><use href="#i-mic"/></svg>Dictation
+              <svg class="icon-16"><use href="#i-mic"/></svg><span class="settings-nav-label">Dictation</span>
             </button>
             <button type="button" class="settings-nav-btn" data-settings-section="listening">
-              <svg class="icon-16"><use href="#i-ear"/></svg>Listening
+              <svg class="icon-16"><use href="#i-ear"/></svg><span class="settings-nav-label">Listening</span>
             </button>
-            <button type="button" class="settings-nav-btn" data-settings-section="vrchat">
-              <svg class="icon-16"><use href="#i-osc"/></svg>VRChat
-            </button>
+            <span class="settings-nav-group">Engines</span>
             <button type="button" class="settings-nav-btn" data-settings-section="providers">
-              <svg class="icon-16"><use href="#i-server"/></svg>Providers
+              <svg class="icon-16"><use href="#i-server"/></svg><span class="settings-nav-label">Providers</span>
             </button>
-            <!-- NEW (1.7.0) -->
-            <button type="button" class="settings-nav-btn" data-settings-section="storage">
-              <svg class="icon-16"><use href="#i-db"/></svg>Storage
+            <button type="button" class="settings-nav-btn" data-settings-section="models">
+              <svg class="icon-16"><use href="#i-download"/></svg><span class="settings-nav-label">Models &amp; downloads</span>
             </button>
-            <!-- NEW (2.0.0): phones, other PCs and the Frivo app -->
-            <button type="button" class="settings-nav-btn" data-settings-section="devices">
-              <svg class="icon-16"><use href="#i-globe"/></svg>Other devices
+            <span class="settings-nav-group">Add-ons</span>
+            <button type="button" class="settings-nav-btn" data-settings-section="frivosc">
+              <svg class="icon-16"><use href="#i-osc"/></svg><span class="settings-nav-label">FrivOSC</span><span class="settings-nav-dot" data-service-dot="frivosc" aria-hidden="true"></span>
             </button>
-            <!-- NEW (2.0.0): only in the Frivo app (desktop\ in the repo), never in a browser -->
+            <button type="button" class="settings-nav-btn" data-settings-section="evora">
+              <svg class="icon-16"><use href="#i-wave"/></svg><span class="settings-nav-label">Evora</span><span class="settings-nav-dot" data-service-dot="whisper" aria-hidden="true"></span>
+            </button>
+            <button type="button" class="settings-nav-btn" data-settings-section="ollama">
+              <svg class="icon-16"><use href="#i-chip"/></svg><span class="settings-nav-label">Ollama</span><span class="settings-nav-dot" data-service-dot="ollama" aria-hidden="true"></span>
+            </button>
+            <span class="settings-nav-group">This PC</span>
             <button type="button" class="settings-nav-btn is-hidden" data-settings-section="app" id="appNavBtn">
-              <svg class="icon-16"><use href="#i-chip"/></svg>App
+              <svg class="icon-16"><use href="#i-gem"/></svg><span class="settings-nav-label">Frivo app</span>
             </button>
-            <span class="rail-spacer"></span>
+            <button type="button" class="settings-nav-btn" data-settings-section="devices">
+              <svg class="icon-16"><use href="#i-globe"/></svg><span class="settings-nav-label">Other devices</span>
+            </button>
             <button type="button" class="settings-nav-btn" data-settings-section="about">
-              <svg class="icon-16"><use href="#i-download"/></svg>Updates
-              <span class="settings-nav-version" id="settingsNavVersion"></span>
+              <svg class="icon-16"><use href="#i-refresh"/></svg><span class="settings-nav-label">Updates &amp; backup</span><span class="settings-nav-badge is-hidden" id="settingsNavUpdateBadge">1</span><span class="settings-nav-version" id="settingsNavVersion"></span>
             </button>
           </nav>
 
@@ -851,8 +862,13 @@
                     <span class="srow-chevron"><svg class="icon-16"><use href="#i-chevron"/></svg></span>
                   </button>
                 </div>
+              </section>
 
+
+              <!-- CHANGED (2.0.0): its own section (it was under Accounts) -->
+              <section class="settings-section" data-settings-section="appearance">
                 <h3 class="settings-section-title">Appearance</h3>
+                <p class="settings-section-sub">How Frivo looks, in this browser.</p>
                 <div class="settings-card">
                   <label class="srow">
                     <span class="srow-main srow-main--flex">
@@ -1186,10 +1202,217 @@
                   </div>
                 </div>
 
+                <!-- NEW (2.0.0): what it uses is set in Providers and Models -->
+                <h4 class="settings-subhead">Uses</h4>
+                <div class="settings-card">
+                  <button class="srow" type="button" data-goto-section="models">
+                    <span class="srow-main srow-main--flex">
+                      <span class="srow-label">Built-in model</span>
+                      <span class="srow-sub">Download one, and pick which, in Models &amp; downloads. It's the Live (Frivo) mode.</span>
+                    </span>
+                    <span class="srow-value" id="dictUsesBuiltinValue"></span>
+                    <span class="srow-chevron"><svg class="icon-16"><use href="#i-chevron"/></svg></span>
+                  </button>
+                  <button class="srow" type="button" data-goto-section="providers">
+                    <span class="srow-main srow-main--flex">
+                      <span class="srow-label">Accurate mode</span>
+                      <span class="srow-sub">Evora or OpenAI, chosen in Providers.</span>
+                    </span>
+                    <span class="srow-value" id="dictUsesAccurateValue"></span>
+                    <span class="srow-chevron"><svg class="icon-16"><use href="#i-chevron"/></svg></span>
+                  </button>
+                </div>
+              </section>
+
+              <!-- Listening -->
+              <section class="settings-section" data-settings-section="listening">
+                <h3 class="settings-section-title">Listening</h3>
+                <p class="settings-section-sub">Translating and transcribing the people around you. Open it from the rail.</p>
+                <div class="settings-card" id="listenSetupCard">
+                  <!-- CHANGED (2.0.0): the audio source and gate are in Settings › Audio -->
+                  <button class="srow" type="button" data-goto-section="audio">
+                    <span class="srow-main srow-main--flex">
+                      <span class="srow-label">Audio source</span>
+                      <span class="srow-sub">Chosen, checked and gated in Audio.</span>
+                    </span>
+                    <span class="srow-value" data-audio-summary="listen">System default</span>
+                    <span class="srow-chevron"><svg class="icon-16"><use href="#i-chevron"/></svg></span>
+                  </button>
+                  <div class="srow">
+                    <label class="srow-main srow-main--flex" for="listenSegmentSeconds">
+                      <span class="srow-label">Commit every</span>
+                      <span class="srow-sub">When nobody pauses, a line is finished anyway after this long.</span>
+                    </label>
+                    <span class="srow-control">
+                      <select id="listenSegmentSeconds">
+                        <option value="3">3 seconds — busiest rooms</option>
+                        <option value="6" selected>6 seconds — good default</option>
+                        <option value="10">10 seconds — calmer conversations</option>
+                        <option value="30">30 seconds — only on pauses</option>
+                      </select>
+                    </span>
+                  </div>
+                  <label class="srow">
+                    <span class="srow-main srow-main--flex">
+                      <span class="srow-label">Live updates</span>
+                      <span class="srow-sub">Show text while they're still talking, correcting itself as more arrives.</span>
+                    </span>
+                    <span class="switch">
+                      <input type="checkbox" id="listenLiveToggle">
+                      <span class="switch-track" aria-hidden="true"></span>
+                    </span>
+                  </label>
+                </div>
+
+
+                <!-- NEW (2.0.0): what it uses is set in Providers and on Evora's page -->
+                <h4 class="settings-subhead">Uses</h4>
+                <div class="settings-card">
+                  <button class="srow" type="button" data-goto-section="providers">
+                    <span class="srow-main srow-main--flex">
+                      <span class="srow-label">Hearing</span>
+                      <span class="srow-sub">Frivo's built-in model, or Evora or OpenAI. Chosen in Providers.</span>
+                    </span>
+                    <span class="srow-value" id="listenUsesHearValue"></span>
+                    <span class="srow-chevron"><svg class="icon-16"><use href="#i-chevron"/></svg></span>
+                  </button>
+                  <button class="srow" type="button" data-goto-section="providers">
+                    <span class="srow-main srow-main--flex">
+                      <span class="srow-label">Translation</span>
+                      <span class="srow-sub">Chosen in Providers.</span>
+                    </span>
+                    <span class="srow-value" id="listenUsesTranslateValue"></span>
+                    <span class="srow-chevron"><svg class="icon-16"><use href="#i-chevron"/></svg></span>
+                  </button>
+                  <button class="srow" type="button" data-goto-section="evora">
+                    <span class="srow-main srow-main--flex">
+                      <span class="srow-label">Telling voices apart</span>
+                      <span class="srow-sub">Evora, with Speaker setup and Voice matching on its page.</span>
+                    </span>
+                    <span class="srow-value" id="listenUsesVoicesValue">Evora</span>
+                    <span class="srow-chevron"><svg class="icon-16"><use href="#i-chevron"/></svg></span>
+                  </button>
+                </div>
+              </section>
+
+              <!-- Providers -->
+              <section class="settings-section" data-settings-section="providers">
+                <h3 class="settings-section-title">Providers</h3>
+                <p class="settings-section-sub">What Frivo uses for each job. Addresses and models are on each add-on's page and in Models &amp; downloads.</p>
+                <div class="settings-card">
+                  <!-- CHANGED (1.6.0): only shown when there's an OpenAI key. -->
+                  <label class="srow is-hidden" id="allowFallbackRow">
+                    <span class="srow-main srow-main--flex">
+                      <span class="srow-label">Fall back to OpenAI if a local AI is down</span>
+                      <span class="srow-sub">Off, Clean up uses No AI (Frivo's rules) when the local AI can't answer, and Reply says it's down, instead of quietly costing money.</span>
+                    </span>
+                    <span class="switch">
+                      <input type="checkbox" id="allowFallbackToggle">
+                      <span class="switch-track" aria-hidden="true"></span>
+                    </span>
+                  </label>
+                  <div class="srow srow--stacked">
+                    <span class="srow-main srow-main--flex">
+                      <span class="srow-label">Chat replies</span>
+                      <span class="srow-sub" id="chatProviderNote"></span>
+                    </span>
+                    <div class="radio-row" id="chatProviderRadios" role="radiogroup" aria-label="Chat provider"></div>
+                  </div>
+                  <div class="srow srow--stacked">
+                    <span class="srow-main srow-main--flex">
+                      <span class="srow-label">Transcription</span>
+                      <span class="srow-sub" id="transcriptionProviderNote">Dictation's Accurate mode.</span>
+                    </span>
+                    <div class="radio-row" id="transcriptionProviderRadios" role="radiogroup" aria-label="Transcription provider"></div>
+                  </div>
+                  <!-- NEW (2.0.0): Frivo's own model, or Evora / OpenAI -->
+                  <div class="srow">
+                    <label class="srow-main srow-main--flex" for="listenEngineSelect">
+                      <span class="srow-label">Listening</span>
+                      <span class="srow-sub" id="listenEngineSub">Who hears the people around you. Frivo's built-in model is the one picked in Models &amp; downloads; telling voices apart needs Evora. Saved in this browser.</span>
+                    </label>
+                    <span class="srow-control">
+                      <select id="listenEngineSelect">
+                        <option value="auto">Built-in model, once downloaded</option>
+                        <option value="frivo">Built-in model</option>
+                        <option value="provider">Evora or OpenAI (as Transcription)</option>
+                      </select>
+                    </span>
+                  </div>
+                </div>
+
+                <h3 class="settings-section-title">Translation</h3>
+                <p class="settings-section-sub">For the Listening panel and hover-to-translate.</p>
+                <div class="settings-card">
+                  <button class="srow" type="button" data-settings-page="translation-provider">
+                    <span class="srow-main srow-main--flex"><span class="srow-label">Provider</span></span>
+                    <span class="srow-value" id="settingsTranslationProviderValue">—</span>
+                    <span class="srow-chevron"><svg class="icon-16"><use href="#i-chevron"/></svg></span>
+                  </button>
+                  <button class="srow" type="button" data-settings-page="translation-model">
+                    <span class="srow-main srow-main--flex"><span class="srow-label">Model</span></span>
+                    <span class="srow-value" id="settingsTranslationModelValue">—</span>
+                    <span class="srow-chevron"><svg class="icon-16"><use href="#i-chevron"/></svg></span>
+                  </button>
+                </div>
+              </section>
+
+              <!-- NEW (2.0.0): everything Frivo downloads, in one place -->
+              <section class="settings-section" data-settings-section="models" id="modelsSection">
+                <h3 class="settings-section-title">Models &amp; downloads</h3>
+                <p class="settings-section-sub">Everything Frivo downloads to the PC it runs on: what's there, what's loaded, and where it's kept. Ollama's models are on Ollama's page.</p>
+                <!-- NEW (1.6.0): the built-in AI: one click, no Ollama, no key. -->
+                <h3 class="settings-section-title models-group-title">Built-in AI <span class="settings-inline-value" id="builtinValue"></span></h3>
+                <p class="settings-section-sub">A small AI that runs inside Frivo, on the processor of the PC Frivo runs on (which may not be the one you're browsing from). No Ollama, no account, no key: download it and it works. Replies are simpler than OpenAI's or a big Ollama model's. Without any AI, Clean up in English still fixes spelling and punctuation by itself.</p>
+                <div class="settings-card bai" id="builtinCard">
+                  <div class="srow srow--stacked">
+                    <span class="srow-main srow-main--flex">
+                      <span class="srow-label">Model</span>
+                      <span class="srow-sub" id="builtinModelNote"></span>
+                    </span>
+                    <div class="bai-models" id="builtinModels" role="radiogroup" aria-label="Built-in AI model"></div>
+                  </div>
+                  <div class="bai-action" id="builtinAction">
+                    <div class="bai-progress is-hidden" id="builtinProgress">
+                      <div class="bai-progress-line"><span id="builtinProgressText">Starting…</span><span id="builtinProgressPct"></span></div>
+                      <div class="om-progress"><span id="builtinProgressBar" style="width:0%"></span></div>
+                    </div>
+                    <p class="bai-status" id="builtinStatus" aria-live="polite"></p>
+                    <div class="bai-buttons">
+                      <button type="button" class="btn" id="builtinGetBtn">Download and use</button>
+                      <button type="button" class="btn-ghost btn-sm is-hidden" id="builtinCancelBtn">Cancel</button>
+                      <button type="button" class="btn-ghost btn-sm is-hidden" id="builtinTestBtn">Test</button>
+                      <!-- NEW (1.7.0) -->
+                      <button type="button" class="btn-ghost btn-sm is-hidden" id="builtinAgainBtn" title="Deletes the engine and this model and downloads them again">Download again</button>
+                    </div>
+                  </div>
+                  <div class="srow">
+                    <label class="srow-main srow-main--flex" for="builtinIdle">
+                      <span class="srow-label">Free its memory when idle</span>
+                      <span class="srow-sub">It's started when a reply needs it, which takes a few seconds, and stopped after this long with no replies.</span>
+                    </label>
+                    <span class="srow-control">
+                      <select id="builtinIdle" aria-label="Free the built-in AI's memory after">
+                        <option value="15m">After 15 minutes</option>
+                        <option value="1h">After 1 hour</option>
+                        <option value="4h">After 4 hours</option>
+                        <option value="never">Never</option>
+                      </select>
+                    </span>
+                  </div>
+                  <div class="srow bai-remove-row is-hidden" id="builtinRemoveRow">
+                    <span class="srow-main srow-main--flex">
+                      <span class="srow-label">Remove the built-in AI</span>
+                      <span class="srow-sub" id="builtinFolder"></span>
+                    </span>
+                    <button type="button" class="btn-ghost btn-sm" id="builtinRemoveBtn">Remove</button>
+                  </div>
+                </div>
+
                 <!-- NEW (2.0.0): built-in dictation (app/builtin_dictation.py). Downloaded on
                      the PC Frivo runs on, whichever device clicks the button. -->
-                <h3 class="settings-section-title">Built into Frivo <span class="settings-inline-value" id="bdValue"></span></h3>
-                <p class="settings-section-sub">Live dictation that runs inside Frivo, on the PC Frivo runs on (which may not be the one you're using). Free and private: nothing goes to OpenAI, and no Evora is needed. Small and Medium run on the processor; Large runs on an NVIDIA graphics card. It's the <b>Live (Frivo)</b> dictation mode above.</p>
+                <h3 class="settings-section-title models-group-title">Dictation &amp; listening <span class="settings-inline-value" id="bdValue"></span></h3>
+                <p class="settings-section-sub">Live dictation that runs inside Frivo, on the PC Frivo runs on (which may not be the one you're using). Free and private: nothing goes to OpenAI, and no Evora is needed. Small and Medium run on the processor; Large runs on an NVIDIA graphics card. Dictation's <b>Live (Frivo)</b> mode and the Listening panel use it.</p>
                 <div class="settings-card bai" id="bdCard">
                   <div class="srow srow--stacked">
                     <span class="srow-main srow-main--flex">
@@ -1233,91 +1456,30 @@
                     <button type="button" class="btn-ghost btn-sm" id="bdRemoveBtn">Remove</button>
                   </div>
                 </div>
+
+                <h3 class="settings-section-title models-group-title">Where they're kept</h3>
+                <p class="settings-section-sub">Where Frivo keeps its big files, on the PC Frivo runs on (not the one you're browsing from). Pick a bigger drive for any of them; Frivo moves what's already there. Settings, profiles and keys stay in Frivo's own folder.</p>
+                <div class="settings-card st-list" id="storageList"><p class="st-empty">Looking…</p></div>
+                <div class="st-job is-hidden" id="storageJob" aria-live="polite">
+                  <div class="bai-progress-line"><span id="storageJobText">Moving…</span><span id="storageJobPct"></span></div>
+                  <div class="om-progress"><span id="storageJobBar" style="width:0%"></span></div>
+                </div>
+                <p class="bai-status" id="storageStatus" aria-live="polite"></p>
+                <details class="backup-help">
+                  <summary>And Ollama's models?</summary>
+                  <p>Ollama keeps its own models, on the PC it runs on. To put them on another drive, on that PC:</p>
+                  <ol>
+                    <li>Quit Ollama (right-click its icon by the clock, then Quit).</li>
+                    <li>Move the folder <code>%USERPROFILE%\.ollama\models</code> to the new place, for example <code>D:\Ollama\models</code>.</li>
+                    <li>In PowerShell: <code>setx OLLAMA_MODELS "D:\Ollama\models"</code></li>
+                    <li>Start Ollama again. Models you download from Frivo go there too.</li>
+                  </ol>
+                </details>
               </section>
 
-              <!-- Listening -->
-              <section class="settings-section" data-settings-section="listening">
-                <h3 class="settings-section-title">Listening</h3>
-                <p class="settings-section-sub">Translating and transcribing the people around you. Open it from the rail.</p>
-                <div class="settings-card" id="listenSetupCard">
-                  <!-- NEW (2.0.0): Frivo's own model, or Evora / OpenAI -->
-                  <div class="srow">
-                    <label class="srow-main srow-main--flex" for="listenEngineSelect">
-                      <span class="srow-label">Hear them with</span>
-                      <span class="srow-sub" id="listenEngineSub">Frivo's built-in model is the one chosen in Dictation, on the PC Frivo runs on. Free, live, and nothing leaves that PC. Telling voices apart needs Evora.</span>
-                    </label>
-                    <span class="srow-control">
-                      <select id="listenEngineSelect">
-                        <option value="auto">Built-in model, once downloaded</option>
-                        <option value="frivo">Built-in model</option>
-                        <option value="provider">Evora or OpenAI (as in Dictation)</option>
-                      </select>
-                    </span>
-                  </div>
-                  <!-- CHANGED (2.0.0): the audio source and gate are in Settings › Audio -->
-                  <button class="srow" type="button" data-goto-section="audio">
-                    <span class="srow-main srow-main--flex">
-                      <span class="srow-label">Audio source</span>
-                      <span class="srow-sub">Chosen, checked and gated in Audio.</span>
-                    </span>
-                    <span class="srow-value" data-audio-summary="listen">System default</span>
-                    <span class="srow-chevron"><svg class="icon-16"><use href="#i-chevron"/></svg></span>
-                  </button>
-                  <div class="srow">
-                    <label class="srow-main srow-main--flex" for="listenSegmentSeconds">
-                      <span class="srow-label">Commit every</span>
-                      <span class="srow-sub">When nobody pauses, a line is finished anyway after this long.</span>
-                    </label>
-                    <span class="srow-control">
-                      <select id="listenSegmentSeconds">
-                        <option value="3">3 seconds — busiest rooms</option>
-                        <option value="6" selected>6 seconds — good default</option>
-                        <option value="10">10 seconds — calmer conversations</option>
-                        <option value="30">30 seconds — only on pauses</option>
-                      </select>
-                    </span>
-                  </div>
-                  <label class="srow">
-                    <span class="srow-main srow-main--flex">
-                      <span class="srow-label">Live updates</span>
-                      <span class="srow-sub">Show text while they're still talking, correcting itself as more arrives.</span>
-                    </span>
-                    <span class="switch">
-                      <input type="checkbox" id="listenLiveToggle">
-                      <span class="switch-track" aria-hidden="true"></span>
-                    </span>
-                  </label>
-                  <div class="srow">
-                    <label class="srow-main srow-main--flex" for="listenSpeakerThreshold">
-                      <span class="srow-label">Voice matching</span>
-                      <span class="srow-sub">Lower if one person keeps splitting into several; raise if two people merge.</span>
-                    </label>
-                    <span class="srow-slider">
-                      <input type="range" id="listenSpeakerThreshold" min="30" max="90" step="1" value="45">
-                    </span>
-                    <span class="srow-number readout" id="listenSpeakerThresholdValue">0.65</span>
-                  </div>
-                </div>
-
-                <h3 class="settings-section-title">Translation</h3>
-                <p class="settings-section-sub">For the listening panel and the hover translations.</p>
-                <div class="settings-card">
-                  <button class="srow" type="button" data-settings-page="translation-provider">
-                    <span class="srow-main srow-main--flex"><span class="srow-label">Provider</span></span>
-                    <span class="srow-value" id="settingsTranslationProviderValue">—</span>
-                    <span class="srow-chevron"><svg class="icon-16"><use href="#i-chevron"/></svg></span>
-                  </button>
-                  <button class="srow" type="button" data-settings-page="translation-model">
-                    <span class="srow-main srow-main--flex"><span class="srow-label">Model</span></span>
-                    <span class="srow-value" id="settingsTranslationModelValue">—</span>
-                    <span class="srow-chevron"><svg class="icon-16"><use href="#i-chevron"/></svg></span>
-                  </button>
-                </div>
-              </section>
-
-              <!-- VRChat -->
-              <section class="settings-section" data-settings-section="vrchat">
-                <h3 class="settings-section-title">VRChat</h3>
+              <!-- CHANGED (2.0.0): VRChat is FrivOSC's page now -->
+              <section class="settings-section" data-settings-section="frivosc" id="frivoscSection">
+                <h3 class="settings-section-title">FrivOSC</h3>
                 <p class="settings-section-sub">Through the Frivo app on the PC you play VRChat on: FrivOSC is built into it, and connects by itself while VRChat runs. (The separate FrivOSC still works too.)</p>
                 <div class="settings-card-home" id="oscSettingsHome"></div>
                 <div class="settings-card" id="oscSettings">
@@ -1370,92 +1532,27 @@
                     <span class="srow-value" id="frivoscMicValue">Unknown</span>
                   </div>
                 </div>
-              </section>
-
-              <!-- Providers -->
-              <section class="settings-section" data-settings-section="providers">
-                <h3 class="settings-section-title">Providers</h3>
-                <p class="settings-section-sub">Where each job runs. Everything defaults to OpenAI.</p>
-                <div class="settings-card">
-                  <!-- CHANGED (1.6.0): only shown when there's an OpenAI key. -->
-                  <label class="srow is-hidden" id="allowFallbackRow">
+                <!-- CHANGED (2.0.0): the Frivo app's switch for FrivOSC, built into it (moved
+                     from the App section). Shown only in the app. -->
+                <h4 class="settings-subhead is-hidden" id="appVrchatHead">On this PC</h4>
+                <div class="settings-card is-hidden" id="appVrchatCard">
+                  <label class="srow" id="appVrchatRow">
                     <span class="srow-main srow-main--flex">
-                      <span class="srow-label">Fall back to OpenAI if a local AI is down</span>
-                      <span class="srow-sub">Off, Clean up uses No AI (Frivo's rules) when the local AI can't answer, and Reply says it's down, instead of quietly costing money.</span>
+                      <span class="srow-label">VRChat on this PC</span>
+                      <span class="srow-sub" id="appVrchatSub">Chatbox and microphone sync, while VRChat runs here.</span>
                     </span>
                     <span class="switch">
-                      <input type="checkbox" id="allowFallbackToggle">
+                      <input type="checkbox" id="appVrchatToggle">
                       <span class="switch-track" aria-hidden="true"></span>
                     </span>
                   </label>
-                  <div class="srow srow--stacked">
-                    <span class="srow-main srow-main--flex">
-                      <span class="srow-label">Chat replies</span>
-                      <span class="srow-sub" id="chatProviderNote"></span>
-                    </span>
-                    <div class="radio-row" id="chatProviderRadios" role="radiogroup" aria-label="Chat provider"></div>
-                  </div>
-                  <div class="srow srow--stacked">
-                    <span class="srow-main srow-main--flex">
-                      <span class="srow-label">Transcription</span>
-                      <span class="srow-sub" id="transcriptionProviderNote">Accurate dictation mode.</span>
-                    </span>
-                    <div class="radio-row" id="transcriptionProviderRadios" role="radiogroup" aria-label="Transcription provider"></div>
-                  </div>
                 </div>
+              </section>
 
-                <!-- NEW (1.6.0): the built-in AI: one click, no Ollama, no key. -->
-                <h3 class="settings-section-title">Built-in AI <span class="settings-inline-value" id="builtinValue"></span></h3>
-                <p class="settings-section-sub">A small AI that runs inside Frivo, on the processor of the PC Frivo runs on (which may not be the one you're browsing from). No Ollama, no account, no key: download it and it works. Replies are simpler than OpenAI's or a big Ollama model's. Without any AI, Clean up in English still fixes spelling and punctuation by itself.</p>
-                <div class="settings-card bai" id="builtinCard">
-                  <div class="srow srow--stacked">
-                    <span class="srow-main srow-main--flex">
-                      <span class="srow-label">Model</span>
-                      <span class="srow-sub" id="builtinModelNote"></span>
-                    </span>
-                    <div class="bai-models" id="builtinModels" role="radiogroup" aria-label="Built-in AI model"></div>
-                  </div>
-                  <div class="bai-action" id="builtinAction">
-                    <div class="bai-progress is-hidden" id="builtinProgress">
-                      <div class="bai-progress-line"><span id="builtinProgressText">Starting…</span><span id="builtinProgressPct"></span></div>
-                      <div class="om-progress"><span id="builtinProgressBar" style="width:0%"></span></div>
-                    </div>
-                    <p class="bai-status" id="builtinStatus" aria-live="polite"></p>
-                    <div class="bai-buttons">
-                      <button type="button" class="btn" id="builtinGetBtn">Download and use</button>
-                      <button type="button" class="btn-ghost btn-sm is-hidden" id="builtinCancelBtn">Cancel</button>
-                      <button type="button" class="btn-ghost btn-sm is-hidden" id="builtinTestBtn">Test</button>
-                      <!-- NEW (1.7.0) -->
-                      <button type="button" class="btn-ghost btn-sm is-hidden" id="builtinAgainBtn" title="Deletes the engine and this model and downloads them again">Download again</button>
-                    </div>
-                  </div>
-                  <div class="srow">
-                    <label class="srow-main srow-main--flex" for="builtinIdle">
-                      <span class="srow-label">Free its memory when idle</span>
-                      <span class="srow-sub">It's started when a reply needs it, which takes a few seconds, and stopped after this long with no replies.</span>
-                    </label>
-                    <span class="srow-control">
-                      <select id="builtinIdle" aria-label="Free the built-in AI's memory after">
-                        <option value="15m">After 15 minutes</option>
-                        <option value="1h">After 1 hour</option>
-                        <option value="4h">After 4 hours</option>
-                        <option value="never">Never</option>
-                      </select>
-                    </span>
-                  </div>
-                  <div class="srow bai-remove-row is-hidden" id="builtinRemoveRow">
-                    <span class="srow-main srow-main--flex">
-                      <span class="srow-label">Remove the built-in AI</span>
-                      <span class="srow-sub" id="builtinFolder"></span>
-                    </span>
-                    <button type="button" class="btn-ghost btn-sm" id="builtinRemoveBtn">Remove</button>
-                  </div>
-                </div>
-
-                <!-- CHANGED (2.0): Evora and Ollama are set up right here,
-                     not on pages of their own. -->
+              <!-- CHANGED (2.0.0): Evora has its own page (it was under Providers) -->
+              <section class="settings-section" data-settings-section="evora" id="evoraSection">
                 <h3 class="settings-section-title">Evora <span class="settings-inline-value" id="settingsWhisperValue">Not set</span></h3>
-                <p class="settings-section-sub">Local transcription and speaker recognition. Install and open Evora on the machine that will process audio.</p>
+                <p class="settings-section-sub">Frivo's speech server, on a PC with a graphics card. It tells voices apart in Listening, and does dictation and listening when Providers says so. Install and open Evora on the machine that will process audio.</p>
                 <div class="settings-card-home" id="whisperSettingsHome"></div>
                 <div class="settings-card" id="whisperSettings">
                   <div class="srow">
@@ -1509,8 +1606,34 @@
                   </div>
                 </div>
 
+                <h4 class="settings-subhead">Telling voices apart</h4>
+                <div class="settings-card">
+                  <a class="srow" href="/api/evora-speaker-settings" target="_blank" rel="noopener noreferrer">
+                    <span class="srow-main srow-main--flex">
+                      <span class="srow-label">Speaker setup</span>
+                      <span class="srow-sub">Known voices and how they're matched, on Evora's own page.</span>
+                    </span>
+                    <span class="srow-value">Opens Evora</span>
+                    <span class="srow-chevron"><svg class="icon-16"><use href="#i-chevron"/></svg></span>
+                  </a>
+                  <div class="srow">
+                    <label class="srow-main srow-main--flex" for="listenSpeakerThreshold">
+                      <span class="srow-label">Voice matching</span>
+                      <span class="srow-sub">Lower if one person keeps splitting into several; raise if two people merge.</span>
+                    </label>
+                    <span class="srow-slider">
+                      <input type="range" id="listenSpeakerThreshold" min="30" max="90" step="1" value="45">
+                    </span>
+                    <span class="srow-number readout" id="listenSpeakerThresholdValue">0.65</span>
+                  </div>
+                </div>
+
+              </section>
+
+              <!-- CHANGED (2.0.0): Ollama has its own page (it was under Providers) -->
+              <section class="settings-section" data-settings-section="ollama" id="ollamaSection">
                 <h3 class="settings-section-title">Ollama <span class="settings-inline-value" id="settingsOllamaValue">Not set</span></h3>
-                <p class="settings-section-sub">A local chat model, for replies and translation without OpenAI.
+                <p class="settings-section-sub">A local chat model on this PC or another, for replies and translation without OpenAI. Providers says which jobs use it.
                   <!-- NEW (1.5.0) --><a href="/setup/ollama" class="settings-guide-link">New to this? Set it up step by step →</a></p>
                 <div class="settings-card" id="ollamaSettings">
                   <div class="srow">
@@ -1599,28 +1722,6 @@
                 </div>
               </section>
 
-              <!-- NEW (1.7.0): where the big things are kept -->
-              <section class="settings-section" data-settings-section="storage" id="storageSection">
-                <h3 class="settings-section-title">Storage</h3>
-                <p class="settings-section-sub">Where Frivo keeps its big files, on the PC Frivo runs on (not the one you're browsing from). Pick a bigger drive for any of them; Frivo moves what's already there. Settings, profiles and keys stay in Frivo's own folder.</p>
-                <div class="settings-card st-list" id="storageList"><p class="st-empty">Looking…</p></div>
-                <div class="st-job is-hidden" id="storageJob" aria-live="polite">
-                  <div class="bai-progress-line"><span id="storageJobText">Moving…</span><span id="storageJobPct"></span></div>
-                  <div class="om-progress"><span id="storageJobBar" style="width:0%"></span></div>
-                </div>
-                <p class="bai-status" id="storageStatus" aria-live="polite"></p>
-                <details class="backup-help">
-                  <summary>And Ollama's models?</summary>
-                  <p>Ollama keeps its own models, on the PC it runs on. To put them on another drive, on that PC:</p>
-                  <ol>
-                    <li>Quit Ollama (right-click its icon by the clock, then Quit).</li>
-                    <li>Move the folder <code>%USERPROFILE%\.ollama\models</code> to the new place, for example <code>D:\Ollama\models</code>.</li>
-                    <li>In PowerShell: <code>setx OLLAMA_MODELS "D:\Ollama\models"</code></li>
-                    <li>Start Ollama again. Models you download from Frivo go there too.</li>
-                  </ol>
-                </details>
-              </section>
-
               <!-- NEW (2.0.0): phones, other PCs and the Frivo app on them. -->
               <section class="settings-section" data-settings-section="devices" id="devicesSection">
                 <h3 class="settings-section-title">Other devices</h3>
@@ -1687,7 +1788,7 @@
               <!-- NEW (2.0.0): the Frivo app's own settings. Shown only when this page
                    is open in the app, which gives it window.frivoApp (desktop\src\preload.js). -->
               <section class="settings-section" data-settings-section="app" id="appSection">
-                <h3 class="settings-section-title">App</h3>
+                <h3 class="settings-section-title">Frivo app</h3>
                 <p class="settings-section-sub">This window is the Frivo app. Frivo's settings are the same everywhere; these are the app's own.</p>
                 <div class="settings-card">
                   <div class="srow">
@@ -1737,19 +1838,7 @@
                     </span>
                   </div>
                 </div>
-                <!-- NEW (2.0.0): FrivOSC, built into the app -->
-                <div class="settings-card">
-                  <label class="srow" id="appVrchatRow">
-                    <span class="srow-main srow-main--flex">
-                      <span class="srow-label">VRChat on this PC</span>
-                      <span class="srow-sub" id="appVrchatSub">Chatbox and microphone sync, while VRChat runs here.</span>
-                    </span>
-                    <span class="switch">
-                      <input type="checkbox" id="appVrchatToggle">
-                      <span class="switch-track" aria-hidden="true"></span>
-                    </span>
-                  </label>
-                </div>
+                <!-- CHANGED (2.0.0): "VRChat on this PC" moved to FrivOSC -->
                 <!-- CHANGED (2.0.0): the app's version and its updates moved to
                      Updates, beside Frivo's own. -->
                 <!-- NEW: keys that work anywhere, even in VRChat or a game. -->

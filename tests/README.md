@@ -499,7 +499,7 @@ up the audio; Commit every; Stop waiting for the last translations; and in
 Chromium with a fake audio source: the panel switching to the built-in model
 by itself, translated lines with the original under them, the loudness gate
 keeping a hum out (reintroducing the hum makes it fail), Evora's speaker
-controls stepping aside, and Settings › Listening's choice of engine.
+controls stepping aside, and the Listening engine chosen in Settings › Providers.
 
 ## test-server-page.py
 

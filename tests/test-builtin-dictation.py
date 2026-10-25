@@ -271,7 +271,7 @@ CARD["present"] = True
 check("with a card, Large can run", not models()["large"]["problem"], models()["large"]["problem"])
 check("and says NVIDIA's libraries come with it the first time", models()["large"]["extra_size"] == M.CUDA_SIZE)
 r = client.post("/api/dictation/stream", json={})
-check("Live (Frivo) won't start with nothing downloaded", r.status_code == 409 and "Settings › Dictation" in r.get_json()["error"], r.get_json())
+check("Live (Frivo) won't start with nothing downloaded", r.status_code == 409 and "Settings › Models & downloads" in r.get_json()["error"], r.get_json())
 
 print("Downloading")
 SITE["mode"] = "bad"
@@ -471,7 +471,7 @@ if sync_playwright:
         page.wait_for_selector("#dictateBtn", timeout=20000)
         page.evaluate("localStorage.removeItem('voice_console_dictation_mode')")
         page.click("#settingsToggle")
-        page.click('.settings-nav-btn[data-settings-section="dictation"]')
+        page.click('.settings-nav-btn[data-settings-section="models"]')   # CHANGED (2.0.0): downloads live there
         page.wait_for_function("document.getElementById('bdValue').textContent.length > 0", timeout=10000)
         check("the card lists the three models", page.locator("#bdModels .bai-model").count() == 3)
         card_text = page.text_content("#bdModels")
@@ -502,7 +502,7 @@ if sync_playwright:
         page.wait_for_function("/download/i.test(document.getElementById('status').textContent)", timeout=8000)
         time.sleep(0.5)
         check("not downloaded: the mic says why, and it stays said", "download" in page.text_content("#status").lower(), page.text_content("#status"))
-        check("and Settings › Dictation opens", page.is_visible("#bdCard"))
+        check("and Settings › Models & downloads opens", page.is_visible("#bdCard"))
         check("and the mic isn't left on", "is-recording" not in (page.get_attribute("#dictateBtn", "class") or ""))
         client.post("/api/builtin-dictation/download", json={"model": "small"})
         wait_job()

@@ -327,14 +327,29 @@ let renderedServiceIds = "";
 // state, one line of detail — with a Settings link that opens the page
 // where it is set up. The chips used to expand and pull the settings card
 // into themselves; in a popover that read as a second, cramped Settings.
+// CHANGED (2.0.0): Evora, Ollama and FrivOSC have pages of their own, and
+// the built-in AI is in Models & downloads.
 const SERVICE_SETTINGS_TARGET = {
-  whisper: { section: "providers" },
-  ollama: { section: "providers" },
-  builtin: { section: "providers" },   // NEW (1.6.0)
+  whisper: { section: "evora" },
+  ollama: { section: "ollama" },
+  builtin: { section: "models" },      // NEW (1.6.0)
   openai: { section: "providers" },    // NEW (1.6.0)
   none: { section: "providers" },      // NEW (1.6.0)
-  frivosc: { section: "vrchat" },
+  frivosc: { section: "frivosc" },
 };
+
+// NEW (2.0.0): the dots beside FrivOSC, Evora and Ollama in Settings' list.
+// Green when it's working, orange when it's in use and down, grey when it
+// isn't in use (or is resting, like FrivOSC with VRChat closed).
+function paintSettingsNavDots(services) {
+  document.querySelectorAll("[data-service-dot]").forEach((dot) => {
+    const service = (services || []).find((s) => s.id === dot.dataset.serviceDot);
+    const state = !service ? "" : service.ok ? "is-ok" : service.idle ? "" : "is-down";
+    dot.className = "settings-nav-dot" + (state ? " " + state : "");
+    const btn = dot.closest(".settings-nav-btn");
+    if (btn) btn.title = !service ? "Not in use" : service.ok ? "Working" : service.idle ? "Resting" : `${service.state || "Not reachable"}`;
+  });
+}
 
 function buildServiceBlock(service) {
   const block = document.createElement("div");
@@ -401,6 +416,7 @@ function renderServiceChips(services) {
     if (block) paintServiceBlock(block, service);
   });
   paintStatusPill(services);
+  paintSettingsNavDots(services);   // NEW (2.0.0)
 }
 
 // Kept for the callers that still ask; nothing expands any more.
@@ -417,6 +433,7 @@ async function loadLocalStatus() {
       renderedServiceIds = "";
       serviceStatus.classList.add("is-hidden");
       paintStatusPill([]);
+      paintSettingsNavDots([]);   // NEW (2.0.0)
       return;
     }
 
@@ -475,14 +492,14 @@ function anyProviderIs(value) {
 let whisperModelsLoaded = false;
 
 function syncProviderVisibility() {
-  if (ollamaSettings) {
-    ollamaSettings.classList.toggle("is-hidden", !anyProviderIs("ollama"));
-  }
+  // CHANGED (2.0.0): Ollama and Evora have pages of their own now, which
+  // are where they're set up, so their settings always show there.
+  if (ollamaSettings) ollamaSettings.classList.remove("is-hidden");
   if (typeof syncAiChip === "function") syncAiChip();   // NEW (1.5.0)
   if (whisperSettings) {
     const usingLocal =
       getRadioValue(transcriptionProviderRadios, "openai") === "local_whisper";
-    whisperSettings.classList.toggle("is-hidden", !usingLocal);
+    whisperSettings.classList.remove("is-hidden");
 
     // Switching to local Whisper reveals the panel — fetch the real model
     // list the moment it becomes visible rather than waiting for a Test.
@@ -4784,13 +4801,13 @@ function updateDictationModeNote() {
   if (currentDictationMode() === "live_frivo") {
     dictationModeNote.textContent = builtinDictationReady
       ? "Words appear as you speak, transcribed by Frivo on the PC it runs on. Uses the microphone chosen in Audio."
-      : "Download built-in dictation below to use this.";
+      : "Download a built-in model in Models & downloads to use this.";   // CHANGED (2.0.0)
     return;
   }
   if (!supportsLiveDictation() && currentDictationMode() !== "live_local") {
     dictationModeNote.textContent = IN_FRIVO_APP
       ? (currentDictationMode() === "accurate"
-        ? "Nothing appears until you stop; uses OpenAI or Evora (Settings › Providers). For live words, download built-in dictation below."
+        ? "Nothing appears until you stop; uses OpenAI or Evora (Settings › Providers). For live words, download a built-in model in Models & downloads."
         : "")
       : "Live (browser) isn't available in this browser — Chrome and Edge support it. Accurate mode works everywhere.";
     if (dictationModeNote.textContent) return;
@@ -5829,7 +5846,7 @@ async function startFrivoLiveDictation() {
       if (/download|setup|Repair/i.test(err.message || "") && typeof window.showSettingsSection === "function") {
         builtinDictationReady = false;
         setSettingsOpen(true);
-        window.showSettingsSection("dictation");
+        window.showSettingsSection("models");   // CHANGED (2.0.0): downloads live there now
       }
     }
     return;
@@ -8551,6 +8568,9 @@ function renderUpdateChip() {
   const notify = updateInfo && updateInfo.notify;
   updateChip.classList.toggle("is-hidden", !notify);
   if (notify) updateChipText.textContent = `Update available · ${notify.version}`;
+  // NEW (2.0.0): and a badge on Updates in Settings' list.
+  const badge = $("settingsNavUpdateBadge");
+  if (badge) badge.classList.toggle("is-hidden", !notify);
 }
 
 function renderAboutSection() {
@@ -9233,7 +9253,13 @@ window.addEventListener("pagehide", () => {
   const noMatch = $("settingsNoMatch");
   let currentSection = "replies";
 
+  // CHANGED (2.0.0): sections that were renamed or folded into others,
+  // for links and buttons that still ask for the old ones.
+  const SECTION_ALIASES = { vrchat: "frivosc", storage: "models" };
+  window.settingsSectionName = (name) => SECTION_ALIASES[name] || name;
+
   window.showSettingsSection = function showSettingsSection(name) {
+    name = SECTION_ALIASES[name] || name;
     currentSection = name;
     if (search && search.value) {
       search.value = "";
@@ -9245,7 +9271,31 @@ window.addEventListener("pagehide", () => {
       nav.querySelectorAll(".settings-nav-btn").forEach((b) => b.classList.toggle("is-active", b.dataset.settingsSection === name));
     }
     if (settingsScroll) settingsScroll.scrollTop = 0;
+    if (name === "dictation" || name === "listening") paintUsesRows();   // NEW (2.0.0)
   };
+
+  // NEW (2.0.0): Dictation's and Listening's "Uses" rows say what each is
+  // set to, from the pages where that's chosen.
+  async function paintUsesRows() {
+    const set = (id, text) => { const el = $(id); if (el) el.textContent = text; };
+    const checkedName = (container) => {
+      const input = container && container.querySelector("input:checked");
+      const label = input && input.closest("label");
+      return label ? label.textContent.trim().split("\n")[0].trim() : "";
+    };
+    set("dictUsesAccurateValue", checkedName(typeof transcriptionProviderRadios !== "undefined" ? transcriptionProviderRadios : null));
+    const engine = $("listenEngineSelect");
+    set("listenUsesHearValue", engine && engine.selectedOptions[0] ? engine.selectedOptions[0].textContent : "");
+    const tr = $("settingsTranslationProviderValue");
+    set("listenUsesTranslateValue", tr ? tr.textContent : "");
+    try {
+      const res = await fetch("/api/builtin-dictation");
+      const info = res.ok ? await res.json() : null;
+      const chosen = info && (info.models || []).find((m) => m.id === info.model);
+      const ready = chosen && chosen.downloaded;
+      set("dictUsesBuiltinValue", !info ? "" : ready ? `${chosen.name} · ${chosen.model}` : "Not downloaded");
+    } catch (e) { /* left as it was */ }
+  }
   if (nav) {
     nav.addEventListener("click", (e) => {
       const b = e.target.closest("[data-settings-section]");
@@ -9257,7 +9307,7 @@ window.addEventListener("pagehide", () => {
   // its section lit.
   const pageToSection = {
     openai: "accounts", eleven: "accounts", "reply-length": "replies", model: "replies",
-    "max-tokens": "replies", "translation-provider": "listening", "translation-model": "listening",
+    "max-tokens": "replies", "translation-provider": "providers", "translation-model": "providers",   // CHANGED (2.0.0)
     "earlier-versions": "about",
   };
   if (stack) {
@@ -14869,8 +14919,12 @@ async function checkElevenKey(force) {
     // CHANGED (1.6.0): only the Providers button in the list on the left.
     // (Matching the whole section re-drew the card on every click inside it,
     // which undid Remove's "click again" and put the model choice back.)
-    if (e.target.closest && e.target.closest('.settings-nav-btn[data-settings-section="providers"]')) {
+    // CHANGED (2.0.0): the built-in AI is in Models & downloads now, and
+    // Ollama's models on Ollama's page.
+    if (e.target.closest && e.target.closest('.settings-nav-btn[data-settings-section="models"]')) {
       setTimeout(refresh, 50);
+    }
+    if (e.target.closest && e.target.closest('.settings-nav-btn[data-settings-section="ollama"]')) {
       // So the Ollama card can say what your own models use.
       if (typeof omLoad === "function" && !(omState && omState.data)) setTimeout(omLoad, 80);
     }
@@ -15167,7 +15221,7 @@ async function checkElevenKey(force) {
   if (dictationModeRadios) dictationModeRadios.addEventListener("change", () => setTimeout(render, 0));
 
   document.addEventListener("click", (e) => {
-    if (e.target.closest && e.target.closest('.settings-nav-btn[data-settings-section="dictation"]')) setTimeout(refresh, 50);
+    if (e.target.closest && e.target.closest('.settings-nav-btn[data-settings-section="models"], [data-goto-section="models"]')) setTimeout(refresh, 50);   // CHANGED (2.0.0)
   });
   refresh();
 })();
@@ -15374,7 +15428,7 @@ function omCardUses() {
   pop.addEventListener("keydown", (e) => { if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); closePicker(); } });
 
   document.addEventListener("click", (e) => {
-    if (e.target.closest && e.target.closest('.settings-nav-btn[data-settings-section="storage"]')) setTimeout(refresh, 50);
+    if (e.target.closest && e.target.closest('.settings-nav-btn[data-settings-section="models"], [data-goto-section="models"]')) setTimeout(refresh, 50);   // CHANGED (2.0.0)
   });
   refresh();
 })();
@@ -15608,6 +15662,9 @@ function omCardUses() {
   }
 
   // ---- NEW (2.0.0): FrivOSC, built into the app ----
+  // CHANGED (2.0.0): its switch is on FrivOSC's page, shown only here.
+  $("appVrchatHead").classList.remove("is-hidden");
+  $("appVrchatCard").classList.remove("is-hidden");
   const vrchatToggle = $("appVrchatToggle");
   function renderVrchat(s) {
     if (!s || !s.vrchat) return;
@@ -15976,6 +16033,7 @@ syncAudioSummaries();
   let wanted = null;
   try { wanted = new URLSearchParams(window.location.search).get("settings"); } catch { return; }
   if (!wanted || !/^[a-z-]{1,30}$/.test(wanted)) return;
+  if (typeof window.settingsSectionName === "function") wanted = window.settingsSectionName(wanted);   // NEW (2.0.0)
   if (!document.querySelector(`[data-settings-section="${wanted}"].settings-section`)) return;
   setSettingsOpen(true);
   if (typeof window.showSettingsSection === "function") window.showSettingsSection(wanted);

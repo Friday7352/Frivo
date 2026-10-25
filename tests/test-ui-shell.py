@@ -178,6 +178,29 @@ const base = 'http://127.0.0.1:5093';
   check('picking a section clears the search', (await p.inputValue('#settingsSearch')) === '' && JSON.stringify(await shown()) === '["replies"]');
   check('no Save button for ordinary settings', !(await vis('#saveSettings')));
 
+  // NEW (2.0.0): the list is grouped; each add-on has a page with everything
+  // about it, Providers says who does what, Models & downloads has the downloads.
+  const groups = await p.evaluate(() => [...document.querySelectorAll('#settingsNav .settings-nav-group')].map(g => g.textContent));
+  check('the list is grouped', JSON.stringify(groups) === '["General","Features","Engines","Add-ons","This PC"]', groups);
+  const inSection = (name, ids) => p.evaluate(([name, ids]) => ids.every(id => {
+    const el = document.getElementById(id);
+    return el && el.closest('.settings-section') && el.closest('.settings-section').dataset.settingsSection === name;
+  }), [name, ids]);
+  check('FrivOSC has its settings and the app switch', await inSection('frivosc', ['oscSettings', 'appVrchatToggle']));
+  check('Evora has its address, idle timers and voice matching', await inSection('evora', ['whisperUrl', 'evoraIdleListen', 'listenSpeakerThreshold']));
+  check('Ollama has its address and models', await inSection('ollama', ['ollamaSettings', 'ollamaModels']));
+  check('Providers says who does what, translation and listening too', await inSection('providers', ['chatProviderRadios', 'transcriptionProviderRadios', 'listenEngineSelect', 'settingsTranslationProviderValue']));
+  check('Models & downloads has every download and where they are kept', await inSection('models', ['builtinCard', 'bdCard', 'storageList']));
+  check('Appearance is its own page', await inSection('appearance', ['themeToggleSettings']));
+  await p.click('.settings-nav-btn[data-settings-section="evora"]'); await wait(200);
+  check('an add-on page shows alone', JSON.stringify(await shown()) === '["evora"]' && await vis('#whisperUrl'), await shown());
+  await p.evaluate(() => showSettingsSection('vrchat')); await wait(150);
+  check('an old link to VRChat opens FrivOSC', JSON.stringify(await shown()) === '["frivosc"]', await shown());
+  await p.click('[data-settings-section="dictation"]'); await wait(200);
+  await p.click('[data-settings-section="dictation"] [data-goto-section="models"]'); await wait(200);
+  check('Dictation\'s Uses row leads to Models & downloads', JSON.stringify(await shown()) === '["models"]', await shown());
+  await p.click('[data-settings-section="replies"]'); await wait(200);
+
   console.log('--- settings save themselves ---');
   const before = (await (await fetch(base + '/_test/saves')).json()).saves.length;
   await p.evaluate(() => { const t = document.getElementById('temperatureSlider'); t.value = 120; t.dispatchEvent(new Event('input', { bubbles: true })); t.dispatchEvent(new Event('change', { bubbles: true })); });

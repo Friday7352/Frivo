@@ -96,7 +96,7 @@ Click any of them:
 - 🎤 **Dictation** — click and talk instead of typing. It's always off when
   Frivo opens.
 
-**Built-in dictation.** In **Settings › Dictation › Built into Frivo**, pick a
+**Built-in dictation.** In **Settings › Models & downloads**, pick a
 model and download it for live dictation that runs inside Frivo on the PC it
 runs on: words appear as you speak, with nothing sent to OpenAI and no Evora
 needed. **Small** (Nemotron 3.5 streaming, about 680 MB) and **Medium**
@@ -107,7 +107,7 @@ GPU graph. All three are multilingual. It downloads to the PC Frivo runs on,
 even when you click the button on a phone or another PC. The mic button then
 uses the **Live (Frivo)** mode, and the **Listening** panel uses the same
 model to transcribe and translate the people around you, live (telling
-voices apart still needs Evora; **Settings › Listening › Hear them with**
+voices apart still needs Evora; **Settings › Providers › Listening**
 switches back).
 
 **Hover over a reply** to see which voice spoke it and whether it was written
@@ -272,7 +272,7 @@ The app shows Frivo's own pages, so every Frivo update shows up in it. When
 setup updates Frivo it updates the app on that PC too, and an app on another
 PC picks up its update from the Frivo it's connected to. Its
 settings (where Frivo runs, starting with Windows, what closing the window
-does) are under **Settings › App** and on the tray icon's menu. Phones and
+does) are under **Settings › Frivo app** and on the tray icon's menu. Phones and
 browsers keep working as before.
 
 ## Use Frivo on your phone or another PC
