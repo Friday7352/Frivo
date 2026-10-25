@@ -27,7 +27,7 @@ function Get-AppSourceHash {
         output, or the Node.js the build downloads), to tell whether the app
         needs building again.
     #>
-    $skip = @('node_modules', 'dist', '.tools', 'screenshots')
+    $skip = @('node_modules', 'dist', '.tools', 'screenshots', 'build-id.json')   # CHANGED (2.0.0): build-id.json is written from this
     $files = New-Object System.Collections.Generic.List[string]
     $pending = New-Object System.Collections.Generic.Stack[string]
     $pending.Push($desktop)
@@ -61,8 +61,15 @@ $hash = Get-AppSourceHash
 $stamp = if (Test-Path -LiteralPath $stampPath -PathType Leaf) { (Get-Content -LiteralPath $stampPath -Raw).Trim() } else { '' }
 
 Write-Host ''
+# NEW (2.0.0): the build's own id, inside the app (src\build-id.json) and
+# beside it (app.json). Two builds of the same version differ by it, so an
+# app connected to a Frivo with a newer build of the same version still
+# updates: you only ever update Frivo, and the apps follow.
+$buildId = $hash.Substring(0, 16).ToLowerInvariant()
 if ($RebuildApp -or -not (Test-Path -LiteralPath $appBuilt -PathType Leaf) -or $stamp -ne $hash) {
     Write-Host ('=== The Frivo app {0} ===' -f $appVersion)
+    [System.IO.File]::WriteAllText((Join-Path $desktop 'src\build-id.json'), ('{{"build": "{0}"}}' -f $buildId),
+        (New-Object System.Text.UTF8Encoding($false)))
     & (Join-Path $here 'Build-App.ps1')
     Set-Content -LiteralPath $stampPath -Value $hash -Encoding ASCII
 } else {
@@ -76,7 +83,7 @@ $payload = Join-Path $here 'app'
 if (Test-Path -LiteralPath $payload) { Remove-Item -LiteralPath $payload -Recurse -Force }
 New-Item -ItemType Directory -Path $payload -Force | Out-Null
 Copy-Item -LiteralPath $appBuilt -Destination (Join-Path $payload 'FrivoApp-Setup.exe') -Force
-[System.IO.File]::WriteAllText((Join-Path $payload 'app.json'), (@{ version = $appVersion } | ConvertTo-Json),
+[System.IO.File]::WriteAllText((Join-Path $payload 'app.json'), (@{ version = $appVersion; build = $buildId } | ConvertTo-Json),
     (New-Object System.Text.UTF8Encoding($false)))
 # Left over from builds that put the app beside setup instead.
 foreach ($old in @((Join-Path $root 'installer\bundled-app.json'))) {

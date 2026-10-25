@@ -266,6 +266,19 @@ if sync_playwright:
         final = page.input_value("#messageInput")
         check("after Stop the sentence is in the box", "word1_" in final and "word2_" in final, final)
         check("no script errors", not errors, errors)
+        # NEW (2.0.0): not downloaded on the PC Frivo runs on: the mic says so
+        # (it used to be replaced by "Ready." at once) and Settings opens there.
+        client.delete("/api/builtin-dictation")
+        page.evaluate("localStorage.setItem('voice_console_dictation_mode', 'live_frivo'); builtinDictationKnown = false;")
+        page.click("#dictateBtn")
+        page.wait_for_function("/download/i.test(document.getElementById('status').textContent)", timeout=8000)
+        time.sleep(0.5)
+        status = page.text_content("#status")
+        check("not downloaded: the mic says why, and it stays said", "download" in status.lower(), status)
+        check("and Settings › Dictation opens", page.is_visible('#bdCard'))
+        check("and the mic isn't left on", "is-recording" not in (page.get_attribute("#dictateBtn", "class") or ""))
+        client.post("/api/builtin-dictation/download", json={"model": "small"})
+        wait_job()
         # NEW (2.0.0): the Frivo app has no speech service behind the browser's
         # recogniser, so Live (browser) is never offered or chosen there.
         app_page = browser.new_page(user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/140.0 Electron/44.5.1 Safari/537.36 FrivoApp/2.0.0")

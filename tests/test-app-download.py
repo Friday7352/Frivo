@@ -63,6 +63,16 @@ check("its name", info.get("name") == "FrivoApp-Setup-2.0.0.exe", info)
 check("its size", info.get("size") == len(body), info)
 check("its SHA-256", info.get("sha256") == hashlib.sha256(body).hexdigest(), info)
 
+check("no build id: none said", info.get("build") == "", info)
+with open(os.path.join(folder, "app.json"), "w") as f:
+    json.dump({"version": "2.0.0", "build": "0123abcd4567ef89"}, f)
+info = client.get("/api/app/latest").get_json() or {}
+check("NEW (2.0.0): which build it is, so a rebuilt app of the same version is taken too",
+      info.get("build") == "0123abcd4567ef89", info)
+with open(os.path.join(folder, "app.json"), "w") as f:
+    json.dump({"version": "2.0.0", "build": "<script>"}, f)
+check("a build id that isn't one is left out", (client.get("/api/app/latest").get_json() or {}).get("build") == "")
+
 r = client.get("/api/app/installer")
 check("the installer is that file", r.status_code == 200 and r.data == body, r.status_code)
 check("as a download with the versioned name",

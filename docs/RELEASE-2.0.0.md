@@ -21,7 +21,7 @@ The app comes inside `FrivoSetup.exe`, so there's one file to download whichever
 
 What else it does:
 
-- **Same Frivo, same version.** The app shows Frivo's own pages, so every Frivo update shows up in it straight away. Updating Frivo updates the app on the same PC. An app on another PC gets its update from the Frivo it's connected to (not from GitHub), and asks before restarting to install it.
+- **Same Frivo, same version.** The app shows Frivo's own pages, so every Frivo update shows up in it straight away. Updating Frivo updates the app on the same PC. An app on another PC gets its update from the Frivo it's connected to (not from GitHub) and installs it by itself while it's in the tray or minimized, or the next time it starts. You only ever update Frivo.
 - **Settings › App** (only in the app): where Frivo runs, the network address for phones, Stop Frivo, Start with Windows, what closing the window does, and the app's own updates. The same things are on the tray icon's menu.
 - **Closing the window** keeps Frivo running in the tray, so phones and other devices stay connected. **Quit** in the tray stops it. You can change this.
 - **When Frivo drops out**, the app says so and reconnects by itself, including through an in-app Frivo update.

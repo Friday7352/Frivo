@@ -78,3 +78,6 @@ Desktop.ini
 
 # NEW (2.0.0): the dictation speed test's output
 tools/dictation-bench/results.txt
+
+# NEW (2.0.0): written by Build.bat
+desktop/src/build-id.json

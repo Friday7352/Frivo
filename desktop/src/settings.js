@@ -41,6 +41,12 @@ const DEFAULTS = Object.freeze({
   // NEW (2.0.0): FrivOSC built in (osc.js): VRChat's chatbox and microphone,
   // while VRChat runs on this PC.
   vrchatBridge: true,
+  // NEW (2.0.0): an app update downloaded from Frivo and not installed yet
+  // ({file, version, build}): installed when the app next starts.
+  pendingUpdate: null,
+  // NEW (2.0.0): set before an update installs itself while the app was in
+  // the tray, so the updated app starts in the tray too.
+  startHiddenOnce: false,
 });
 
 function clone(value) {

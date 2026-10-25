@@ -11549,8 +11549,13 @@ def app_installer_info():
             for chunk in iter(lambda: f.read(1024 * 1024), b""):
                 digest.update(chunk)
         _app_installer_cache.update(key=key, sha256=digest.hexdigest())
+    # NEW (2.0.0): which build it is. Two builds of one version differ by it,
+    # and the app takes the one its Frivo carries.
+    build = str(meta.get("build") or "").lower()
+    if not re.fullmatch(r"[0-9a-f]{6,64}", build):
+        build = ""
     return {"version": version, "name": f"FrivoApp-Setup-{version}.exe", "size": stat.st_size,
-            "sha256": _app_installer_cache["sha256"]}
+            "sha256": _app_installer_cache["sha256"], "build": build}
 
 
 @app.route("/api/app/latest")

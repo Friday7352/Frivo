@@ -34,6 +34,10 @@ const { FrivoLocal, lanAddress } = require('./frivo-local');
 const pairing = require('./pairing');       // NEW: pairing codes
 const discovery = require('./discovery');   // NEW: finding Frivo on the network
 const { FrivOSC } = require('./osc');       // NEW (2.0.0): FrivOSC, built in
+// NEW (2.0.0): which build this is (Build.bat writes it). Frivo may carry a
+// newer build of the same version, and the app follows the Frivo it uses.
+let BUILD_ID = '';
+try { BUILD_ID = String(require('./build-id.json').build || ''); } catch { BUILD_ID = ''; }
 const os = require('os');
 const { execFile } = require('child_process');
 
@@ -67,7 +71,10 @@ if (!app.requestSingleInstanceLock()) {
 function start() {
   const settings = new Settings(path.join(app.getPath('userData'), 'app-settings.json'));
   const local = new FrivoLocal({ appData: app.getPath('appData'), execPath: process.execPath });
-  const hiddenStart = process.argv.includes('--hidden');
+  // CHANGED (2.0.0): also after an update that installed itself while the
+  // app was in the tray.
+  const hiddenStart = process.argv.includes('--hidden') || settings.get('startHiddenOnce') === true;
+  if (settings.get('startHiddenOnce')) settings.update({ startHiddenOnce: false });
 
   // ---------------------------------------------------------------- FrivOSC (NEW, 2.0.0)
   // VRChat's chatbox and microphone, done by the app on the PC that plays
@@ -265,6 +272,9 @@ function start() {
     };
     win.on('resize', saveBounds);
     win.on('move', saveBounds);
+    // NEW (2.0.0): put away with an update waiting: it installs now.
+    win.on('hide', () => setTimeout(autoInstallWhenAway, 1500));
+    win.on('minimize', () => setTimeout(autoInstallWhenAway, 1500));
 
     win.on('close', (e) => {
       if (state.quitting) return;
@@ -955,7 +965,11 @@ function start() {
       const info = response.ok ? await response.json() : null;
       const offered = info && gh.parseVersion(info.version);
       const mine = gh.parseVersion(app.getVersion());
-      if (!offered || !mine || gh.compareVersions(offered, mine) <= 0 || !info.sha256) {
+      const cmp = offered && mine ? gh.compareVersions(offered, mine) : -1;
+      // NEW (2.0.0): or the same version, built again (Build.bat): the app
+      // takes the build its Frivo carries, so updating Frivo is enough.
+      const rebuilt = cmp === 0 && info.build && BUILD_ID && info.build !== BUILD_ID;
+      if (!offered || !mine || !info.sha256 || !(cmp > 0 || rebuilt)) {
         state.update = { state: manual ? 'current' : 'idle', version: '', error: '', file: '', percent: 0 };
         pushState();
         rebuildTray();
@@ -964,12 +978,16 @@ function start() {
       const version = offered.join('.');
       state.update = { state: 'downloading', version, error: '', file: '', percent: 0 };
       pushState();
-      const file = path.join(app.getPath('userData'), 'updates', `FrivoApp-Setup-${version}.exe`);
+      const file = path.join(app.getPath('userData'), 'updates', `FrivoApp-Setup-${version}${info.build ? `-${info.build}` : ''}.exe`);
       await gh.downloadChecked(net.fetch, `${origin}/api/app/installer`, info.sha256, info.size, file, (received, total) => {
         state.update.percent = total ? Math.floor((received / total) * 100) : 0;
       });
       state.update = { state: 'ready', version, error: '', file, percent: 100 };
-      notify('Frivo update ready', `The app's update (${version}) installs when you restart it.`);
+      // CHANGED (2.0.0): it installs by itself: now if the app is in the
+      // tray, otherwise when it's next put away or started.
+      settings.update({ pendingUpdate: { file, version, build: info.build || '' } });
+      notify('Frivo app update', `The app updates to Frivo's ${version} by itself, the next time it's in the tray or starts. Or restart it from the tray menu now.`);
+      setTimeout(autoInstallWhenAway, 1000);
     } catch (err) {
       state.update = { state: 'error', version: '', error: err.message || String(err), file: '', percent: 0 };
     }
@@ -977,14 +995,47 @@ function start() {
     rebuildTray();
   }
 
-  function installAppUpdate() {
+  function installAppUpdate({ quiet = false } = {}) {
     if (state.update.state !== 'ready' || !fs.existsSync(state.update.file)) return;
     // Silent install of the new version, which starts the app again. Frivo
     // itself keeps running: this updates the app, not Frivo.
+    settings.update({ pendingUpdate: null, startHiddenOnce: Boolean(quiet) });
     const child = spawn(state.update.file, ['/S', '--updated', '--force-run'], { detached: true, stdio: 'ignore' });
     child.on('error', () => {});
     child.unref();
     quitApp({ keepFrivo: true });
+  }
+
+  // NEW (2.0.0): an update installs by itself while the window is put away
+  // (in the tray or minimized), so nothing is interrupted. Otherwise it
+  // waits, checking again every minute.
+  function autoInstallWhenAway() {
+    clearTimeout(state.autoInstallTimer);
+    if (state.update.state !== 'ready' || !app.isPackaged) return;   // never from the tests
+    const win = state.win;
+    const away = !win || win.isDestroyed() || !win.isVisible() || win.isMinimized();
+    if (away) { installAppUpdate({ quiet: true }); return; }
+    state.autoInstallTimer = setTimeout(autoInstallWhenAway, 60000);
+  }
+
+  // NEW (2.0.0): one downloaded before the app was closed installs as it starts.
+  function installPendingUpdate() {
+    const pending = settings.get('pendingUpdate');
+    if (!pending || !pending.file) return false;
+    settings.update({ pendingUpdate: null });
+    const mine = gh.parseVersion(app.getVersion());
+    const theirs = gh.parseVersion(pending.version);
+    const newer = mine && theirs && (gh.compareVersions(theirs, mine) > 0
+      || (gh.compareVersions(theirs, mine) === 0 && pending.build && BUILD_ID && pending.build !== BUILD_ID));
+    if (!newer || !fs.existsSync(pending.file)) return false;
+    try {
+      const child = spawn(pending.file, ['/S', '--updated', '--force-run'], { detached: true, stdio: 'ignore' });
+      child.on('error', () => {});
+      child.unref();
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   // ---------------------------------------------------------------- hotkeys
@@ -1271,6 +1322,8 @@ function start() {
   });
 
   app.whenReady().then(async () => {
+    // NEW (2.0.0): an update waiting from last time goes in first.
+    if (app.isPackaged && installPendingUpdate()) { app.exit(0); return; }
     setUpSession();
     state.win = createWindow();
 

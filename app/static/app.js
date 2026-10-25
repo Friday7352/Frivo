@@ -4741,6 +4741,7 @@ let mediaRecorder = null;
 let recordedChunks = [];
 let isDictating = false;
 let builtinDictationReady = false;   // NEW (2.0.0): set by Settings › Dictation's card
+let builtinDictationKnown = false;   // NEW (2.0.0): once the card has asked Frivo
 let liveFrivo = null;                // NEW (2.0.0): the live built-in dictation running now
 // Which engine the in-progress dictation was started with, so stopping
 // always goes back to the same one even if the setting changed mid-way.
@@ -4765,6 +4766,9 @@ function currentDictationMode() {
   if (stored === "live" && !supportsLiveDictation()) {
     // CHANGED (2.0.0): saved in a browser, or before the app existed. Falls
     // through to the default below.
+  } else if (stored === "live_frivo" && builtinDictationKnown && !builtinDictationReady) {
+    // NEW (2.0.0): picked, but not downloaded (or removed) on the PC Frivo
+    // runs on: the default below until it is.
   } else if (stored === "live" || stored === "accurate" || stored === "live_local" || stored === "live_frivo") return stored;
   // NEW (2.0.0): built-in dictation, once it's downloaded.
   if (builtinDictationReady) return "live_frivo";
@@ -5712,7 +5716,7 @@ async function pumpFrivo(s, force) {
   } catch (err) {
     if (liveFrivo === s && isDictating) {
       setStatus(`Dictation stopped: ${err.message}`, true);
-      stopFrivoLiveDictation();
+      stopFrivoLiveDictation({ keepStatus: true });
     }
   } finally {
     s.inflight = false;
@@ -5786,7 +5790,7 @@ async function startFrivoLiveDictation() {
     s.node = node;
   } catch (err) {
     setStatus(`Couldn't start dictation: ${err.message}`, true);
-    stopFrivoLiveDictation();
+    stopFrivoLiveDictation({ keepStatus: true });
     return;
   }
   try {
@@ -5794,7 +5798,14 @@ async function startFrivoLiveDictation() {
   } catch (err) {
     if (liveFrivo === s) {
       setStatus(err.message, true);
-      stopFrivoLiveDictation();
+      stopFrivoLiveDictation({ keepStatus: true });
+      // NEW (2.0.0): not downloaded (or not installed) on the PC Frivo runs
+      // on: Settings › Dictation is where that's fixed, so it opens there.
+      if (/download|setup|Repair/i.test(err.message || "") && typeof window.showSettingsSection === "function") {
+        builtinDictationReady = false;
+        setSettingsOpen(true);
+        window.showSettingsSection("dictation");
+      }
     }
     return;
   }
@@ -5808,7 +5819,7 @@ async function startFrivoLiveDictation() {
   pumpFrivo(s, true);
 }
 
-async function stopFrivoLiveDictation() {
+async function stopFrivoLiveDictation({ keepStatus = false } = {}) {
   const s = liveFrivo;
   isDictating = false;
   liveStopping = true;
@@ -5855,7 +5866,9 @@ async function stopFrivoLiveDictation() {
   if (s.lastCompleteAt || messageInput.value.trim()) {
     scheduleAutoSend(LIVE_FRIVO.AUTO_SEND_QUIET_MS - (Date.now() - (s.lastVoiceAt || Date.now())));
   }
-  setStatus("Ready.");
+  // CHANGED (2.0.0): an error that stopped it stays on screen (it used to be
+  // replaced by "Ready." straight away, so the mic seemed to do nothing).
+  if (!keepStatus) setStatus("Ready.");
 }
 
 // Named, because the mic button is no longer the only thing that starts and
@@ -5863,11 +5876,23 @@ async function stopFrivoLiveDictation() {
 // Whichever engine is selected, both callers go through the same door.
 function beginDictation() {
   if (isDictating) return;
-  activeDictationMode = currentDictationMode();
-  if (activeDictationMode === "live") startLiveDictation();
-  else if (activeDictationMode === "live_local") startLocalLiveDictation();
-  else if (activeDictationMode === "live_frivo") startFrivoLiveDictation();   // NEW (2.0.0)
-  else startDictation();
+  // CHANGED (2.0.0): anything that goes wrong starting it is said, rather
+  // than the button silently doing nothing.
+  try {
+    activeDictationMode = currentDictationMode();
+    let started;
+    if (activeDictationMode === "live") started = startLiveDictation();
+    else if (activeDictationMode === "live_local") started = startLocalLiveDictation();
+    else if (activeDictationMode === "live_frivo") started = startFrivoLiveDictation();   // NEW (2.0.0)
+    else started = startDictation();
+    Promise.resolve(started).catch((err) => {
+      console.error("Dictation couldn't start:", err);
+      setStatus(`Dictation couldn't start: ${err && err.message ? err.message : err}`, true);
+    });
+  } catch (err) {
+    console.error("Dictation couldn't start:", err);
+    setStatus(`Dictation couldn't start: ${err && err.message ? err.message : err}`, true);
+  }
 }
 
 function endDictation() {
@@ -14604,6 +14629,7 @@ async function checkElevenKey(force) {
   function markReady() {
     const was = builtinDictationReady;
     builtinDictationReady = Boolean(info && info.supported && (info.models || []).some((m) => m.downloaded));
+    builtinDictationKnown = true;
     if (was !== builtinDictationReady && typeof buildDictationModeUI === "function") buildDictationModeUI();
     else if (typeof updateDictationModeNote === "function") updateDictationModeNote();
   }

@@ -107,7 +107,15 @@ looks 8 seconds after it connects and every six hours; if Frivo carries a
 newer version, it downloads it, checks its SHA-256 as it arrives
 (`downloadChecked` in `src/github.js`), and installs it when you choose
 **Restart to update** (Settings › App or the tray menu). Frivo keeps running
-through an app update. On the PC Frivo runs on, setup has already updated the
+through an app update. CHANGED (2.0.0): it also installs by itself, as soon
+as the window is in the tray or minimized, or when the app next starts (the
+download is remembered in `pendingUpdate`), and an update that installed
+from the tray starts the app in the tray again.
+
+Each build has an id (`src/build-id.json`, written by `Build.bat`, also in
+`app.json` beside the installer). When Frivo carries a different build of
+the same version, the app takes it too, so updating Frivo is all it ever
+takes, even between builds that didn't change the version. On the PC Frivo runs on, setup has already updated the
 app, so there's nothing to fetch. In a browser, Frivo's page offers the same
 file as a download.
 

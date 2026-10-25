@@ -681,7 +681,8 @@ function Get-FrivoBundledApp {
         try {
             $meta = Get-Content -LiteralPath (Join-Path $folder 'app.json') -Raw -ErrorAction Stop | ConvertFrom-Json
             if ([string] $meta.version -match '^\d+\.\d+\.\d+$') {
-                return [pscustomobject] @{ Path = $exe; Version = [version] [string] $meta.version; Folder = $folder }
+                $build = if ($meta.PSObject.Properties['build']) { [string] $meta.build } else { '' }   # NEW (2.0.0)
+                return [pscustomobject] @{ Path = $exe; Version = [version] [string] $meta.version; Folder = $folder; Build = $build }
             }
         } catch { }
     }
@@ -693,7 +694,7 @@ function Get-FrivoBundledApp {
             if (-not $m.Success) { continue }
             $version = [version] $m.Groups[1].Value
             if (-not $best -or $version -gt $best.Version) {
-                $best = [pscustomobject] @{ Path = $file.FullName; Version = $version; Folder = '' }
+                $best = [pscustomobject] @{ Path = $file.FullName; Version = $version; Folder = ''; Build = '' }
             }
         }
     }
@@ -715,7 +716,7 @@ function Copy-FrivoAppInstaller {
         $dest = Join-Path $Target 'app-installer'
         New-Item -ItemType Directory -Path $dest -Force | Out-Null
         Copy-Item -LiteralPath $bundled.Path -Destination (Join-Path $dest 'FrivoApp-Setup.exe') -Force
-        $json = (@{ version = $bundled.Version.ToString(3) } | ConvertTo-Json)
+        $json = (@{ version = $bundled.Version.ToString(3); build = [string] $bundled.Build } | ConvertTo-Json)   # CHANGED (2.0.0): and its build
         [System.IO.File]::WriteAllText((Join-Path $dest 'app.json'), $json, (New-Object System.Text.UTF8Encoding($false)))
     } catch {
         Write-SetupLog ('app installer copy failed: ' + $_.Exception.Message)
